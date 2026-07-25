@@ -20,6 +20,7 @@ import {
 import { GatedButton } from "@/components/ui/gated-button";
 import { Button } from "@/components/ui/button";
 import { PaymentUpload } from "@/components/reservations/payment-upload";
+import { LegalDocumentsPanel } from "@/components/legal/legal-documents-panel";
 import { Check, Loader2, MessageCircle, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -283,6 +284,19 @@ export function ReservationDetail({
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Legal documents */}
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                Documentos Legales
+              </p>
+              <LegalDocumentsPanel
+                reservationId={reservation.id}
+                reservationTotal={reservation.total_amount}
+                currency={reservation.currency}
+                contactName={reservation.contact?.name || reservation.contact?.phone || ""}
+              />
             </div>
           </div>
 

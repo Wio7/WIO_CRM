@@ -675,3 +675,69 @@ export interface ReservationPayment {
   reviewed_at?: string;
   created_at: string;
 }
+
+// ============================================================
+// Legal documents (migration 033) — Anexo 01, Anexo 02, Minuta.
+// ============================================================
+
+export type LegalDocType = 'anexo_01' | 'anexo_02' | 'minuta';
+export type LegalDocStatus =
+  | 'borrador'
+  | 'pendiente'
+  | 'aprobado'
+  | 'rechazado'
+  | 'listo_para_firma';
+export type FinanciamientoTipo = 'contado' | 'credito_directo' | 'credito_hipotecario';
+
+export interface AdditionalUnit {
+  type: string;
+  area: number;
+  description: string;
+}
+
+export interface BuyerData {
+  nombre: string;
+  dni: string;
+  estado_civil: string;
+  ocupacion: string;
+  profesion: string;
+  nacionalidad: string;
+  direccion: string;
+  provincia: string;
+  departamento: string;
+}
+
+export interface Anexo01Data {
+  comprador: BuyerData;
+  tiene_conyuge: boolean;
+  conyuge?: BuyerData;
+  inmuebles_adicionales: AdditionalUnit[];
+}
+
+export interface CuotaRow {
+  numero: number;
+  fecha_limite: string;
+  monto: number;
+}
+
+export interface Anexo02Data {
+  precio_total: number;
+  cuota_inicial: number;
+  tipo_financiamiento: FinanciamientoTipo;
+  cuotas: CuotaRow[];
+}
+
+export interface LegalDocument {
+  id: string;
+  account_id: string;
+  reservation_id: string;
+  doc_type: LegalDocType;
+  data: Record<string, unknown>;
+  status: LegalDocStatus;
+  pdf_url?: string;
+  created_by?: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
