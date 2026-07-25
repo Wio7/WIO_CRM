@@ -7,12 +7,24 @@ export interface MetricDelta {
   previous: number
 }
 
+export interface RealEstateMetrics {
+  unitsAvailable: number
+  unitsReserved: number
+  unitsSold: number
+  activeReservations: number
+}
+
 export interface MetricsBundle {
   activeConversations: MetricDelta
   newContactsToday: MetricDelta
   openDealsValue: number
   openDealsCount: number
   messagesSentToday: MetricDelta
+  /** Only meaningful once the account has real-estate projects/units set
+   *  up — the dashboard row that reads this hides itself when every
+   *  count is zero, so accounts without the real-estate module see no
+   *  change. */
+  realEstate: RealEstateMetrics
 }
 
 export interface ConversationsSeriesPoint {

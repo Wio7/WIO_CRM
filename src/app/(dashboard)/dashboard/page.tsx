@@ -9,6 +9,10 @@ import {
   UserPlus,
   DollarSign,
   Send,
+  Home,
+  Clock,
+  CheckCircle2,
+  CalendarCheck,
 } from 'lucide-react'
 
 import {
@@ -122,9 +126,9 @@ export default function DashboardPage() {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+        <h1 className="text-2xl font-bold text-foreground">Panel Principal</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Live analytics across conversations, contacts, deals, broadcasts, and automations.
+          Analíticas en vivo de conversaciones, contactos, tratos, difusiones y automatizaciones.
         </p>
       </div>
 
@@ -135,16 +139,16 @@ export default function DashboardPage() {
         ) : (
           <>
             <MetricCard
-              title="Active Conversations"
+              title="Conversaciones Activas"
               value={metrics.activeConversations.current.toLocaleString()}
               icon={MessageSquare}
               delta={{
                 sign: metrics.activeConversations.previous,
-                label: deltaLabel(metrics.activeConversations.previous, 'new today vs yesterday'),
+                label: deltaLabel(metrics.activeConversations.previous, 'nuevas hoy vs ayer'),
               }}
             />
             <MetricCard
-              title="New Contacts Today"
+              title="Nuevos Contactos Hoy"
               value={metrics.newContactsToday.current.toLocaleString()}
               icon={UserPlus}
               delta={{
@@ -152,18 +156,18 @@ export default function DashboardPage() {
                   metrics.newContactsToday.current - metrics.newContactsToday.previous,
                 label: deltaLabel(
                   metrics.newContactsToday.current - metrics.newContactsToday.previous,
-                  'vs yesterday',
+                  'vs ayer',
                 ),
               }}
             />
             <MetricCard
-              title="Open Deals Value"
+              title="Valor de Tratos Abiertos"
               value={formatCurrency(metrics.openDealsValue, defaultCurrency)}
               icon={DollarSign}
-              subtitle={`${metrics.openDealsCount} open deal${metrics.openDealsCount === 1 ? '' : 's'}`}
+              subtitle={`${metrics.openDealsCount} ${metrics.openDealsCount === 1 ? 'trato abierto' : 'tratos abiertos'}`}
             />
             <MetricCard
-              title="Messages Sent Today"
+              title="Mensajes Enviados Hoy"
               value={metrics.messagesSentToday.current.toLocaleString()}
               icon={Send}
               delta={{
@@ -171,13 +175,46 @@ export default function DashboardPage() {
                   metrics.messagesSentToday.current - metrics.messagesSentToday.previous,
                 label: deltaLabel(
                   metrics.messagesSentToday.current - metrics.messagesSentToday.previous,
-                  'vs yesterday',
+                  'vs ayer',
                 ),
               }}
             />
           </>
         )}
       </div>
+
+      {/* Real estate KPI row — hidden until the account has projects/units
+          set up, so accounts without the real-estate module see no
+          change (every count would otherwise render as a false zero). */}
+      {metrics?.realEstate &&
+        (metrics.realEstate.unitsAvailable +
+          metrics.realEstate.unitsReserved +
+          metrics.realEstate.unitsSold +
+          metrics.realEstate.activeReservations) >
+          0 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <MetricCard
+              title="Unidades Disponibles"
+              value={metrics.realEstate.unitsAvailable.toLocaleString()}
+              icon={Home}
+            />
+            <MetricCard
+              title="Unidades Reservadas"
+              value={metrics.realEstate.unitsReserved.toLocaleString()}
+              icon={Clock}
+            />
+            <MetricCard
+              title="Unidades Vendidas"
+              value={metrics.realEstate.unitsSold.toLocaleString()}
+              icon={CheckCircle2}
+            />
+            <MetricCard
+              title="Separaciones Activas"
+              value={metrics.realEstate.activeReservations.toLocaleString()}
+              icon={CalendarCheck}
+            />
+          </div>
+        )}
 
       {/* Quick actions */}
       <QuickActions />
@@ -219,7 +256,7 @@ export default function DashboardPage() {
 // ------------------------------------------------------------
 
 function deltaLabel(delta: number, suffix: string): string {
-  if (delta === 0) return `No change ${suffix}`
+  if (delta === 0) return `Sin cambios ${suffix}`
   const sign = delta > 0 ? '+' : ''
   return `${sign}${delta.toLocaleString()} ${suffix}`
 }

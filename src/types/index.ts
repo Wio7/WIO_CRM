@@ -567,3 +567,111 @@ export interface AutomationLog {
   created_at: string;
   contact?: Contact;
 }
+
+// ============================================================
+// Real Estate (migration 032) — projects (urbanizaciones), units
+// (lotes/viviendas), and reservations ("separaciones") tying one or
+// more units to a contact.
+// ============================================================
+
+export type ProjectStatus = 'active' | 'sold_out' | 'coming_soon';
+export type UnitStatus = 'disponible' | 'reservado' | 'vendido';
+export type ReservationStatus = 'pendiente' | 'aprobada' | 'rechazada' | 'cerrada';
+export type PaymentMethod = 'voucher' | 'online' | 'mixed';
+export type PaymentType = 'voucher' | 'culqi' | 'transferencia';
+export type PaymentStatus = 'pendiente' | 'aprobado' | 'rechazado';
+
+export interface UnitRoom {
+  name: string;
+  area: number;
+}
+
+export interface RealEstateProject {
+  id: string;
+  account_id: string;
+  created_by?: string;
+  name: string;
+  slug?: string;
+  location?: string;
+  city?: string;
+  description?: string;
+  initial_from?: number;
+  price_cash?: number;
+  price_financed?: number;
+  financing_months?: number;
+  monthly_payment?: number;
+  area_from?: number;
+  amenities: string[];
+  cover_image_url?: string;
+  status: ProjectStatus;
+  seller_company?: string;
+  seller_representative?: string;
+  seller_dni?: string;
+  seller_address?: string;
+  created_at: string;
+  updated_at: string;
+  /** Hydrated by queries that embed `real_estate_units(id, status)`. */
+  units?: RealEstateUnit[];
+  /** Client-side aggregated counts (disponible/reservado/vendido). */
+  unit_counts?: Record<UnitStatus, number>;
+}
+
+export interface RealEstateUnit {
+  id: string;
+  project_id: string;
+  account_id: string;
+  code: string;
+  manzana?: string;
+  lote_number?: number;
+  area_total?: number;
+  area_techada?: number;
+  area_no_techada?: number;
+  rooms: UnitRoom[];
+  floors: number;
+  height_floor?: number;
+  height_total?: number;
+  material?: string;
+  services?: string;
+  ventilation?: string;
+  price?: number;
+  currency: string;
+  status: UnitStatus;
+  created_at: string;
+  updated_at: string;
+  /** Hydrated by queries that embed `real_estate_projects(*)`. */
+  project?: RealEstateProject;
+}
+
+export interface Reservation {
+  id: string;
+  account_id: string;
+  contact_id: string | null;
+  advisor_id?: string;
+  total_amount: number;
+  currency: string;
+  payment_method?: PaymentMethod;
+  status: ReservationStatus;
+  notes?: string;
+  approved_by?: string;
+  approved_at?: string;
+  created_at: string;
+  updated_at: string;
+  contact?: Contact;
+  advisor?: Profile;
+  units?: RealEstateUnit[];
+  payments?: ReservationPayment[];
+}
+
+export interface ReservationPayment {
+  id: string;
+  reservation_id: string;
+  account_id: string;
+  type: PaymentType;
+  amount: number;
+  voucher_url?: string;
+  reference?: string;
+  status: PaymentStatus;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  created_at: string;
+}

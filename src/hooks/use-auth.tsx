@@ -40,6 +40,7 @@ interface Profile {
 interface AccountSummary {
   id: string;
   name: string;
+  status: string;
   /** Default deal currency (ISO-4217). NOT NULL DEFAULT 'USD' in the
    *  DB (migration 021); narrowed to DEFAULT_CURRENCY when absent. */
   default_currency: string;
@@ -102,6 +103,10 @@ interface AuthContextValue {
   canEditSettings: boolean;
   /** True if the caller can send messages and edit operational data (agent+). */
   canSendMessages: boolean;
+  /** True if the caller is the global super admin. */
+  isSuperAdmin: boolean;
+  /** True if the current account is inactive and the caller is not the super admin. */
+  isAccountInactive: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -171,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             .from("accounts")
             // default_currency added in migration 021; narrowed to the
             // USD fallback below for older schemas where it reads null.
-            .select("id, name, default_currency")
+            .select("id, name, status, default_currency")
             .eq("id", data.account_id)
             .maybeSingle();
           if (accountErr) {
@@ -185,6 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             accountRow = {
               id: account.id,
               name: account.name,
+              status: account.status ?? 'active',
               default_currency: account.default_currency ?? DEFAULT_CURRENCY,
             };
           }
@@ -333,6 +339,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [profile?.account_role, profile?.account_id]);
 
+  const isSuperAdmin = useMemo(() => {
+    const email = user?.email?.toLowerCase();
+    const superAdminEmail = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAIL || "admin@wiocrm.com").toLowerCase();
+    return email === superAdminEmail;
+  }, [user?.email]);
+
+  const isAccountInactive = useMemo(() => {
+    return account?.status === 'inactive' && !isSuperAdmin;
+  }, [account?.status, isSuperAdmin]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -344,6 +360,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshProfile,
         account,
         defaultCurrency: account?.default_currency ?? DEFAULT_CURRENCY,
+        isSuperAdmin,
+        isAccountInactive,
         ...derived,
       }}
     >
@@ -383,6 +401,8 @@ export function useAuth(): AuthContextValue {
       canManageMembers: false,
       canEditSettings: false,
       canSendMessages: false,
+      isSuperAdmin: false,
+      isAccountInactive: false,
     };
   }
   return ctx;

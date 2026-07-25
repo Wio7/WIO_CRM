@@ -19,14 +19,16 @@ import {
 import { ModeToggle } from "@/components/layout/mode-toggle";
 
 const pageTitles: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/inbox": "Inbox",
-  "/notifications": "Notifications",
-  "/contacts": "Contacts",
-  "/pipelines": "Pipelines",
-  "/broadcasts": "Broadcasts",
-  "/automations": "Automations",
-  "/settings": "Settings",
+  "/dashboard": "Panel Principal",
+  "/inbox": "Bandeja de Entrada",
+  "/notifications": "Notificaciones",
+  "/contacts": "Contactos",
+  "/pipelines": "Embudos de Venta",
+  "/projects": "Proyectos Inmobiliarios",
+  "/reservations": "Centro de Separaciones",
+  "/broadcasts": "Difusiones",
+  "/automations": "Automatizaciones",
+  "/settings": "Configuración",
 };
 
 function getPageTitle(pathname: string): string {
@@ -116,7 +118,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             }
           >
             <User className="size-4" />
-            Profile
+            Perfil
           </DropdownMenuItem>
           <DropdownMenuItem
             render={
@@ -127,7 +129,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             }
           >
             <SettingsIcon className="size-4" />
-            Settings
+            Configuración
           </DropdownMenuItem>
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem
@@ -135,7 +137,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
           >
             <LogOut className="size-4" />
-            Sign out
+            Cerrar Sesión
           </DropdownMenuItem>
         </DropdownMenuContent>
         </DropdownMenu>

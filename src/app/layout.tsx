@@ -20,16 +20,16 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "wacrm",
-    template: "%s — wacrm",
+    default: "Wio CRM",
+    template: "%s — Wio CRM",
   },
-  description: "Self-hostable CRM template for WhatsApp.",
+  description: "CRM de WhatsApp potente y autohospedado.",
   robots: {
     index: false,
     follow: false,
   },
   icons: {
-    icon: [{ url: "/icon" }],
+    icon: [{ url: "/logo.png" }],
   },
   formatDetection: {
     email: false,
@@ -82,7 +82,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="es"
       data-theme={DEFAULT_THEME}
       data-mode={DEFAULT_MODE}
       className={`${inter.variable} h-full antialiased`}

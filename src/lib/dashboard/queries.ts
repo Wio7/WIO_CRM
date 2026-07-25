@@ -42,6 +42,8 @@ export async function loadMetrics(db: DB): Promise<MetricsBundle> {
     openDeals,
     messagesToday,
     messagesYesterday,
+    realEstateUnits,
+    activeReservations,
   ] = await Promise.all([
     db.from('conversations').select('id', { count: 'exact', head: true }).eq('status', 'open'),
     db
@@ -73,10 +75,17 @@ export async function loadMetrics(db: DB): Promise<MetricsBundle> {
       .eq('sender_type', 'agent')
       .gte('created_at', yesterdayStart)
       .lt('created_at', todayStart),
+    db.from('real_estate_units').select('status'),
+    db
+      .from('reservations')
+      .select('id', { count: 'exact', head: true })
+      .in('status', ['pendiente', 'aprobada']),
   ])
 
   const openDealsRows = (openDeals.data ?? []) as { value: number | null }[]
   const openDealsValue = openDealsRows.reduce((sum, d) => sum + (d.value ?? 0), 0)
+
+  const unitRows = (realEstateUnits.data ?? []) as { status: string }[]
 
   return {
     activeConversations: {
@@ -95,6 +104,12 @@ export async function loadMetrics(db: DB): Promise<MetricsBundle> {
     messagesSentToday: {
       current: messagesToday.count ?? 0,
       previous: messagesYesterday.count ?? 0,
+    },
+    realEstate: {
+      unitsAvailable: unitRows.filter((u) => u.status === 'disponible').length,
+      unitsReserved: unitRows.filter((u) => u.status === 'reservado').length,
+      unitsSold: unitRows.filter((u) => u.status === 'vendido').length,
+      activeReservations: activeReservations.count ?? 0,
     },
   }
 }

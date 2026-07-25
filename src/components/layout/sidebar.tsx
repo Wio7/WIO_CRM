@@ -10,6 +10,8 @@ import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import {
   Bell,
   Bot,
+  Building2,
+  CalendarCheck,
   Crown,
   GitBranch,
   LayoutDashboard,
@@ -38,28 +40,28 @@ const ROLE_CHIP: Record<
 > = {
   owner: {
     icon: Crown,
-    label: "Owner",
+    label: "Propietario",
     // Amber: scarce, immutable, "the boss" — gets visual emphasis.
     className:
       "border-amber-500/40 bg-amber-500/10 text-amber-300",
   },
   admin: {
     icon: Shield,
-    label: "Admin",
+    label: "Administrador",
     // Primary-tinted: significant but not as scarce as owner.
     className:
       "border-primary/40 bg-primary/10 text-primary",
   },
   agent: {
     icon: UserCog,
-    label: "Agent",
+    label: "Agente",
     // Neutral slate: the operational default.
     className:
       "border-border bg-muted text-foreground",
   },
   viewer: {
     icon: User,
-    label: "Viewer",
+    label: "Espectador",
     // Muted slate: read-only role; visually quieter than agent.
     className:
       "border-border bg-card text-muted-foreground",
@@ -90,19 +92,21 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/inbox", label: "Inbox", icon: MessageSquare },
-  { href: "/notifications", label: "Notifications", icon: Bell },
-  { href: "/contacts", label: "Contacts", icon: Users },
-  { href: "/pipelines", label: "Pipelines", icon: GitBranch },
-  { href: "/broadcasts", label: "Broadcasts", icon: Radio },
-  { href: "/automations", label: "Automations", icon: Zap },
-  { href: "/flows", label: "Flows", icon: Workflow, beta: true },
-  { href: "/agents", label: "AI Agents", icon: Bot },
+  { href: "/dashboard", label: "Panel Principal", icon: LayoutDashboard },
+  { href: "/inbox", label: "Bandeja de Entrada", icon: MessageSquare },
+  { href: "/notifications", label: "Notificaciones", icon: Bell },
+  { href: "/contacts", label: "Contactos", icon: Users },
+  { href: "/pipelines", label: "Embudos de Venta", icon: GitBranch },
+  { href: "/projects", label: "Proyectos", icon: Building2 },
+  { href: "/reservations", label: "Separaciones", icon: CalendarCheck },
+  { href: "/broadcasts", label: "Difusiones", icon: Radio },
+  { href: "/automations", label: "Automatizaciones", icon: Zap },
+  { href: "/flows", label: "Flujos", icon: Workflow, beta: true },
+  { href: "/agents", label: "Agentes IA", icon: Bot },
 ];
 
 const bottomNavItems = [
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/settings", label: "Configuración", icon: Settings },
 ];
 
 interface SidebarProps {
@@ -113,7 +117,7 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const { profile, profileLoading, account, accountRole, signOut, isSuperAdmin } = useAuth();
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   // Only surface the account-name strip when it actually carries
@@ -185,11 +189,9 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <MessageSquare className="h-4 w-4" />
-            </div>
+            <img src="/logo.png" alt="Wio CRM" className="h-8 w-auto object-contain rounded-md" />
             <span className="text-sm font-semibold text-foreground">
-              CRM Template for WhatsApp
+              Wio CRM
             </span>
           </Link>
           <button
@@ -205,7 +207,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
+            {(isSuperAdmin
+              ? [...navItems, { href: "/saas-owner", label: "Administración SaaS", icon: Shield }]
+              : navItems
+            ).map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
@@ -367,7 +372,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 }
               >
                 <User className="size-4" />
-                Profile
+                Perfil
               </DropdownMenuItem>
               <DropdownMenuItem
                 render={
@@ -379,7 +384,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 }
               >
                 <Settings className="size-4" />
-                Settings
+                Configuración
               </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-border" />
               <DropdownMenuItem
@@ -387,7 +392,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
               >
                 <LogOut className="size-4" />
-                Sign out
+                Cerrar Sesión
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

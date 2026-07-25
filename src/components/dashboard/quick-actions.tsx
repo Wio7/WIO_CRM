@@ -16,10 +16,10 @@ interface Action {
 }
 
 const ACTIONS: Action[] = [
-  { label: 'New Contact', href: '/contacts', icon: UserPlus, tint: 'text-primary' },
-  { label: 'New Deal', href: '/pipelines', icon: Briefcase, tint: 'text-blue-400' },
-  { label: 'New Broadcast', href: '/broadcasts/new', icon: Radio, tint: 'text-amber-400' },
-  { label: 'New Automation', href: '/automations/new', icon: Zap, tint: 'text-primary' },
+  { label: 'Nuevo Contacto', href: '/contacts', icon: UserPlus, tint: 'text-primary' },
+  { label: 'Nuevo Trato', href: '/pipelines', icon: Briefcase, tint: 'text-blue-400' },
+  { label: 'Nueva Difusión', href: '/broadcasts/new', icon: Radio, tint: 'text-amber-400' },
+  { label: 'Nueva Automatización', href: '/automations/new', icon: Zap, tint: 'text-primary' },
 ]
 
 export function QuickActions() {
