@@ -4,15 +4,15 @@ import { useEffect, useState, useMemo } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import { 
-  Building2, 
-  Search, 
-  Trash2, 
-  ToggleLeft, 
-  ToggleRight, 
-  Activity, 
-  ShieldAlert, 
-  CheckCircle, 
+import {
+  Building2,
+  Search,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  Activity,
+  ShieldAlert,
+  CheckCircle,
   XCircle,
   ExternalLink,
   ChevronRight,
@@ -22,7 +22,8 @@ import {
   User,
   Lock,
   Loader2,
-  X
+  X,
+  UserPlus
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { SaasInviteDialog } from "@/components/saas-owner/saas-invite-dialog";
 
 interface Account {
   id: string;
@@ -52,6 +54,7 @@ export default function SaasOwnerPage() {
   const [search, setSearch] = useState("");
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [inviteTarget, setInviteTarget] = useState<Account | null>(null);
 
   // Invitation / Account Creation modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -376,6 +379,16 @@ export default function SaasOwnerPage() {
                     </td>
                     <td className="py-4 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        {/* Invite by Email Button */}
+                        <Button
+                          onClick={() => setInviteTarget(account)}
+                          variant="ghost"
+                          className="h-9 w-9 rounded-xl border border-primary/10 bg-primary/5 hover:bg-primary/20 p-0 text-primary"
+                          title="Invitar por correo a esta cuenta"
+                        >
+                          <UserPlus className="h-4 w-4" />
+                        </Button>
+
                         {/* Toggle Status Button */}
                         <Button
                           onClick={() => handleToggleStatus(account)}
@@ -530,6 +543,18 @@ export default function SaasOwnerPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Invite Modal */}
+      {inviteTarget && (
+        <SaasInviteDialog
+          open={!!inviteTarget}
+          onOpenChange={(open) => {
+            if (!open) setInviteTarget(null);
+          }}
+          accountId={inviteTarget.id}
+          accountName={inviteTarget.name}
+        />
+      )}
     </div>
   );
 }

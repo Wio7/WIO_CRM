@@ -170,6 +170,11 @@ export function SettingsOverview({
       ),
     },
     {
+      section: 'meta-leads',
+      loading: false,
+      subtitle: 'Conecta campañas de Facebook e Instagram',
+    },
+    {
       section: 'members',
       loading: countsLoading,
       subtitle:

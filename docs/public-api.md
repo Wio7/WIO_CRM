@@ -193,6 +193,57 @@ match returns `200` with the existing contact; a new contact returns
 `201`. The response body is the serialized contact (same shape as the
 list rows above).
 
+### `POST /api/v1/leads`
+
+Capture a lead from an ad, campaign, or landing page. Scope:
+`contacts:write`. Point your Meta Lead Ads bridge, Google Ads lead-form
+webhook, or a landing-page form here. `phone` (E.164) is required;
+`name` and `email` are optional, plus the attribution fields
+`lead_source`, `campaign_name`, `ad_id`, `utm_source`, `utm_medium`,
+`utm_campaign`, `utm_term`, `utm_content`.
+
+Differs from `POST /api/v1/contacts` in three ways:
+
+1. **Attribution is recorded first-touch** — attribution is written only
+   to columns that are still empty, so a returning lead never overwrites
+   its original source.
+2. **A conversation is guaranteed** to exist for the contact.
+3. **The `new_contact_created` automation trigger fires** for genuinely
+   new contacts — so an automation with an `assign_conversation`
+   (round-robin) step auto-distributes the lead to an advisor.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/leads \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "phone": "+14155550123",
+        "name": "Jane Doe",
+        "lead_source": "meta_ads",
+        "campaign_name": "Proyecto Sol — Julio",
+        "ad_id": "1203456789",
+        "utm_source": "facebook",
+        "utm_medium": "paid_social"
+      }'
+```
+
+Find-or-create by phone: a new contact returns `201` with
+`contact_created: true`; an existing match returns `200`. Response:
+
+```json
+{
+  "data": {
+    "contact_id": "…",
+    "conversation_id": "…",
+    "contact_created": true,
+    "conversation_created": true
+  }
+}
+```
+
+> Replaces the legacy, hardcoded `POST /api/public/leads` (kept only for
+> an existing demo landing page). New integrations should use this route.
+
 ### `GET` / `PATCH /api/v1/contacts/{id}`
 
 Read or update one contact. Scopes: `contacts:read` / `contacts:write`.

@@ -1,3 +1,13 @@
+// ⚠️ DEPRECATED — use `POST /api/v1/leads` instead.
+//
+// This route is hardcoded to an account named "Aurex" (with an unsafe
+// "first account that exists" fallback) and predates the public API. It
+// is kept only so the existing Aurex demo landing page keeps working.
+// New integrations (Meta Lead Ads, Google Ads, landing forms) must use
+// the API-key-authenticated `POST /api/v1/leads`, which scopes the lead
+// to the key's own account and fires the round-robin advisor assignment.
+// Do not extend this file.
+
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 

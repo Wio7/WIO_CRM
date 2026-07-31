@@ -425,15 +425,23 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       if (!args.contactId) throw new Error('assign_conversation needs a contact')
       let agentId = cfg.agent_id
       if (cfg.mode === 'round_robin') {
-        // Pick any member of the account. The existing implementation
-        // only ever returned the automation's author; preserving that
-        // shape until a real round-robin algorithm replaces it.
-        const { data: profiles } = await db
-          .from('profiles')
-          .select('user_id')
-          .eq('account_id', args.automation.account_id)
-          .limit(1)
-        agentId = profiles?.[0]?.user_id
+        // Resolve the eligible pool: the configured subset, or every
+        // account member when none is configured.
+        let candidates = (cfg.agent_ids ?? []).filter(Boolean)
+        if (candidates.length === 0) {
+          const { data: profiles } = await db
+            .from('profiles')
+            .select('user_id')
+            .eq('account_id', args.automation.account_id)
+          candidates = (profiles ?? []).map((p) => p.user_id)
+        }
+        // Atomic even round-robin: the RPC locks per-step rotation state
+        // so concurrent dispatches can't both land on the same agent.
+        const { data: chosen } = await db.rpc('pick_round_robin_agent', {
+          p_step_id: step.id,
+          p_candidates: candidates,
+        })
+        agentId = (chosen as string | null) ?? undefined
       }
       if (!agentId) return 'no agent resolved'
       await db

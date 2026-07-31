@@ -98,6 +98,20 @@ export interface Contact {
   email?: string;
   company?: string;
   avatar_url?: string;
+  /**
+   * Campaign attribution (migration 035) — where this lead came from.
+   * First-touch: set once at capture and preserved thereafter. All
+   * optional; populated by POST /api/v1/leads and the Meta Lead Ads
+   * webhook.
+   */
+  lead_source?: string;
+  campaign_name?: string;
+  ad_id?: string;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_term?: string;
+  utm_content?: string;
   created_at: string;
   updated_at: string;
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
@@ -456,7 +470,14 @@ export interface TagStepConfig {
 
 export interface AssignConversationStepConfig {
   mode: 'specific' | 'round_robin';
+  /** The agent to assign to when `mode === 'specific'`. */
   agent_id?: string;
+  /**
+   * Eligible advisor pool for `mode === 'round_robin'`. An empty or
+   * absent list means "rotate across every account member". Rotation is
+   * even (each turn goes to the least-recently-picked agent).
+   */
+  agent_ids?: string[];
 }
 
 export interface UpdateContactFieldStepConfig {
