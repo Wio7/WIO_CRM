@@ -331,9 +331,10 @@ export function AiConfig() {
 
             <div className="space-y-2">
               <Label htmlFor="ai-embeddings-key">
-                Embeddings key{' '}
+                OpenAI key{' '}
                 <span className="font-normal text-muted-foreground">
-                  (optional — enables semantic knowledge-base search)
+                  (optional — semantic knowledge-base search and call
+                  transcription)
                 </span>
               </Label>
               <Input
@@ -355,11 +356,13 @@ export function AiConfig() {
                 autoComplete="off"
               />
               <p className="text-xs text-muted-foreground">
-                An OpenAI key used only to embed your knowledge base
-                (text-embedding-3-small)
+                An OpenAI key used for two things: embedding your knowledge base
+                (text-embedding-3-small) and transcribing Power Dialer call
+                recordings (whisper-1)
                 {provider === 'openai' ? ' — can be the same key as above' : ''}.
-                Leave blank to use keyword search instead. Clear it to turn
-                semantic search off.
+                Both features are OpenAI-only, which is why this is separate
+                from the provider above. Leave blank to use keyword search and
+                skip transcription; clear it to turn both off.
               </p>
             </div>
           </CardContent>

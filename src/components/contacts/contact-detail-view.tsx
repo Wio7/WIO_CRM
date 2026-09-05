@@ -27,6 +27,10 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { LeadSourceBadge } from '@/components/contacts/lead-source-badge';
 import {
+  CallResultCard,
+  type CallResultRow,
+} from '@/components/calls/call-result-card';
+import {
   Phone,
   Mail,
   Building2,
@@ -94,6 +98,8 @@ export function ContactDetailView({
   // Deals tab
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loadingDeals, setLoadingDeals] = useState(false);
+  const [calls, setCalls] = useState<CallResultRow[]>([]);
+  const [loadingCalls, setLoadingCalls] = useState(false);
 
   const fetchContact = useCallback(async () => {
     if (!contactId) return;
@@ -178,6 +184,25 @@ export function ContactDetailView({
     setLoadingDeals(false);
   }, [contactId, supabase]);
 
+  const fetchCalls = useCallback(async () => {
+    if (!contactId) return;
+    setLoadingCalls(true);
+    const { data } = await supabase
+      .from('call_results')
+      .select(
+        'id, contact_id, mode, recording_url, transcript, ai_summary, ai_recommendation, transcription_status, transcription_error, duration_sec, created_at, advisor:profiles(full_name)',
+      )
+      .eq('contact_id', contactId)
+      .order('created_at', { ascending: false });
+
+    setCalls(
+      ((data ?? []) as unknown as (CallResultRow & {
+        advisor: { full_name: string | null } | null;
+      })[]).map((r) => ({ ...r, advisor_name: r.advisor?.full_name ?? null })),
+    );
+    setLoadingCalls(false);
+  }, [contactId, supabase]);
+
   useEffect(() => {
     if (open && contactId) {
       fetchContact();
@@ -185,8 +210,18 @@ export function ContactDetailView({
       fetchNotes();
       fetchCustomFields();
       fetchDeals();
+      fetchCalls();
     }
-  }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
+  }, [
+    open,
+    contactId,
+    fetchContact,
+    fetchTags,
+    fetchNotes,
+    fetchCustomFields,
+    fetchDeals,
+    fetchCalls,
+  ]);
 
   async function copyPhone() {
     if (!contact) return;
@@ -487,6 +522,12 @@ export function ContactDetailView({
                 >
                   Deals
                 </TabsTrigger>
+                <TabsTrigger
+                  value="calls"
+                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
+                >
+                  Llamadas
+                </TabsTrigger>
               </TabsList>
 
               {/* Details Tab */}
@@ -773,6 +814,25 @@ export function ContactDetailView({
                           )}
                         </div>
                       </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* Calls Tab */}
+              <TabsContent value="calls" className="flex-1 overflow-y-auto px-4 py-3">
+                {loadingCalls ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="size-5 animate-spin text-primary" />
+                  </div>
+                ) : calls.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Sin llamadas registradas
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {calls.map((call) => (
+                      <CallResultCard key={call.id} call={call} showContact={false} />
                     ))}
                   </div>
                 )}
