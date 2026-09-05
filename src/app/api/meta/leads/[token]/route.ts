@@ -27,12 +27,10 @@ import {
   decryptPageToken,
   verifySignatureWithSecret,
 } from '@/lib/meta-leads/config';
-import { fetchLeadDetail } from '@/lib/meta-leads/graph';
-import { mapLeadFields } from '@/lib/meta-leads/map-fields';
-import { captureLead } from '@/lib/api/v1/leads';
-import { resolveAuditUserId } from '@/lib/api/v1/contacts';
-import { runAutomationsForTrigger } from '@/lib/automations/engine';
-import { dispatchWebhookEvent } from '@/lib/webhooks/deliver';
+import {
+  processLeadgenValues,
+  type LeadgenValue,
+} from '@/lib/meta-leads/process-lead';
 
 // ------------------------------------------------------------
 // GET — Meta subscription verification challenge.
@@ -67,14 +65,6 @@ export async function GET(
 // ------------------------------------------------------------
 // POST — leadgen delivery.
 // ------------------------------------------------------------
-interface LeadgenValue {
-  leadgen_id?: string;
-  page_id?: string;
-  form_id?: string;
-  ad_id?: string;
-  created_time?: number;
-}
-
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ token: string }> }
@@ -129,95 +119,14 @@ export async function POST(
   if (leadgenValues.length > 0) {
     const pageToken = decryptPageToken(config);
     after(
-      processLeads(config.account_id, pageToken, leadgenValues).catch((err) =>
-        console.error('[meta-leads] processing failed:', err)
-      )
+      processLeadgenValues(
+        db,
+        config.account_id,
+        pageToken,
+        leadgenValues
+      ).catch((err) => console.error('[meta-leads] processing failed:', err))
     );
   }
 
   return NextResponse.json({ received: true });
-}
-
-/**
- * Fetch, map, and persist each lead. Best-effort per lead — one failure
- * never blocks the rest. Runs after the 200 response via `after()`.
- */
-async function processLeads(
-  accountId: string,
-  pageToken: string | null,
-  values: LeadgenValue[]
-): Promise<void> {
-  if (!pageToken) {
-    console.error('[meta-leads] no Page access token configured — skipping');
-    return;
-  }
-  const db = supabaseAdmin();
-  const auditUserId = await resolveAuditUserId(db, accountId).catch(() => null);
-
-  for (const value of values) {
-    try {
-      const detail = await fetchLeadDetail(value.leadgen_id!, pageToken);
-      const mapped = mapLeadFields(detail.field_data);
-      if (!mapped.phone) {
-        console.warn(
-          `[meta-leads] lead ${value.leadgen_id} has no phone — skipping`
-        );
-        continue;
-      }
-
-      const result = await captureLead(db, accountId, {
-        phone: mapped.phone,
-        name: mapped.name,
-        email: mapped.email,
-        lead_source: 'meta_ads',
-        campaign_name: detail.campaign_name,
-        ad_id: value.ad_id ?? detail.ad_id,
-        utm_source: 'facebook',
-        utm_medium: 'paid_social',
-        utm_campaign: detail.campaign_name,
-      });
-
-      // Preserve any custom form answers as a note so nothing is lost.
-      if (mapped.extras.length > 0 && auditUserId) {
-        const noteText =
-          '📋 Meta Lead Ads — respuestas del formulario\n' +
-          mapped.extras.map((e) => `- ${e.label}: ${e.value}`).join('\n');
-        await db
-          .from('contact_notes')
-          .insert({
-            contact_id: result.contactId,
-            user_id: auditUserId,
-            note_text: noteText,
-          })
-          .then(({ error }) => {
-            if (error) console.error('[meta-leads] note insert failed:', error);
-          });
-      }
-
-      if (result.conversationCreated) {
-        await dispatchWebhookEvent(db, accountId, 'conversation.created', {
-          conversation_id: result.conversationId,
-          contact_id: result.contactId,
-        });
-      }
-
-      // Fire new_contact_created for new contacts → runs the round-robin
-      // advisor assignment on the campaign lead.
-      if (result.contactCreated) {
-        await runAutomationsForTrigger({
-          accountId,
-          triggerType: 'new_contact_created',
-          contactId: result.contactId,
-          context: { conversation_id: result.conversationId },
-        }).catch((err) =>
-          console.error('[meta-leads] automation dispatch failed:', err)
-        );
-      }
-    } catch (err) {
-      console.error(
-        `[meta-leads] failed to process lead ${value.leadgen_id}:`,
-        err
-      );
-    }
-  }
 }

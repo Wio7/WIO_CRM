@@ -117,6 +117,13 @@ export interface Contact {
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
    *  Inbox conversation list, for tag filtering). Absent otherwise. */
   tags?: Tag[];
+  /**
+   * Click-to-WhatsApp click id (migration 037). Set when the contact's
+   * first inbound WhatsApp message carried a `referral` from an ad; it's
+   * the join key Meta's Conversions API uses to match a reported
+   * conversion back to the ad that produced it.
+   */
+  ctwa_clid?: string;
 }
 
 export interface Tag {

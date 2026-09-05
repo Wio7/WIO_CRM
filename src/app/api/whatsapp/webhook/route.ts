@@ -59,6 +59,59 @@ interface WhatsAppMessage {
   }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
+  /**
+   * Click-to-WhatsApp attribution. Meta attaches this to the FIRST
+   * message of a conversation that started from an ad with a WhatsApp
+   * CTA, so it's how a chat lead gets tied back to the campaign that
+   * paid for it — the same way a lead-form submission carries its ad_id.
+   *
+   * `source_id` is the ad id; `ctwa_clid` is the click id Meta's
+   * Conversions API uses to match a reported conversion back to the ad.
+   */
+  referral?: {
+    source_url?: string
+    source_id?: string
+    source_type?: string
+    headline?: string
+    body?: string
+    ctwa_clid?: string
+  }
+}
+
+/**
+ * First-touch attribution stamped on contacts created from an inbound
+ * WhatsApp message. Mirrors the columns migration 035 added (plus
+ * `ctwa_clid` from 037) so every capture path — Meta lead forms, the
+ * public API, and now WhatsApp — describes origin the same way.
+ */
+interface InboundAttribution {
+  lead_source: string
+  ad_id?: string
+  campaign_name?: string
+  utm_source?: string
+  utm_medium?: string
+  ctwa_clid?: string
+}
+
+/**
+ * Derive attribution from an inbound message. Messages carrying a
+ * `referral` came from an ad; everything else is organic WhatsApp.
+ */
+function attributionFromMessage(message: WhatsAppMessage): InboundAttribution {
+  const ref = message.referral
+  if (ref?.source_id || ref?.ctwa_clid) {
+    return {
+      lead_source: 'whatsapp_ad',
+      ad_id: ref.source_id,
+      // Meta doesn't send the campaign name on the referral, only the
+      // ad's headline — it's the closest human-readable label we get.
+      campaign_name: ref.headline,
+      utm_source: 'facebook',
+      utm_medium: 'click_to_whatsapp',
+      ctwa_clid: ref.ctwa_clid,
+    }
+  }
+  return { lead_source: 'whatsapp' }
 }
 
 interface WhatsAppWebhookEntry {
@@ -578,7 +631,8 @@ async function processMessage(
     accountId,
     configOwnerUserId,
     senderPhone,
-    contactName
+    contactName,
+    attributionFromMessage(message)
   )
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
@@ -974,7 +1028,8 @@ async function findOrCreateContact(
   accountId: string,
   configOwnerUserId: string,
   phone: string,
-  name: string
+  name: string,
+  attribution: InboundAttribution
 ): Promise<ContactOutcome | null> {
   // Find an existing contact for this account by phone. The shared
   // helper pre-filters in SQL by the last-8-digit suffix (so we don't
@@ -1003,6 +1058,11 @@ async function findOrCreateContact(
   // user_id is the NOT NULL FK audit column (no inbound message
   // has a single "user who created" it — we attribute to the
   // WhatsApp config owner as a stable default).
+  //
+  // Attribution is written ONLY here, on creation — it is first-touch by
+  // convention across every capture path (see src/lib/api/v1/leads.ts),
+  // so a returning contact keeps whatever source first brought them in
+  // rather than being relabelled by their latest message.
   const { data: newContact, error: createError } = await supabaseAdmin()
     .from('contacts')
     .insert({
@@ -1010,6 +1070,12 @@ async function findOrCreateContact(
       user_id: configOwnerUserId,
       phone,
       name: name || phone,
+      lead_source: attribution.lead_source,
+      ad_id: attribution.ad_id ?? null,
+      campaign_name: attribution.campaign_name ?? null,
+      utm_source: attribution.utm_source ?? null,
+      utm_medium: attribution.utm_medium ?? null,
+      ctwa_clid: attribution.ctwa_clid ?? null,
     })
     .select()
     .single()

@@ -25,6 +25,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { LeadSourceBadge } from '@/components/contacts/lead-source-badge';
 import {
   Phone,
   Mail,
@@ -538,6 +539,34 @@ export function ContactDetailView({
                     )}
                     Save Changes
                   </Button>
+
+                  {/* Attribution — read-only. First-touch, written once by
+                      whichever capture path created the contact, so it is
+                      deliberately not editable here. */}
+                  {contact.lead_source && (
+                    <div className="space-y-2 rounded-lg border border-border p-3">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-muted-foreground text-xs">Origen</Label>
+                        <LeadSourceBadge source={contact.lead_source} />
+                      </div>
+                      {[
+                        ['Campaña', contact.campaign_name],
+                        ['Anuncio', contact.ad_id],
+                        ['UTM source', contact.utm_source],
+                        ['UTM medium', contact.utm_medium],
+                        ['UTM campaign', contact.utm_campaign],
+                      ]
+                        .filter(([, value]) => !!value)
+                        .map(([label, value]) => (
+                          <div key={label} className="flex justify-between gap-2 text-xs">
+                            <span className="text-muted-foreground">{label}</span>
+                            <span className="truncate text-right text-foreground">
+                              {value}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </TabsContent>
 

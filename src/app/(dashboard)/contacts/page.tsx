@@ -35,6 +35,11 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import {
+  LeadSourceBadge,
+  LEAD_SOURCE_OPTIONS,
+  leadSourceLabel,
+} from '@/components/contacts/lead-source-badge';
+import {
   Search,
   Plus,
   Upload,
@@ -75,6 +80,7 @@ export default function ContactsPage() {
   const [totalCount, setTotalCount] = useState(0);
   // Tag filter — contacts shown must have ANY of these tags (OR).
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
 
   // Modals
   const [formOpen, setFormOpen] = useState(false);
@@ -151,6 +157,14 @@ export default function ContactsPage() {
       const rows = (data ?? []) as { contact: Contact; total_count: number }[];
       contactRows = rows.map((r) => r.contact);
       count = rows.length > 0 ? Number(rows[0].total_count) : 0;
+      // The RPC (migration 025) predates lead_source and takes no source
+      // argument, so combining both filters narrows the current page in
+      // JS. `count` still reflects the tag filter alone — the rows shown
+      // are always correct, the total may overstate. Acceptable for a
+      // secondary filter; widening the RPC would be the real fix.
+      if (sourceFilter) {
+        contactRows = contactRows.filter((c) => c.lead_source === sourceFilter);
+      }
     } else {
       let query = supabase
         .from('contacts')
@@ -161,6 +175,10 @@ export default function ContactsPage() {
       if (term) {
         const like = `%${term}%`;
         query = query.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+      }
+
+      if (sourceFilter) {
+        query = query.eq('lead_source', sourceFilter);
       }
 
       const { data, count: exactCount, error } = await query;
@@ -205,7 +223,7 @@ export default function ContactsPage() {
 
     setContacts(enriched);
     setLoading(false);
-  }, [supabase, page, search, selectedTagIds, tagsMap]);
+  }, [supabase, page, search, selectedTagIds, sourceFilter, tagsMap]);
 
   // Load-once-on-mount-ish data fetches. Each setter inside runs
   // inside an async promise completion (Supabase await), not
@@ -458,6 +476,53 @@ export default function ContactsPage() {
               )}
             </PopoverContent>
           </Popover>
+
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  variant="outline"
+                  className="border-border text-muted-foreground hover:bg-muted shrink-0"
+                />
+              }
+            >
+              <Filter className="size-4" />
+              {sourceFilter ? leadSourceLabel(sourceFilter) : 'Origen'}
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-52 p-0">
+              <div className="py-1">
+                <button
+                  onClick={() => {
+                    setSourceFilter(null);
+                    setPage(0);
+                  }}
+                  className={`flex w-full items-center px-3 py-1.5 text-sm hover:bg-muted/50 ${
+                    sourceFilter === null
+                      ? 'text-primary font-medium'
+                      : 'text-popover-foreground'
+                  }`}
+                >
+                  Todos los orígenes
+                </button>
+                {LEAD_SOURCE_OPTIONS.map((source) => (
+                  <button
+                    key={source}
+                    onClick={() => {
+                      setSourceFilter(source);
+                      setPage(0);
+                    }}
+                    className={`flex w-full items-center px-3 py-1.5 text-sm hover:bg-muted/50 ${
+                      sourceFilter === source
+                        ? 'text-primary font-medium'
+                        : 'text-popover-foreground'
+                    }`}
+                  >
+                    {leadSourceLabel(source)}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* Active tag-filter chips */}
@@ -545,6 +610,7 @@ export default function ContactsPage() {
               <TableHead className="text-muted-foreground hidden md:table-cell">Correo</TableHead>
               <TableHead className="text-muted-foreground hidden lg:table-cell">Empresa</TableHead>
               <TableHead className="text-muted-foreground hidden md:table-cell">Etiquetas</TableHead>
+              <TableHead className="text-muted-foreground hidden md:table-cell">Origen</TableHead>
               <TableHead className="text-muted-foreground hidden lg:table-cell">Creado</TableHead>
               <TableHead className="text-muted-foreground w-12" />
             </TableRow>
@@ -552,7 +618,7 @@ export default function ContactsPage() {
           <TableBody>
             {loading ? (
               <TableRow className="border-border">
-                <TableCell colSpan={8} className="text-center py-12">
+                <TableCell colSpan={9} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Loader2 className="size-6 animate-spin text-primary" />
                     <p className="text-sm text-muted-foreground">Cargando contactos...</p>
@@ -561,7 +627,7 @@ export default function ContactsPage() {
               </TableRow>
             ) : contacts.length === 0 ? (
               <TableRow className="border-border">
-                <TableCell colSpan={8} className="text-center py-12">
+                <TableCell colSpan={9} className="text-center py-12">
                   <div className="flex flex-col items-center gap-2">
                     <Users className="size-8 text-muted-foreground" />
                     <p className="text-sm text-muted-foreground">
@@ -635,6 +701,9 @@ export default function ContactsPage() {
                         </span>
                       )}
                     </div>
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <LeadSourceBadge source={contact.lead_source} />
                   </TableCell>
                   <TableCell className="text-muted-foreground text-xs hidden lg:table-cell">
                     {new Date(contact.created_at).toLocaleDateString('es-ES', {
