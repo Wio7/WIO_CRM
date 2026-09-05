@@ -12,6 +12,7 @@ import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
 import { MetaLeadsConfig } from '@/components/settings/meta-leads-config';
+import { DialerConfig } from '@/components/settings/dialer-config';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
@@ -58,6 +59,7 @@ export default function SettingsPage() {
     appearance: <AppearancePanel />,
     whatsapp: <WhatsAppConfig />,
     'meta-leads': <MetaLeadsConfig />,
+    dialer: <DialerConfig />,
     templates: <TemplateManager />,
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,
