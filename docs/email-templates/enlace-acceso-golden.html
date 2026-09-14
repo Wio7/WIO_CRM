@@ -1,0 +1,106 @@
+<!--
+  Plantilla "Magic Link" de Supabase Auth (proyecto WIO CRM).
+  Supabase → Authentication → Emails → Magic Link
+  Asunto: Su acceso a Golden App — Golden Habitat
+
+  La recibe quien ya tenía cuenta en el CRM cuando lo invitan al equipo
+  (src/lib/auth/invite-email.ts). El texto sirve también para cualquier
+  otro enlace de acceso que el CRM llegue a enviar.
+
+  Variables de Supabase:
+    {{ .ConfirmationURL }}  enlace que inicia la sesión
+    {{ .Data.full_name }}   nombre del usuario (si lo tiene)
+-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
+  <title>Su acceso a Golden App</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f1ec; -webkit-text-size-adjust:100%;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f1ec;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 8px 28px rgba(24,24,27,0.08);">
+
+          <!-- Franja de marca -->
+          <tr>
+            <td style="height:6px; line-height:6px; font-size:0; background-color:#c8102e; background-image:linear-gradient(90deg,#e11d2e,#8f1726);">&nbsp;</td>
+          </tr>
+
+          <!-- Logo y nombre -->
+          <tr>
+            <td align="center" style="padding:36px 40px 8px;">
+              <img src="https://golden-habitat-studios.vercel.app/assets/brand/logo.png" width="76" height="76" alt="Golden Habitat" style="display:block; width:76px; height:76px; border:0; border-radius:18px;" />
+              <p style="margin:14px 0 0; font-family:Arial,Helvetica,sans-serif; font-size:13px; font-weight:bold; letter-spacing:4px; color:#18181b;">GOLDEN APP</p>
+              <p style="margin:4px 0 0; font-family:Arial,Helvetica,sans-serif; font-size:12px; letter-spacing:1px; color:#8b8f98;">GOLDEN HABITAT</p>
+            </td>
+          </tr>
+
+          <!-- Contenido -->
+          <tr>
+            <td style="padding:24px 40px 8px; font-family:Arial,Helvetica,sans-serif; color:#27272a;">
+              <h1 style="margin:0 0 18px; font-size:22px; line-height:1.3; font-weight:bold; color:#18181b; text-align:center;">
+                Su enlace de acceso
+              </h1>
+
+              <p style="margin:0 0 14px; font-size:15px; line-height:1.6;">
+                {{ if .Data.full_name }}Estimado(a) {{ .Data.full_name }}:{{ else }}Estimado(a) colaborador(a):{{ end }}
+              </p>
+
+              <p style="margin:0 0 14px; font-size:15px; line-height:1.6;">
+                Hemos recibido una solicitud para ingresar con su cuenta. Si le han invitado a formar parte
+                del equipo de <strong>Golden Habitat</strong>, este enlace le permitirá ingresar y
+                <strong>aceptar la invitación</strong> sin necesidad de escribir su contraseña.
+              </p>
+
+              <p style="margin:0 0 22px; font-size:15px; line-height:1.6;">
+                Después podrá usar <strong>Golden App</strong> desde su celular con su correo y la contraseña de siempre.
+              </p>
+
+              <!-- Botón -->
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 24px;">
+                <tr>
+                  <td align="center" bgcolor="#c8102e" style="border-radius:10px;">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block; padding:15px 34px; font-family:Arial,Helvetica,sans-serif; font-size:16px; font-weight:bold; color:#ffffff; text-decoration:none; border-radius:10px;">
+                      Ingresar y continuar
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 6px; font-size:13px; line-height:1.6; color:#52525b;">
+                Si el botón no funciona, copie y pegue este enlace en su navegador:
+              </p>
+              <p style="margin:0 0 22px; font-size:12px; line-height:1.5; word-break:break-all;">
+                <a href="{{ .ConfirmationURL }}" target="_blank" style="color:#8f1726;">{{ .ConfirmationURL }}</a>
+              </p>
+
+              <p style="margin:0 0 24px; padding:12px 14px; font-size:13px; line-height:1.6; color:#52525b; background-color:#faf7f2; border-left:3px solid #e2a94e; border-radius:6px;">
+                Por seguridad, este enlace es personal, sirve una sola vez y vence en poco tiempo.
+                No lo comparta con nadie.
+              </p>
+
+              <p style="margin:0 0 4px; font-size:15px; line-height:1.6;">Atentamente,</p>
+              <p style="margin:0 0 28px; font-size:15px; line-height:1.6; font-weight:bold; color:#18181b;">Equipo de Golden Habitat</p>
+            </td>
+          </tr>
+
+          <!-- Pie -->
+          <tr>
+            <td style="padding:18px 40px 26px; border-top:1px solid #eeeae4; font-family:Arial,Helvetica,sans-serif; font-size:12px; line-height:1.6; color:#8b8f98; text-align:center;">
+              Si usted no solicitó este acceso, ignore este correo; su cuenta sigue protegida.
+              <br />© Golden Habitat
+            </td>
+          </tr>
+
+        </table>
+
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
