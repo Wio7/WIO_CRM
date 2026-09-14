@@ -54,6 +54,10 @@ import {
 } from '@/components/ui/dialog';
 import { createClient } from '@/lib/supabase/client';
 
+/** Where most members actually work. After accepting, send them there. */
+const GOLDEN_APP_URL =
+  process.env.NEXT_PUBLIC_GOLDEN_APP_URL?.replace(/\/+$/, '') || null;
+
 interface PeekOk {
   ok: true;
   account_name: string;
@@ -141,6 +145,7 @@ export default function JoinPage() {
   const [needsPassword, setNeedsPassword] = useState(false);
   const [password, setPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
+  const [accepted, setAccepted] = useState(false);
 
   // Extracted so the "Try again" button on the server_error card
   // can re-run the same logic without remounting the component.
@@ -227,6 +232,12 @@ export default function JoinPage() {
         return;
       }
       toast.success('Welcome to the team');
+      if (GOLDEN_APP_URL) {
+        // Advisors work from the Golden App on their phone: offer it first.
+        setAccepted(true);
+        setAccepting(false);
+        return;
+      }
       // Full reload (not router.push) so AuthProvider re-fetches
       // the profile with the new account_id and account_role.
       window.location.href = '/dashboard';
@@ -368,6 +379,42 @@ export default function JoinPage() {
       </CardDescription>
     </CardHeader>
   );
+
+  // ----- Accepted: point them to where they will work -----
+  if (accepted && GOLDEN_APP_URL) {
+    return (
+      <Card className="w-full max-w-md border-border bg-card">
+        <CardHeader className="items-center text-center">
+          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10">
+            <CheckCircle className="h-6 w-6 text-emerald-400" />
+          </div>
+          <CardTitle className="text-xl text-foreground">
+            You&apos;re in{' '}
+            <span className="text-primary">{peek.account_name}</span>
+          </CardTitle>
+          <CardDescription className="text-muted-foreground">
+            Open the Golden App and sign in with this same email and
+            password. Your chats and your team are already there.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          <a href={GOLDEN_APP_URL}>
+            <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
+              Open Golden App
+            </Button>
+          </a>
+          <a href="/dashboard">
+            <Button
+              variant="outline"
+              className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              Go to the CRM
+            </Button>
+          </a>
+        </CardContent>
+      </Card>
+    );
+  }
 
   // ----- Authed: show Accept button -----
   if (authedUserId) {
