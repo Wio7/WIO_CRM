@@ -65,6 +65,8 @@ export interface AccountMember {
   avatar_url: string | null;
   role: AccountRole;
   joined_at: string;
+  /** accounts.owner_user_id — that owner can't be edited or removed. */
+  is_primary_owner?: boolean;
 }
 
 /**

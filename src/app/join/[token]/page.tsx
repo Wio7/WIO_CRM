@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Card,
   CardContent,
@@ -56,7 +57,7 @@ import { createClient } from '@/lib/supabase/client';
 interface PeekOk {
   ok: true;
   account_name: string;
-  role: 'admin' | 'agent' | 'viewer';
+  role: 'owner' | 'admin' | 'agent' | 'viewer';
   expires_at: string;
 }
 interface PeekFail {
@@ -66,6 +67,7 @@ interface PeekFail {
 type PeekResult = PeekOk | PeekFail;
 
 const ROLE_LABEL: Record<PeekOk['role'], string> = {
+  owner: 'Owner',
   admin: 'Admin',
   agent: 'Agent',
   viewer: 'Viewer',
@@ -90,6 +92,33 @@ const FAIL_COPY: Record<PeekFail['reason'], { title: string; body: string }> = {
   },
 };
 
+/**
+ * Invitation emails (Supabase invite / magic link, see
+ * src/lib/auth/invite-email.ts) land here with the session in the URL
+ * hash: #access_token=…&refresh_token=…&type=invite|magiclink.
+ * Store it before probing auth, and drop the tokens from the address bar.
+ */
+async function absorbSessionFromUrl(): Promise<'invite' | 'magiclink' | null> {
+  if (typeof window === 'undefined' || !window.location.hash.includes('access_token')) {
+    return null;
+  }
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const accessToken = params.get('access_token');
+  const refreshToken = params.get('refresh_token');
+  const type = params.get('type');
+  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  if (!accessToken || !refreshToken) return null;
+  const { error } = await createClient().auth.setSession({
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+  if (error) {
+    console.error('[join] could not store the session from the email link:', error);
+    return null;
+  }
+  return type === 'invite' ? 'invite' : 'magiclink';
+}
+
 export default function JoinPage() {
   const params = useParams<{ token: string }>();
   const token = params?.token;
@@ -108,6 +137,10 @@ export default function JoinPage() {
   // step. Surface a blocking modal that walks them through it.
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  // Invited by email: the account exists but has no password yet.
+  const [needsPassword, setNeedsPassword] = useState(false);
+  const [password, setPassword] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
 
   // Extracted so the "Try again" button on the server_error card
   // can re-run the same logic without remounting the component.
@@ -141,6 +174,8 @@ export default function JoinPage() {
     let cancelled = false;
     (async () => {
       try {
+        const linkType = await absorbSessionFromUrl();
+        if (!cancelled && linkType === 'invite') setNeedsPassword(true);
         const [peekRes, authRes] = await Promise.all([
           fetch(`/api/invitations/${encodeURIComponent(token)}/peek`, {
             cache: 'no-store',
@@ -201,6 +236,23 @@ export default function JoinPage() {
       setAccepting(false);
     }
   }, [token]);
+
+  const handleSavePassword = useCallback(async () => {
+    if (password.length < 8) {
+      toast.error('Use at least 8 characters');
+      return;
+    }
+    setSavingPassword(true);
+    const { error } = await createClient().auth.updateUser({ password });
+    setSavingPassword(false);
+    if (error) {
+      toast.error(error.message || 'Could not save your password');
+      return;
+    }
+    setNeedsPassword(false);
+    setPassword('');
+    toast.success('Password saved');
+  }, [password]);
 
   const handleSignOutAndRetry = useCallback(async () => {
     setSigningOut(true);
@@ -323,6 +375,36 @@ export default function JoinPage() {
       <>
         <Card className="w-full max-w-md border-border bg-card">
           {inviteHeader}
+          {needsPassword ? (
+            <CardContent className="flex flex-col gap-3">
+              <p className="text-sm text-muted-foreground">
+                First, create the password you&apos;ll use to sign in here
+                and in the Golden App.
+              </p>
+              <Input
+                type="password"
+                autoComplete="new-password"
+                placeholder="New password (8+ characters)"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="bg-muted border-border text-foreground"
+              />
+              <Button
+                onClick={handleSavePassword}
+                disabled={savingPassword}
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {savingPassword ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  'Save password'
+                )}
+              </Button>
+            </CardContent>
+          ) : (
           <CardContent className="flex flex-col gap-3">
             <Button
               onClick={handleAccept}
@@ -347,6 +429,7 @@ export default function JoinPage() {
               empty personal account from signup will be cleaned up.
             </p>
           </CardContent>
+          )}
         </Card>
 
         {/* Conflict modal — opens when the redeem endpoint returns 409

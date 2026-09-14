@@ -4,14 +4,15 @@
 //   PATCH  — change a member's role.   Admin+.
 //   DELETE — remove a member.          Admin+.
 //
-// Both delegate to SECURITY DEFINER RPCs from migration 018:
+// Both delegate to SECURITY DEFINER RPCs (018, rewritten in 040):
 //   - set_member_role(p_user_id, p_new_role)
 //   - remove_account_member(p_user_id)
 //
-// The RPCs do the *real* authorisation work — caller must be
-// admin+, target must be in caller's account, target can't be the
-// owner, can't be self. The TS layer here only forwards the call
-// and maps Postgres SQLSTATEs back to HTTP statuses.
+// The RPCs do the *real* authorisation work — caller must be admin+,
+// target must be in caller's account, can't be self, can't be the
+// primary owner, and only an owner can grant/remove the owner role.
+// The TS layer forwards the call and maps SQLSTATEs to HTTP statuses.
+// CORS-wrapped for the Golden App's Team screen (Bearer token).
 // ============================================================
 
 import { NextResponse } from "next/server";
@@ -19,15 +20,18 @@ import type { PostgrestError } from "@supabase/supabase-js";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
 import { isAccountRole } from "@/lib/auth/roles";
+import { corsPreflight, withCors } from "@/lib/cors";
 import {
   checkRateLimit,
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
 
-// Map known SQLSTATEs from the RPCs (see migration 018) onto HTTP
-// statuses. The `error.code` field is the SQLSTATE; the `message`
-// is the human-readable RAISE message we put in the migration.
+type RouteContext = { params: Promise<{ userId: string }> };
+
+// Map known SQLSTATEs from the RPCs onto HTTP statuses. The
+// `error.code` field is the SQLSTATE; the `message` is the
+// human-readable RAISE message from the migration.
 function rpcErrorToResponse(err: PostgrestError): NextResponse {
   if (err.code === "42501") {
     return NextResponse.json({ error: err.message }, { status: 403 });
@@ -42,10 +46,22 @@ function rpcErrorToResponse(err: PostgrestError): NextResponse {
   );
 }
 
-export async function PATCH(
+export async function PATCH(request: Request, context: RouteContext) {
+  return withCors(request, await changeRole(request, context));
+}
+
+export async function DELETE(request: Request, context: RouteContext) {
+  return withCors(request, await removeMember(context));
+}
+
+export function OPTIONS(request: Request) {
+  return corsPreflight(request);
+}
+
+async function changeRole(
   request: Request,
-  { params }: { params: Promise<{ userId: string }> },
-) {
+  { params }: RouteContext,
+): Promise<Response> {
   try {
     const ctx = await requireRole("admin");
 
@@ -69,18 +85,6 @@ export async function PATCH(
       );
     }
 
-    // The RPC blocks promotion to / demotion from owner, but
-    // surface the friendlier 400 before crossing the wire too.
-    if (role === "owner") {
-      return NextResponse.json(
-        {
-          error:
-            "Use POST /api/account/transfer-ownership to promote a member to owner",
-        },
-        { status: 400 },
-      );
-    }
-
     const { error } = await ctx.supabase.rpc("set_member_role", {
       p_user_id: userId,
       p_new_role: role,
@@ -94,10 +98,7 @@ export async function PATCH(
   }
 }
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ userId: string }> },
-) {
+async function removeMember({ params }: RouteContext): Promise<Response> {
   try {
     const ctx = await requireRole("admin");
 

@@ -38,7 +38,7 @@ import {
 } from '@/components/ui/select';
 import { useAuth } from '@/hooks/use-auth';
 
-type InviteRole = 'admin' | 'agent' | 'viewer';
+type InviteRole = 'owner' | 'admin' | 'agent' | 'viewer';
 
 interface InviteMemberDialogProps {
   open: boolean;
@@ -55,6 +55,8 @@ const EXPIRY_OPTIONS: { value: string; label: string }[] = [
 ];
 
 const ROLE_DESCRIPTIONS: Record<InviteRole, string> = {
+  owner:
+    'Full control of the account, including other owners and admins.',
   admin:
     'Can invite teammates, manage settings, send messages, and edit data.',
   agent:
@@ -74,6 +76,10 @@ interface CreatedInvite {
   /** Snapshotted at creation time so a later account rename can't
    *  retroactively change the wa.me message text on the result step. */
   accountName: string;
+  email: string | null;
+  emailSent: boolean;
+  emailKind: 'invite' | 'magic_link' | null;
+  emailError: string | null;
 }
 
 export function InviteMemberDialog({
@@ -81,10 +87,12 @@ export function InviteMemberDialog({
   onOpenChange,
   onCreated,
 }: InviteMemberDialogProps) {
-  const { account } = useAuth();
+  const { account, isOwner } = useAuth();
   const [role, setRole] = useState<InviteRole>('agent');
   const [expiry, setExpiry] = useState<string>('7');
   const [label, setLabel] = useState('');
+  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<CreatedInvite | null>(null);
 
@@ -92,6 +100,8 @@ export function InviteMemberDialog({
     setRole('agent');
     setExpiry('7');
     setLabel('');
+    setEmail('');
+    setFullName('');
     setResult(null);
     setSubmitting(false);
   }
@@ -115,6 +125,8 @@ export function InviteMemberDialog({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           role,
+          email: email.trim() || undefined,
+          full_name: fullName.trim() || undefined,
           expiresInDays: Number(expiry),
           label: trimmedLabel || undefined,
         }),
@@ -129,6 +141,9 @@ export function InviteMemberDialog({
       const data = (await res.json()) as {
         url: string;
         expiresInDays: number;
+        email_sent?: boolean;
+        email_kind?: 'invite' | 'magic_link' | null;
+        email_error?: string | null;
       };
 
       setResult({
@@ -141,6 +156,10 @@ export function InviteMemberDialog({
         // — the dialog requires admin+ which requires a loaded
         // profile — but stay safe).
         accountName: account?.name ?? 'our wacrm account',
+        email: email.trim() || null,
+        emailSent: data.email_sent === true,
+        emailKind: data.email_kind ?? null,
+        emailError: data.email_error ?? null,
       });
       onCreated();
     } catch (err) {
@@ -206,6 +225,23 @@ export function InviteMemberDialog({
             </DialogHeader>
 
             <div className="space-y-3 py-2">
+              {result.email && (
+                <div
+                  className={
+                    result.emailSent
+                      ? 'rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200'
+                      : 'rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200'
+                  }
+                >
+                  {result.emailSent
+                    ? result.emailKind === 'magic_link'
+                      ? 'This email already had a login, so we sent a sign-in link that opens the invitation.'
+                      : 'Invitation emailed. They will set a password and join from the email.'
+                    : 'The email could not be sent' +
+                      (result.emailError ? ' (' + result.emailError + ')' : '') +
+                      '. Share the link below instead.'}
+                </div>
+              )}
               <Label className="text-muted-foreground">Invite link</Label>
               <div className="flex gap-2">
                 <Input
@@ -272,12 +308,37 @@ export function InviteMemberDialog({
             <DialogHeader>
               <DialogTitle className="text-popover-foreground">Invite a teammate</DialogTitle>
               <DialogDescription className="text-muted-foreground">
-                Generate a one-time invite link. Share it via WhatsApp,
-                Slack, or any channel you like — no email service required.
+                Enter their email and we&apos;ll send the invitation. You
+                also get a one-time link to share via WhatsApp or any channel.
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">Email</Label>
+                <Input
+                  type="email"
+                  placeholder="name@company.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-muted-foreground">
+                  Name{' '}
+                  <span className="text-xs text-muted-foreground">(optional)</span>
+                </Label>
+                <Input
+                  placeholder="e.g. Carlos Merino"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  maxLength={80}
+                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+                />
+              </div>
+
               <div className="space-y-2">
                 <Label className="text-muted-foreground">Role</Label>
                 <Select
@@ -288,6 +349,7 @@ export function InviteMemberDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    {isOwner && <SelectItem value="owner">Owner</SelectItem>}
                     <SelectItem value="admin">Admin</SelectItem>
                     <SelectItem value="agent">Agent</SelectItem>
                     <SelectItem value="viewer">Viewer</SelectItem>
@@ -355,7 +417,7 @@ export function InviteMemberDialog({
                     Creating...
                   </>
                 ) : (
-                  'Generate link'
+                  email.trim() ? 'Send invitation' : 'Generate link'
                 )}
               </Button>
             </DialogFooter>

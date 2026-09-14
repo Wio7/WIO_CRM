@@ -8,14 +8,18 @@
 // Field visibility
 //   Sensitive fields (email) are returned only when the caller is
 //   admin+. Agents and viewers see name + avatar + role + joined
-//   date only. This mirrors the design decision from the planning
-//   phase: "agent/viewer sees names only".
+//   date only.
+//
+// `is_primary_owner` marks accounts.owner_user_id — with several
+// owners allowed (migration 040), that one can't be edited or removed.
+// CORS-wrapped for the Golden App's Team screen (Bearer token).
 // ============================================================
 
 import { NextResponse } from "next/server";
 
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { canManageMembers, isAccountRole } from "@/lib/auth/roles";
+import { corsPreflight, withCors } from "@/lib/cors";
 import type { AccountMember } from "@/types";
 
 interface ProfileRow {
@@ -27,17 +31,32 @@ interface ProfileRow {
   created_at: string;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  return withCors(request, await listMembers());
+}
+
+export function OPTIONS(request: Request) {
+  return corsPreflight(request);
+}
+
+async function listMembers(): Promise<Response> {
   try {
     const ctx = await getCurrentAccount();
 
     // RLS on profiles allows reading any row whose account matches
     // the caller's, so this query is naturally account-scoped.
-    const { data, error } = await ctx.supabase
-      .from("profiles")
-      .select("user_id, full_name, email, avatar_url, account_role, created_at")
-      .eq("account_id", ctx.accountId)
-      .order("created_at", { ascending: true });
+    const [{ data, error }, { data: account }] = await Promise.all([
+      ctx.supabase
+        .from("profiles")
+        .select("user_id, full_name, email, avatar_url, account_role, created_at")
+        .eq("account_id", ctx.accountId)
+        .order("created_at", { ascending: true }),
+      ctx.supabase
+        .from("accounts")
+        .select("owner_user_id")
+        .eq("id", ctx.accountId)
+        .maybeSingle(),
+    ]);
 
     if (error) {
       console.error("[GET /api/account/members] fetch error:", error);
@@ -48,6 +67,7 @@ export async function GET() {
     }
 
     const canSeeEmails = canManageMembers(ctx.role);
+    const primaryOwner = (account?.owner_user_id as string | undefined) ?? null;
 
     const members: AccountMember[] = (data as ProfileRow[]).flatMap((row) => {
       // Defensive: the DB enum should never let an unknown role
@@ -62,11 +82,16 @@ export async function GET() {
           avatar_url: row.avatar_url,
           role: row.account_role,
           joined_at: row.created_at,
+          is_primary_owner: row.user_id === primaryOwner,
         },
       ];
     });
 
-    return NextResponse.json({ members });
+    return NextResponse.json({
+      members,
+      my_role: ctx.role,
+      my_user_id: ctx.userId,
+    });
   } catch (err) {
     return toErrorResponse(err);
   }

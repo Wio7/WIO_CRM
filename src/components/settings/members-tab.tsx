@@ -82,19 +82,22 @@ interface Member {
   avatar_url: string | null;
   role: AccountRole;
   joined_at: string;
+  is_primary_owner?: boolean;
 }
 
 interface Invitation {
   id: string;
-  role: 'admin' | 'agent' | 'viewer';
+  role: AccountRole;
+  email?: string | null;
   label: string | null;
   created_at: string;
   expires_at: string;
 }
 
-// Editable roles in the inline dropdown. Owner is never an option —
-// promotions go through the (deferred) Transfer Ownership flow.
+// Editable roles in the inline dropdown. 'owner' is only offered to
+// owners (migration 040 enforces it server-side as well).
 const EDITABLE_ROLES: { value: AccountRole; label: string; hint: string }[] = [
+  { value: 'owner', label: 'Owner', hint: 'Full control, including other owners' },
   { value: 'admin', label: 'Admin', hint: 'Manage members + everything' },
   { value: 'agent', label: 'Agent', hint: 'Use features; no settings' },
   { value: 'viewer', label: 'Viewer', hint: 'Read-only across the app' },
@@ -125,7 +128,7 @@ function fmtExpiresIn(iso: string): string {
 }
 
 export function MembersTab() {
-  const { user, canManageMembers } = useAuth();
+  const { user, canManageMembers, isOwner } = useAuth();
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -327,7 +330,11 @@ export function MembersTab() {
               const roleMeta = ROLE_META[member.role];
               const RoleIcon = roleMeta.icon;
               const isSelf = member.user_id === user?.id;
-              const isOwnerRow = member.role === 'owner';
+              // Locked rows: the primary owner (accounts.owner_user_id)
+              // always, and any owner unless the caller is an owner too.
+              const isOwnerRow =
+                member.is_primary_owner === true ||
+                (member.role === 'owner' && !isOwner);
               const isBusy = pendingMemberAction === member.user_id;
               const presence = getPresence(member.user_id);
               const presenceRow = getRow(member.user_id);
@@ -429,7 +436,9 @@ export function MembersTab() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {EDITABLE_ROLES.map((r) => (
+                          {EDITABLE_ROLES.filter(
+                            (r) => r.value !== 'owner' || isOwner,
+                          ).map((r) => (
                             <SelectItem key={r.value} value={r.value}>
                               {r.label}
                             </SelectItem>

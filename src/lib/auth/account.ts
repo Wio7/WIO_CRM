@@ -28,7 +28,7 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { createClient } from "@/lib/supabase/server";
+import { getIncomingRequestAuth } from "@/lib/supabase/request-auth";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
 
 // ------------------------------------------------------------
@@ -104,13 +104,10 @@ export interface AccountContext {
  * minimum-role check — it's a thin wrapper over this.
  */
 export async function getCurrentAccount(): Promise<AccountContext> {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-  if (userErr || !user) {
+  // Cookie session (dashboard) or a Bearer access token (the Golden App,
+  // cross-origin). Either way the client runs under the caller's RLS.
+  const { supabase, user } = await getIncomingRequestAuth();
+  if (!user) {
     throw new UnauthorizedError();
   }
 

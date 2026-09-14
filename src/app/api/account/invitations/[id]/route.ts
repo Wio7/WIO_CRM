@@ -11,21 +11,31 @@
 // dead forever — there's no UX where a former invite should be
 // listed; the plaintext token is gone too. Hard delete keeps
 // the table small.
+//
+// CORS-wrapped for the Golden App's Team screen (Bearer token).
 // ============================================================
 
 import { NextResponse } from "next/server";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { corsPreflight, withCors } from "@/lib/cors";
 import {
   checkRateLimit,
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
 
-export async function DELETE(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> },
-) {
+type RouteContext = { params: Promise<{ id: string }> };
+
+export async function DELETE(request: Request, context: RouteContext) {
+  return withCors(request, await revokeInvitation(context));
+}
+
+export function OPTIONS(request: Request) {
+  return corsPreflight(request);
+}
+
+async function revokeInvitation({ params }: RouteContext): Promise<Response> {
   try {
     const ctx = await requireRole("admin");
 
@@ -39,10 +49,9 @@ export async function DELETE(
 
     // No `eq('account_id', ctx.accountId)` — the RLS policy
     // (`is_account_member(account_id, 'admin')`) already scopes
-    // the DELETE to invites in the caller's account. Adding the
-    // filter would be redundant; omitting it surfaces a
-    // cross-account attempt as a silent 0-row delete (which is
-    // exactly what we want for a revocation endpoint).
+    // the DELETE to invites in the caller's account. Omitting the
+    // filter surfaces a cross-account attempt as a silent 0-row
+    // delete (which is exactly what we want for revocation).
     const { error, count } = await ctx.supabase
       .from("account_invitations")
       .delete({ count: "exact" })
