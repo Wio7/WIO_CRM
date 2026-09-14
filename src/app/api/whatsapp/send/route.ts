@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { getRequestAuth } from '@/lib/supabase/request-auth'
+import { corsPreflight, withCors } from '@/lib/cors'
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -20,16 +22,23 @@ import {
 // endpoint reuses. This route is a thin adapter: resolve the
 // conversation, delegate, then map `SendMessageError` back onto the
 // dashboard's internal `{ error }` shape.
+//
+// Besides the dashboard's cookie session it accepts the advisor's Supabase
+// access token as a Bearer header, with CORS for allow-listed origins, so
+// the Golden App can reply from its own inbox (see src/lib/cors.ts).
 export async function POST(request: Request) {
+  return withCors(request, await handlePost(request))
+}
+
+export function OPTIONS(request: Request) {
+  return corsPreflight(request)
+}
+
+async function handlePost(request: Request): Promise<Response> {
   try {
-    const supabase = await createClient()
+    const { supabase, user } = await getRequestAuth(request)
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
@@ -206,7 +215,7 @@ export async function POST(request: Request) {
   }
 }
 
-type SendSupabase = Awaited<ReturnType<typeof createClient>>
+type SendSupabase = SupabaseClient
 
 /**
  * Return the contact's conversation id in this account, creating one if

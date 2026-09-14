@@ -1,12 +1,26 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getRequestAuth } from '@/lib/supabase/request-auth'
+import { corsPreflight, withCors } from '@/lib/cors'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
-export async function GET(
+type MediaRouteContext = { params: Promise<{ mediaId: string }> }
+
+// Authenticated by the dashboard's cookie session, or by the advisor's
+// Supabase access token (Bearer) + CORS for the Golden App — see
+// src/lib/cors.ts.
+export async function GET(request: Request, context: MediaRouteContext) {
+  return withCors(request, await handleGet(request, context))
+}
+
+export function OPTIONS(request: Request) {
+  return corsPreflight(request)
+}
+
+async function handleGet(
   request: Request,
-  { params }: { params: Promise<{ mediaId: string }> }
-) {
+  { params }: MediaRouteContext
+): Promise<Response> {
   try {
     const { mediaId } = await params
 
@@ -17,14 +31,9 @@ export async function GET(
       )
     }
 
-    const supabase = await createClient()
+    const { supabase, user } = await getRequestAuth(request)
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }

@@ -77,8 +77,17 @@ export async function middleware(request: NextRequest) {
     return withRefreshedCookies(NextResponse.redirect(url))
   }
 
+  // The Golden App calls send/media from another origin with a Bearer
+  // access token instead of cookies (and its CORS preflight carries no
+  // credentials at all). Those two routes verify the token themselves.
+  const bearerRoutes = ['/api/whatsapp/send', '/api/whatsapp/media/']
+  const viaBearer =
+    (request.method === 'OPTIONS' ||
+      request.headers.get('authorization')?.startsWith('Bearer ')) &&
+    bearerRoutes.some((path) => request.nextUrl.pathname.startsWith(path))
+
   // API routes that need auth (not webhooks)
-  if (!user && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
+  if (!user && !viaBearer && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
       !request.nextUrl.pathname.includes('/webhook')) {
     return withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
