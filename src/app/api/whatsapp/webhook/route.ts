@@ -9,6 +9,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { dispatchInboundToAiReply } from '@/lib/ai/auto-reply'
 import { dispatchWebhookEvent } from '@/lib/webhooks/deliver'
+import { notifyConversation } from '@/lib/push/send'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -754,6 +755,28 @@ async function processMessage(
 
   if (convError) {
     console.error('Error updating conversation:', convError)
+  }
+
+  // Wake the responsible advisor's phone (Golden App push, migration 039).
+  // Awaited so the send isn't cut off when after() completes; a push
+  // problem must never break inbound processing.
+  try {
+    const mediaLabels: Record<string, string> = {
+      image: '📷 Foto',
+      video: '🎥 Video',
+      audio: '🎤 Audio',
+      document: '📄 Documento',
+      location: '📍 Ubicación',
+    }
+    await notifyConversation(supabaseAdmin(), {
+      accountId,
+      conversationId: conversation.id,
+      assignedAgentId: conversation.assigned_agent_id ?? null,
+      title: contactRecord.name || contactRecord.phone || 'Nuevo mensaje',
+      body: contentText || mediaLabels[contentType] || 'Nuevo mensaje',
+    })
+  } catch (err) {
+    console.error('[webhook] push notify failed:', err)
   }
 
   // If this contact was a recent broadcast recipient, flag the reply
