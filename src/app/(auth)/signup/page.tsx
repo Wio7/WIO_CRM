@@ -60,27 +60,39 @@ function SignupPageInner() {
 
     setLoading(true);
 
-    // If we have an invite token, point Supabase's verification
-    // email back at the join page so the user can accept after
-    // verifying. Without a token, Supabase uses its default
-    // redirect (the app root).
-    const emailRedirectTo = inviteToken
-      ? `${window.location.origin}/join/${encodeURIComponent(inviteToken)}`
-      : undefined;
+    // The verification link comes back with a one-time code (PKCE).
+    // /auth/callback trades it for a session and then continues to the
+    // invitation, or to the dashboard when there is none.
+    const next = inviteToken
+      ? `/join/${encodeURIComponent(inviteToken)}`
+      : "/dashboard";
+    const emailRedirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           full_name: fullName,
         },
-        ...(emailRedirectTo ? { emailRedirectTo } : {}),
+        emailRedirectTo,
       },
     });
 
     if (error) {
       setError(error.message);
+      setLoading(false);
+      return;
+    }
+
+    // Supabase doesn't reveal that an address is taken: it answers as if
+    // it had created the account, sends nothing and ignores the password.
+    // That is exactly what happens to someone invited by email who then
+    // tries to sign up, so tell them what to do instead.
+    if (data.user && data.user.identities?.length === 0) {
+      setError(
+        "Ese correo ya tiene cuenta. Inicia sesión, o usa «¿Olvidaste tu contraseña?» si todavía no creaste una (por ejemplo, si te invitaron por correo).",
+      );
       setLoading(false);
       return;
     }

@@ -4,7 +4,7 @@
   Asunto: Invitación a formar parte del equipo de Golden Habitat
 
   Variables de Supabase:
-    {{ .ConfirmationURL }}  enlace que crea la sesión y abre /join/<token>
+    {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=invite&amp;next={{ .RedirectTo }}  enlace que crea la sesión y abre /join/<token>
     {{ .Data.full_name }}   nombre escrito al invitar (opcional)
 -->
 <!DOCTYPE html>
@@ -82,7 +82,7 @@
               <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 24px;">
                 <tr>
                   <td align="center" bgcolor="#c8102e" style="border-radius:10px;">
-                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block; padding:15px 34px; font-family:Arial,Helvetica,sans-serif; font-size:16px; font-weight:bold; color:#ffffff; text-decoration:none; border-radius:10px;">
+                    <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=invite&amp;next={{ .RedirectTo }}" target="_blank" style="display:inline-block; padding:15px 34px; font-family:Arial,Helvetica,sans-serif; font-size:16px; font-weight:bold; color:#ffffff; text-decoration:none; border-radius:10px;">
                       Aceptar invitación
                     </a>
                   </td>
@@ -93,7 +93,7 @@
                 Si el botón no funciona, copie y pegue este enlace en su navegador:
               </p>
               <p style="margin:0 0 22px; font-size:12px; line-height:1.5; word-break:break-all;">
-                <a href="{{ .ConfirmationURL }}" target="_blank" style="color:#8f1726;">{{ .ConfirmationURL }}</a>
+                <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=invite&amp;next={{ .RedirectTo }}" target="_blank" style="color:#8f1726;">{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=invite&amp;next={{ .RedirectTo }}</a>
               </p>
 
               <p style="margin:0 0 24px; padding:12px 14px; font-size:13px; line-height:1.6; color:#52525b; background-color:#faf7f2; border-left:3px solid #e2a94e; border-radius:6px;">

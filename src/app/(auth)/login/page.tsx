@@ -21,6 +21,25 @@ import { MessageSquare, UsersRound } from "lucide-react";
 // a child component so the outer page can prerender the chrome
 // (background, card frame) while the form hydrates with the query
 // string on the client.
+// Supabase answers in English, and "Invalid login credentials" also
+// covers an account that exists without a password (invited by email).
+function mensajeDeError(mensaje: string): string {
+  if (/invalid login credentials/i.test(mensaje)) {
+    return "Correo o contraseña incorrectos. Si te invitaron por correo y aún no creaste tu contraseña, usa «¿Olvidaste tu contraseña?».";
+  }
+  if (/email not confirmed/i.test(mensaje)) {
+    return "Aún no confirmaste tu correo. Abre el enlace que te enviamos y vuelve a intentarlo.";
+  }
+  return mensaje;
+}
+
+// Set by /auth/callback when an email link couldn't open the session here.
+const AVISOS: Record<string, string> = {
+  confirmado: "Tu correo quedó confirmado. Inicia sesión para continuar.",
+  enlace: "Ese enlace ya se usó o venció. Inicia sesión o pide uno nuevo.",
+  reset: "Abre el enlace en el mismo navegador donde pediste cambiar la contraseña, o pide uno nuevo.",
+};
+
 export default function LoginPage() {
   return (
     <Suspense fallback={null}>
@@ -54,7 +73,7 @@ function LoginPageInner() {
     });
 
     if (error) {
-      setError(error.message);
+      setError(mensajeDeError(error.message));
       setLoading(false);
       return;
     }
@@ -84,6 +103,11 @@ function LoginPageInner() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
+            {!error && AVISOS[searchParams.get("aviso") ?? ""] && (
+              <div className="rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-foreground">
+                {AVISOS[searchParams.get("aviso") ?? ""]}
+              </div>
+            )}
             {error && (
               <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
                 {error}

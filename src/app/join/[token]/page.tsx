@@ -12,14 +12,14 @@
 //   ├──────────────────────┼───────────────┼─────────────────────────┤
 //   │ loading              │ —             │ spinner                  │
 //   │ ok:false (any reason)│ —             │ friendly error + signup  │
-//   │ ok:true              │ signed out    │ "Sign up" + "Sign in"    │
+//   │ ok:true              │ signed out    │ "Sign in" + "Sign up"    │
 //   │ ok:true              │ signed in     │ "Accept" button → redeem │
 //   └──────────────────────┴───────────────┴─────────────────────────┘
 //
 // We deliberately do NOT redeem automatically on page load — the
 // invitee should confirm what account/role they're accepting.
-// Auto-redeem would also race with the signup flow returning to
-// this page after email verification.
+//
+// Copy is in Spanish: the people invited here are Golden Habitat's team.
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
@@ -71,56 +71,80 @@ interface PeekFail {
 type PeekResult = PeekOk | PeekFail;
 
 const ROLE_LABEL: Record<PeekOk['role'], string> = {
-  owner: 'Owner',
-  admin: 'Admin',
-  agent: 'Agent',
-  viewer: 'Viewer',
+  owner: 'Dueño',
+  admin: 'Administrador',
+  agent: 'Asesor inmobiliario',
+  viewer: 'Solo lectura',
 };
 
 const FAIL_COPY: Record<PeekFail['reason'], { title: string; body: string }> = {
   not_found: {
-    title: 'Invite not found',
-    body: 'This link doesn’t match a valid invitation. Double-check the URL or ask the person who invited you to send a new one.',
+    title: 'Invitación no encontrada',
+    body: 'Este enlace no corresponde a ninguna invitación. Revisa que esté completo o pide a quien te invitó que te envíe uno nuevo.',
   },
   used: {
-    title: 'Invite already used',
-    body: 'This invitation has already been accepted. If that wasn’t you, ask the account admin to send a fresh link.',
+    title: 'Invitación ya aceptada',
+    body: 'Esta invitación ya se usó. Si ya la aceptaste, inicia sesión. Si no fuiste tú, pide una nueva.',
   },
   expired: {
-    title: 'Invite expired',
-    body: 'This invitation has expired. Ask the account admin to send a new one — they take a few seconds to generate.',
+    title: 'Invitación vencida',
+    body: 'Esta invitación ya venció. Pide a quien te invitó que te envíe una nueva.',
   },
   server_error: {
-    title: 'Something went wrong',
-    body: 'We couldn’t verify this invitation right now. Try refreshing the page in a moment.',
+    title: 'Algo salió mal',
+    body: 'No pudimos verificar la invitación en este momento. Inténtalo de nuevo en unos segundos.',
   },
 };
 
+type LinkResult = 'invite' | 'magiclink' | 'error' | null;
+
 /**
- * Invitation emails (Supabase invite / magic link, see
- * src/lib/auth/invite-email.ts) land here with the session in the URL
- * hash: #access_token=…&refresh_token=…&type=invite|magiclink.
- * Store it before probing auth, and drop the tokens from the address bar.
+ * Email links can land here three ways:
+ *   · #access_token=…&type=invite|magiclink — invitation emails sent
+ *     before the /auth/confirm templates.
+ *   · ?code=… — a signup confirmation sent before /auth/callback existed.
+ *   · #error_description=… — Supabase rejected the link (already used,
+ *     or opened by a mail scanner first).
+ * Store the session before probing auth and clean the address bar.
  */
-async function absorbSessionFromUrl(): Promise<'invite' | 'magiclink' | null> {
-  if (typeof window === 'undefined' || !window.location.hash.includes('access_token')) {
+async function absorbSessionFromUrl(): Promise<LinkResult> {
+  if (typeof window === 'undefined') return null;
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  const query = new URLSearchParams(window.location.search);
+  const code = query.get('code');
+
+  if (!hash.has('access_token') && !hash.has('error_description') && !code) {
     return null;
   }
-  const params = new URLSearchParams(window.location.hash.slice(1));
-  const accessToken = params.get('access_token');
-  const refreshToken = params.get('refresh_token');
-  const type = params.get('type');
-  window.history.replaceState(null, '', window.location.pathname + window.location.search);
+
+  query.delete('code');
+  const rest = query.toString();
+  window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
+
+  if (hash.has('error_description')) return 'error';
+
+  const supabase = createClient();
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) {
+      console.error('[join] could not exchange the code from the email link:', error);
+      return 'error';
+    }
+    return 'magiclink';
+  }
+
+  const accessToken = hash.get('access_token');
+  const refreshToken = hash.get('refresh_token');
   if (!accessToken || !refreshToken) return null;
-  const { error } = await createClient().auth.setSession({
+  const { error } = await supabase.auth.setSession({
     access_token: accessToken,
     refresh_token: refreshToken,
   });
   if (error) {
     console.error('[join] could not store the session from the email link:', error);
-    return null;
+    return 'error';
   }
-  return type === 'invite' ? 'invite' : 'magiclink';
+  return hash.get('type') === 'invite' ? 'invite' : 'magiclink';
 }
 
 export default function JoinPage() {
@@ -129,16 +153,13 @@ export default function JoinPage() {
 
   const [peek, setPeek] = useState<PeekResult | null>(null);
   // Local auth probe — the AuthProvider lives inside the (dashboard)
-  // route group, so it doesn't reach this page. We hit Supabase
-  // directly the same way `/login` and `/signup` do.
+  // route group, so it doesn't reach this page.
   const [authedUserId, setAuthedUserId] = useState<string | null | undefined>(
     undefined, // undefined = unknown / still loading; null = signed out
   );
   const [accepting, setAccepting] = useState(false);
   // `redeem_invitation` returns 409 when the caller's current account
   // has domain data, or they're already a member of a shared account.
-  // A transient toast wasn't enough — the user has no actionable next
-  // step. Surface a blocking modal that walks them through it.
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   // Invited by email: the account exists but has no password yet.
@@ -146,9 +167,8 @@ export default function JoinPage() {
   const [password, setPassword] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const [linkFailed, setLinkFailed] = useState(false);
 
-  // Extracted so the "Try again" button on the server_error card
-  // can re-run the same logic without remounting the component.
   const loadPeekAndAuth = useCallback(async () => {
     if (!token) return;
     setPeek(null);
@@ -170,17 +190,23 @@ export default function JoinPage() {
     }
   }, [token]);
 
-  // Fetch peek + auth state on mount. The peek endpoint is
-  // rate-limited per-IP (30/min) so double-mounting in React 19
-  // strict mode dev is harmless. We also use the `cancelled` flag
-  // to drop setState calls if the component unmounts mid-fetch.
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
     (async () => {
+      // /auth/confirm adds ?clave=1 after verifying an invitation.
+      const query = new URLSearchParams(window.location.search);
+      const fromConfirm = query.get('clave') === '1';
+      if (fromConfirm) {
+        query.delete('clave');
+        const rest = query.toString();
+        window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
+      }
       try {
         const linkType = await absorbSessionFromUrl();
-        if (!cancelled && linkType === 'invite') setNeedsPassword(true);
+        if (cancelled) return;
+        if (linkType === 'invite' || fromConfirm) setNeedsPassword(true);
+        if (linkType === 'error') setLinkFailed(true);
         const [peekRes, authRes] = await Promise.all([
           fetch(`/api/invitations/${encodeURIComponent(token)}/peek`, {
             cache: 'no-store',
@@ -215,67 +241,61 @@ export default function JoinPage() {
         const payload = (await res.json().catch(() => ({}))) as {
           error?: string;
         };
-        // 409 = caller already has data / is in another shared
-        // account. The redeem RPC's error message is descriptive
-        // enough to show directly; we open a modal so the user has
-        // a clear next-action (sign out → use different email)
-        // rather than a 3-second toast.
         if (res.status === 409) {
           setConflictMessage(
             payload.error ||
-              'You are already in another account. Sign in with a different email to join this one.',
+              'Ya perteneces a otra cuenta. Inicia sesión con otro correo para unirte a esta.',
           );
         } else {
-          toast.error(payload.error || 'Failed to accept invitation');
+          toast.error(payload.error || 'No se pudo aceptar la invitación');
         }
         setAccepting(false);
         return;
       }
-      toast.success('Welcome to the team');
+      toast.success('¡Bienvenido al equipo!');
       if (GOLDEN_APP_URL) {
         // Advisors work from the Golden App on their phone: offer it first.
         setAccepted(true);
         setAccepting(false);
         return;
       }
-      // Full reload (not router.push) so AuthProvider re-fetches
-      // the profile with the new account_id and account_role.
+      // Full reload so AuthProvider re-fetches the profile with the new
+      // account_id and account_role.
       window.location.href = '/dashboard';
     } catch (err) {
       console.error('[join] redeem error:', err);
-      toast.error('Could not reach the server');
+      toast.error('No se pudo conectar con el servidor');
       setAccepting(false);
     }
   }, [token]);
 
   const handleSavePassword = useCallback(async () => {
     if (password.length < 8) {
-      toast.error('Use at least 8 characters');
+      toast.error('Usa al menos 8 caracteres');
       return;
     }
     setSavingPassword(true);
     const { error } = await createClient().auth.updateUser({ password });
     setSavingPassword(false);
     if (error) {
-      toast.error(error.message || 'Could not save your password');
+      toast.error(error.message || 'No se pudo guardar la contraseña');
       return;
     }
     setNeedsPassword(false);
     setPassword('');
-    toast.success('Password saved');
+    toast.success('Contraseña guardada');
   }, [password]);
 
   const handleSignOutAndRetry = useCallback(async () => {
     setSigningOut(true);
     try {
       await createClient().auth.signOut();
-      // Hard reload so the new auth state propagates everywhere
-      // (middleware, AuthProvider). Preserves the invite token in
-      // the URL so the rebuilt page renders the signed-out CTA path.
+      // Hard reload keeps the invite token in the URL so the rebuilt page
+      // renders the signed-out path.
       window.location.reload();
     } catch (err) {
       console.error('[join] sign-out error:', err);
-      toast.error('Could not sign out. Try refreshing the page.');
+      toast.error('No se pudo cerrar la sesión. Recarga la página.');
       setSigningOut(false);
     }
   }, []);
@@ -286,7 +306,7 @@ export default function JoinPage() {
       <Card className="w-full max-w-md border-border bg-card">
         <CardContent className="flex flex-col items-center gap-3 py-12">
           <Loader2 className="size-6 animate-spin text-primary" />
-          <p className="text-sm text-muted-foreground">Verifying invitation…</p>
+          <p className="text-sm text-muted-foreground">Verificando la invitación…</p>
         </CardContent>
       </Card>
     );
@@ -307,46 +327,19 @@ export default function JoinPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
-          {/* For server_error the failure is transient — the network
-              flapped or the peek endpoint hiccupped. Try-again is
-              the right primary action; the "create account" /
-              "sign in" links stay as secondary options. Other
-              failure reasons (not_found / used / expired) are
-              terminal for this token, so no retry — just the
-              signup/sign-in escape hatches. */}
           {peek.reason === 'server_error' ? (
-            <>
-              <Button
-                onClick={loadPeekAndAuth}
-                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                Try again
-              </Button>
-              <Link href="/signup">
-                <Button
-                  variant="outline"
-                  className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  Create a new account instead
-                </Button>
-              </Link>
-            </>
+            <Button
+              onClick={loadPeekAndAuth}
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              Intentar de nuevo
+            </Button>
           ) : (
-            <>
-              <Link href="/signup">
-                <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-                  Create a new account instead
-                </Button>
-              </Link>
-              <Link href="/login">
-                <Button
-                  variant="outline"
-                  className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  Sign in
-                </Button>
-              </Link>
-            </>
+            <Link href="/login">
+              <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
+                Iniciar sesión
+              </Button>
+            </Link>
           )}
         </CardContent>
       </Card>
@@ -360,17 +353,17 @@ export default function JoinPage() {
         <UsersRound className="h-6 w-6 text-primary" />
       </div>
       <CardTitle className="text-xl text-foreground">
-        You&apos;re invited to{' '}
+        Te invitaron a{' '}
         <span className="text-primary">{peek.account_name}</span>
       </CardTitle>
       <CardDescription className="text-muted-foreground">
-        You&apos;ll join as{' '}
+        Entrarás como{' '}
         <span className="inline-flex items-center gap-1 text-foreground">
           <ShieldCheck className="size-3.5 text-primary" />
           {ROLE_LABEL[peek.role]}
         </span>
-        . Link valid until{' '}
-        {new Date(peek.expires_at).toLocaleDateString(undefined, {
+        . Enlace válido hasta el{' '}
+        {new Date(peek.expires_at).toLocaleDateString('es-PE', {
           year: 'numeric',
           month: 'short',
           day: 'numeric',
@@ -389,18 +382,18 @@ export default function JoinPage() {
             <CheckCircle className="h-6 w-6 text-emerald-400" />
           </div>
           <CardTitle className="text-xl text-foreground">
-            You&apos;re in{' '}
+            Ya eres parte de{' '}
             <span className="text-primary">{peek.account_name}</span>
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            Open the Golden App and sign in with this same email and
-            password. Your chats and your team are already there.
+            Abre la Golden App e inicia sesión con este mismo correo y tu
+            contraseña. Tus chats y tu equipo ya están ahí.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
           <a href={GOLDEN_APP_URL}>
             <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-              Open Golden App
+              Abrir la Golden App
             </Button>
           </a>
           <a href="/dashboard">
@@ -408,7 +401,7 @@ export default function JoinPage() {
               variant="outline"
               className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
             >
-              Go to the CRM
+              Ir al CRM
             </Button>
           </a>
         </CardContent>
@@ -425,13 +418,13 @@ export default function JoinPage() {
           {needsPassword ? (
             <CardContent className="flex flex-col gap-3">
               <p className="text-sm text-muted-foreground">
-                First, create the password you&apos;ll use to sign in here
-                and in the Golden App.
+                Primero crea la contraseña con la que entrarás aquí y en la
+                Golden App.
               </p>
               <Input
                 type="password"
                 autoComplete="new-password"
-                placeholder="New password (8+ characters)"
+                placeholder="Nueva contraseña (mínimo 8 caracteres)"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="bg-muted border-border text-foreground"
@@ -444,45 +437,41 @@ export default function JoinPage() {
                 {savingPassword ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
-                    Saving…
+                    Guardando…
                   </>
                 ) : (
-                  'Save password'
+                  'Guardar contraseña'
                 )}
               </Button>
             </CardContent>
           ) : (
-          <CardContent className="flex flex-col gap-3">
-            <Button
-              onClick={handleAccept}
-              disabled={accepting}
-              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-            >
-              {accepting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Accepting…
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="size-4" />
-                  Accept invitation
-                </>
-              )}
-            </Button>
-            <p className="text-center text-xs text-muted-foreground">
-              Accepting moves your login into{' '}
-              <span className="text-muted-foreground">{peek.account_name}</span>. Your
-              empty personal account from signup will be cleaned up.
-            </p>
-          </CardContent>
+            <CardContent className="flex flex-col gap-3">
+              <Button
+                onClick={handleAccept}
+                disabled={accepting}
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {accepting ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Aceptando…
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="size-4" />
+                    Aceptar invitación
+                  </>
+                )}
+              </Button>
+              <p className="text-center text-xs text-muted-foreground">
+                Al aceptar, tu usuario pasa a{' '}
+                <span className="text-muted-foreground">{peek.account_name}</span>.
+              </p>
+            </CardContent>
           )}
         </Card>
 
-        {/* Conflict modal — opens when the redeem endpoint returns 409
-            (caller already in a shared account or has domain data).
-            Blocks the flow until the user picks a recovery action so
-            they aren't stuck retrying an inevitable failure. */}
+        {/* Conflict modal — opens when the redeem endpoint returns 409. */}
         <Dialog
           open={conflictMessage !== null}
           onOpenChange={(open) => {
@@ -493,7 +482,7 @@ export default function JoinPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-popover-foreground">
                 <AlertTriangle className="size-4 text-amber-400" />
-                Can&apos;t join {peek.account_name} with this account
+                No puedes unirte a {peek.account_name} con este usuario
               </DialogTitle>
               <DialogDescription className="text-muted-foreground">
                 {conflictMessage}
@@ -501,11 +490,10 @@ export default function JoinPage() {
             </DialogHeader>
             <div className="space-y-2 py-2 text-xs text-muted-foreground">
               <p>
-                To join{' '}
+                Para unirte a{' '}
                 <span className="text-popover-foreground">{peek.account_name}</span>,
-                sign out and sign up again with a different email address.
-                The invite link stays valid as long as it hasn&apos;t
-                expired.
+                cierra la sesión y entra con otro correo. El enlace sigue
+                sirviendo mientras no venza.
               </p>
             </div>
             <DialogFooter className="bg-popover border-border">
@@ -514,7 +502,7 @@ export default function JoinPage() {
                 onClick={() => setConflictMessage(null)}
                 className="border-border text-popover-foreground hover:bg-muted"
               >
-                Stay signed in
+                Seguir con esta sesión
               </Button>
               <Button
                 onClick={handleSignOutAndRetry}
@@ -524,10 +512,10 @@ export default function JoinPage() {
                 {signingOut ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
-                    Signing out…
+                    Cerrando sesión…
                   </>
                 ) : (
-                  'Sign out & use a different email'
+                  'Cerrar sesión y usar otro correo'
                 )}
               </Button>
             </DialogFooter>
@@ -537,24 +525,40 @@ export default function JoinPage() {
     );
   }
 
-  // ----- Not authed: prompt to sign up or sign in -----
+  // ----- Not authed: sign in first; creating an account is the fallback -----
   return (
     <Card className="w-full max-w-md border-border bg-card">
       {inviteHeader}
-      <CardContent className="flex flex-col gap-2">
-        <Link href={`/signup?invite=${encodeURIComponent(token!)}`}>
+      <CardContent className="flex flex-col gap-3">
+        {linkFailed && (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-foreground">
+            El enlace del correo ya se usó o venció. Inicia sesión, o usa
+            «Crear o recuperar mi contraseña» si todavía no tienes una.
+          </p>
+        )}
+        <Link href={`/login?invite=${encodeURIComponent(token!)}`}>
           <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-            Create account &amp; join
+            Ya tengo cuenta: iniciar sesión
           </Button>
         </Link>
-        <Link href={`/login?invite=${encodeURIComponent(token!)}`}>
+        <Link href={`/signup?invite=${encodeURIComponent(token!)}`}>
           <Button
             variant="outline"
             className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            I already have an account
+            Soy nuevo: crear cuenta y unirme
           </Button>
         </Link>
+        <Link
+          href="/forgot-password"
+          className="text-center text-sm text-primary hover:text-primary/80"
+        >
+          Crear o recuperar mi contraseña
+        </Link>
+        <p className="text-center text-xs text-muted-foreground">
+          ¿Te invitaron por correo? Ya tienes usuario con ese correo: no crees
+          otra cuenta, usa el botón del correo o crea tu contraseña aquí arriba.
+        </p>
       </CardContent>
     </Card>
   );
