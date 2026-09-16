@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { uploadAccountMedia, MEDIA_MAX_BYTES_BY_KIND } from "@/lib/storage/upload-media";
+import { uploadAccountDoc, MEDIA_MAX_BYTES_BY_KIND } from "@/lib/storage/upload-media";
 import type { PaymentType } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,8 +43,10 @@ export function PaymentUpload({
     }
     setUploading(true);
     try {
-      const { publicUrl } = await uploadAccountMedia("reservation-docs", file);
-      setVoucherUrl(publicUrl);
+      // Private bucket (migration 042): we keep the object path, not a
+      // public URL, and the viewer signs it when someone opens it.
+      const { path } = await uploadAccountDoc("client-docs", file);
+      setVoucherUrl(path);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "No se pudo subir el comprobante");
     } finally {

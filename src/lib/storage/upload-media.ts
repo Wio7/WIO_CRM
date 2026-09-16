@@ -118,6 +118,73 @@ export async function uploadAccountMedia(
 }
 
 /**
+ * Upload a file to a PRIVATE account-scoped bucket (`client-docs`:
+ * vouchers, Anexos, Minutas — migration 042) and return only its object
+ * path. There is no public URL to return: reads go through
+ * `signedDocUrl` below, so a payment slip or a signed contract is never
+ * reachable by URL alone the way it was in the public bucket.
+ */
+export async function uploadAccountDoc(
+  bucket: string,
+  file: File,
+): Promise<{ path: string }> {
+  const supabase = createClient();
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr || !user) {
+    throw new Error("Not signed in.");
+  }
+
+  const { data: profile, error: profileErr } = await supabase
+    .from("profiles")
+    .select("account_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (profileErr || !profile?.account_id) {
+    throw new Error("Could not resolve your account.");
+  }
+
+  const path = buildMediaPath(profile.account_id as string, file.name);
+  const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
+    cacheControl: "3600",
+    upsert: false,
+    contentType: file.type,
+  });
+  if (upErr) throw new Error(upErr.message);
+
+  return { path };
+}
+
+/**
+ * A short-lived URL for a document in a private bucket.
+ *
+ * Rows created before migration 042 hold a full public URL instead of a
+ * path (`https://…/reservation-docs/account-…`). Those are passed through
+ * unchanged, so old vouchers and contracts keep opening while new ones
+ * are signed on demand.
+ */
+export async function signedDocUrl(
+  bucket: string,
+  pathOrUrl: string,
+  expiresInSeconds = 120,
+): Promise<string | null> {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+
+  const supabase = createClient();
+  const { data, error } = await supabase.storage
+    .from(bucket)
+    .createSignedUrl(pathOrUrl, expiresInSeconds);
+  if (error) {
+    console.error("[signedDocUrl] could not sign", pathOrUrl, error.message);
+    return null;
+  }
+  return data.signedUrl;
+}
+
+/**
  * Delete a previously-uploaded object. Used to GC media that was staged
  * (uploaded) but never sent — a cancelled draft or a failed Meta send —
  * so abandoned attachments don't accumulate in the public bucket. The

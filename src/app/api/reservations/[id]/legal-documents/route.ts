@@ -189,17 +189,17 @@ export async function POST(
       storedData = { anexo01, anexo02 }
     }
 
+    // `client-docs` is private (migration 042): a Minuta must not be
+    // readable by URL alone — that bypassed the download lock below.
+    // We store the object path and sign it at download time.
     const path = `account-${accountId}/legal/${reservationId}/${docType}-${Date.now()}.pdf`
     const { error: uploadErr } = await supabase.storage
-      .from('reservation-docs')
+      .from('client-docs')
       .upload(path, pdfBuffer, { contentType: 'application/pdf', upsert: false })
     if (uploadErr) {
       console.error('[legal-documents POST] upload error:', uploadErr)
       return NextResponse.json({ error: 'Failed to store generated PDF' }, { status: 500 })
     }
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('reservation-docs').getPublicUrl(path)
 
     const { data: doc, error: upsertErr } = await supabase
       .from('legal_documents')
@@ -210,7 +210,7 @@ export async function POST(
           doc_type: docType,
           data: storedData,
           status: 'pendiente',
-          pdf_url: publicUrl,
+          pdf_url: path,
           created_by: createdBy,
           reviewed_by: null,
           reviewed_at: null,

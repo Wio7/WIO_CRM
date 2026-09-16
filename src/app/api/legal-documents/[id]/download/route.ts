@@ -8,9 +8,12 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account'
  * Minuta while it's "pendiente" or "rechazada" — only once gerencia
  * flips it to "listo_para_firma" does this route let the request
  * through. Anexo 01/02 are working drafts and stay freely
- * downloadable at any status. Redirects to the public Storage URL
- * rather than streaming the bytes, since `reservation-docs` is a
- * public bucket already.
+ * downloadable at any status.
+ *
+ * Since migration 042 the PDFs live in the private `client-docs`
+ * bucket, so this route mints a short-lived signed URL and redirects to
+ * it instead of streaming the bytes. Documents generated before that
+ * migration stored a full public URL; those are redirected as they are.
  */
 export async function GET(
   request: Request,
@@ -42,7 +45,21 @@ export async function GET(
       )
     }
 
-    return NextResponse.redirect(doc.pdf_url)
+    if (/^https?:\/\//i.test(doc.pdf_url)) {
+      return NextResponse.redirect(doc.pdf_url)
+    }
+
+    const { data: firmado, error: signErr } = await supabase.storage
+      .from('client-docs')
+      .createSignedUrl(doc.pdf_url, 120)
+    if (signErr || !firmado?.signedUrl) {
+      console.error('[legal-documents download] sign error:', signErr)
+      return NextResponse.json(
+        { error: 'No se pudo preparar la descarga del documento' },
+        { status: 500 },
+      )
+    }
+    return NextResponse.redirect(firmado.signedUrl)
   } catch (err) {
     return toErrorResponse(err)
   }
