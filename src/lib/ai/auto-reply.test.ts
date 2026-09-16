@@ -11,6 +11,8 @@ const h = vi.hoisted(() => ({
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string }[],
+    account: null as Record<string, unknown> | null,
+    agentMessages: [] as { id: string }[],
     claim: true as boolean,
     updatePayload: null as Record<string, unknown> | null,
     rpcCalls: [] as { name: string; args: unknown }[],
@@ -33,6 +35,26 @@ vi.mock('./admin-client', () => ({
           in: () => chain,
           limit: () =>
             Promise.resolve({ data: h.state.autoResponders, error: null }),
+        }
+        return chain
+      }
+      if (table === 'accounts') {
+        // .select().eq().maybeSingle() → account switches
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () =>
+            Promise.resolve({ data: h.state.account, error: null }),
+        }
+        return chain
+      }
+      if (table === 'messages') {
+        // .select().eq().eq().limit() → agent messages in the thread
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          limit: () =>
+            Promise.resolve({ data: h.state.agentMessages, error: null }),
         }
         return chain
       }
@@ -87,6 +109,8 @@ beforeEach(() => {
     ai_reply_count: 0,
   }
   h.state.autoResponders = []
+  h.state.account = { ai_replies_until_agent_responds: false }
+  h.state.agentMessages = []
   h.state.claim = true
   h.state.updatePayload = null
   h.state.rpcCalls = []
@@ -153,6 +177,43 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
       ai_autoreply_disabled: false,
       ai_reply_count: 0,
     }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('answers an assigned thread while its agent has not written (041)', async () => {
+    h.state.conv = {
+      assigned_agent_id: 'agent-9',
+      ai_autoreply_disabled: false,
+      ai_reply_count: 0,
+    }
+    h.state.account = { ai_replies_until_agent_responds: true }
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-1', text: 'Hello!' }),
+    )
+  })
+
+  it('stands down on an assigned thread once its agent has written (041)', async () => {
+    h.state.conv = {
+      assigned_agent_id: 'agent-9',
+      ai_autoreply_disabled: false,
+      ai_reply_count: 0,
+    }
+    h.state.account = { ai_replies_until_agent_responds: true }
+    h.state.agentMessages = [{ id: 'msg-1' }]
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.generateReply).not.toHaveBeenCalled()
+    expect(h.engineSendText).not.toHaveBeenCalled()
+  })
+
+  it('stands down on an assigned thread when the switch cannot be read', async () => {
+    h.state.conv = {
+      assigned_agent_id: 'agent-9',
+      ai_autoreply_disabled: false,
+      ai_reply_count: 0,
+    }
+    h.state.account = null
     await dispatchInboundToAiReply(ARGS)
     expect(h.engineSendText).not.toHaveBeenCalled()
   })

@@ -27,7 +27,8 @@ interface DispatchArgs {
  *
  * Eligibility gates (any → silent no-op):
  *   - AI off / auto-reply disabled for the account
- *   - a human agent is assigned (they own the thread)
+ *   - a human agent is assigned (they own the thread) — unless the
+ *     account lets the AI cover until the agent's first message (041)
  *   - auto-reply was disabled for this conversation (prior handoff)
  *   - the per-conversation reply cap is reached
  *   - there's nothing to reply to
@@ -70,7 +71,12 @@ export async function dispatchInboundToAiReply(
       .eq('id', conversationId)
       .maybeSingle()
     if (convErr || !conv) return
-    if (conv.assigned_agent_id) return // a human owns this thread
+    if (
+      conv.assigned_agent_id &&
+      !(await aiCoversAssignedThread(db, accountId, conversationId))
+    ) {
+      return // a human owns this thread
+    }
     if (conv.ai_autoreply_disabled) return // handed off / turned off here
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound).
@@ -134,4 +140,33 @@ export async function dispatchInboundToAiReply(
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
   }
+}
+
+/**
+ * Whether the AI may still answer a conversation that has an advisor
+ * assigned. Only for accounts with `ai_replies_until_agent_responds`
+ * (migration 041), and only until a human sends the first message in the
+ * thread. Any lookup failure — e.g. 041 not applied yet — keeps the old
+ * behaviour: the assigned advisor owns the thread.
+ */
+async function aiCoversAssignedThread(
+  db: ReturnType<typeof supabaseAdmin>,
+  accountId: string,
+  conversationId: string,
+): Promise<boolean> {
+  const { data: account, error: accountErr } = await db
+    .from('accounts')
+    .select('ai_replies_until_agent_responds')
+    .eq('id', accountId)
+    .maybeSingle()
+  if (accountErr || !account?.ai_replies_until_agent_responds) return false
+
+  const { data: agentMessages, error: msgErr } = await db
+    .from('messages')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('sender_type', 'agent')
+    .limit(1)
+  if (msgErr || !agentMessages) return false
+  return agentMessages.length === 0
 }
