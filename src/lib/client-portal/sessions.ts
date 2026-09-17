@@ -43,6 +43,13 @@ export interface ClientSummary {
   first_name: string;
   phone_hint: string;
   account_name: string;
+  /**
+   * Qué le toca ver al entrar:
+   *   comprador  ya paga su lote o su casa: cuotas, saldo y vouchers.
+   *   visitante  todavía no compró: proyectos, beneficios y su asesor.
+   * Lo decide el plan de pagos (043), no una casilla que alguien olvide.
+   */
+  tipo: "comprador" | "visitante";
 }
 
 interface ContactRow {
@@ -149,7 +156,12 @@ export async function signInClient(
     return { ok: false, reason: "server_error" };
   }
 
-  return { ok: true, token, expires_at: expiresAt, client: summary(match) };
+  return {
+    ok: true,
+    token,
+    expires_at: expiresAt,
+    client: await resumenConTipo(db, match),
+  };
 }
 
 export interface ClientSession {
@@ -204,7 +216,7 @@ export async function resolveClientSession(
     accountId: data.account_id,
     contactId: data.contact_id,
     expiresAt,
-    client: summary(contact),
+    client: await resumenConTipo(db, contact),
   };
 }
 
@@ -217,13 +229,28 @@ export async function revokeClientSession(db: SupabaseClient, token: string): Pr
     .is("revoked_at", null);
 }
 
-function summary(contact: ContactRow): ClientSummary {
+function summary(contact: ContactRow, tipo: ClientSummary["tipo"]): ClientSummary {
   return {
     name: contact.name?.trim() || "",
     first_name: firstName(contact.name),
     phone_hint: maskPhone(contact.phone),
     account_name: contact.accounts?.name ?? "",
+    tipo,
   };
+}
+
+/**
+ * Comprador si tiene un plan de pagos vivo; visitante si no. Un fallo al
+ * preguntarlo deja "visitante": es la vista que no promete nada.
+ */
+async function resumenConTipo(db: SupabaseClient, contact: ContactRow): Promise<ClientSummary> {
+  const { count, error } = await db
+    .from("payment_plans")
+    .select("id", { count: "exact", head: true })
+    .eq("contact_id", contact.id)
+    .in("status", ["activo", "pagado"]);
+  if (error) console.error("[client-portal] payment plan lookup failed:", error);
+  return summary(contact, count && count > 0 ? "comprador" : "visitante");
 }
 
 /** Push to whoever owns the client's latest conversation (or the admins). */
