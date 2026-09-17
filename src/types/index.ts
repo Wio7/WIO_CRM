@@ -58,12 +58,20 @@ export interface Account {
  * when the caller has admin+ — agents and viewers see name +
  * avatar + role only.
  */
+/** Areas of the firm (migration 046). Null for someone with no area yet. */
+export type MemberArea = "marketing" | "legal" | "cobranzas" | "ventas";
+
+export const MEMBER_AREAS: MemberArea[] = ["marketing", "legal", "cobranzas", "ventas"];
+
 export interface AccountMember {
   user_id: string;
   full_name: string;
   email: string | null;
   avatar_url: string | null;
   role: AccountRole;
+  /** What this member does (migration 046): the role says how much power
+   *  they have, the area says which work is theirs. */
+  area?: MemberArea | null;
   joined_at: string;
   /** accounts.owner_user_id — that owner can't be edited or removed. */
   is_primary_owner?: boolean;

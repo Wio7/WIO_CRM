@@ -20,7 +20,7 @@ import { NextResponse } from "next/server";
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { canManageMembers, isAccountRole } from "@/lib/auth/roles";
 import { corsPreflight, withCors } from "@/lib/cors";
-import type { AccountMember } from "@/types";
+import { MEMBER_AREAS, type AccountMember, type MemberArea } from "@/types";
 
 interface ProfileRow {
   user_id: string;
@@ -28,6 +28,8 @@ interface ProfileRow {
   email: string | null;
   avatar_url: string | null;
   account_role: string;
+  /** What this member does: marketing, legal, cobranzas, ventas (046). */
+  area: string | null;
   created_at: string;
 }
 
@@ -48,7 +50,7 @@ async function listMembers(): Promise<Response> {
     const [{ data, error }, { data: account }] = await Promise.all([
       ctx.supabase
         .from("profiles")
-        .select("user_id, full_name, email, avatar_url, account_role, created_at")
+        .select("user_id, full_name, email, avatar_url, account_role, area, created_at")
         .eq("account_id", ctx.accountId)
         .order("created_at", { ascending: true }),
       ctx.supabase
@@ -81,6 +83,9 @@ async function listMembers(): Promise<Response> {
           email: canSeeEmails ? row.email : null,
           avatar_url: row.avatar_url,
           role: row.account_role,
+          // Igual que con el rol: un valor que no conocemos se ignora en vez
+          // de romper la pantalla.
+          area: MEMBER_AREAS.includes(row.area as MemberArea) ? (row.area as MemberArea) : null,
           joined_at: row.created_at,
           is_primary_owner: row.user_id === primaryOwner,
         },

@@ -1,11 +1,12 @@
 // ============================================================
 // /api/account/members/[userId]
 //
-//   PATCH  — change a member's role.   Admin+.
+//   PATCH  — change a member's role and/or area.   Admin+.
 //   DELETE — remove a member.          Admin+.
 //
 // Both delegate to SECURITY DEFINER RPCs (018, rewritten in 040):
 //   - set_member_role(p_user_id, p_new_role)
+//   - set_member_area(p_user_id, p_area)      (046)
 //   - remove_account_member(p_user_id)
 //
 // The RPCs do the *real* authorisation work — caller must be admin+,
@@ -20,6 +21,7 @@ import type { PostgrestError } from "@supabase/supabase-js";
 
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
 import { isAccountRole } from "@/lib/auth/roles";
+import { MEMBER_AREAS, type MemberArea } from "@/types";
 import { corsPreflight, withCors } from "@/lib/cors";
 import {
   checkRateLimit,
@@ -47,7 +49,7 @@ function rpcErrorToResponse(err: PostgrestError): NextResponse {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  return withCors(request, await changeRole(request, context));
+  return withCors(request, await changeMember(request, context));
 }
 
 export async function DELETE(request: Request, context: RouteContext) {
@@ -58,7 +60,12 @@ export function OPTIONS(request: Request) {
   return corsPreflight(request);
 }
 
-async function changeRole(
+/** True for a valid area, and also for null: "no area" is a valid answer. */
+function isArea(value: unknown): value is MemberArea | null {
+  return value === null || MEMBER_AREAS.includes(value as MemberArea);
+}
+
+async function changeMember(
   request: Request,
   { params }: RouteContext,
 ): Promise<Response> {
@@ -74,23 +81,47 @@ async function changeRole(
     const { userId } = await params;
 
     const body = (await request.json().catch(() => null)) as
-      | { role?: unknown }
+      | { role?: unknown; area?: unknown }
       | null;
-    const role = body?.role;
 
-    if (!isAccountRole(role)) {
+    // Either field on its own is a valid call: the Team screen changes the
+    // role and the area with separate controls.
+    const cambiaRol = body ? "role" in body : false;
+    const cambiaArea = body ? "area" in body : false;
+    if (!cambiaRol && !cambiaArea) {
+      return NextResponse.json(
+        { error: "Send 'role', 'area' or both" },
+        { status: 400 },
+      );
+    }
+    if (cambiaRol && !isAccountRole(body?.role)) {
       return NextResponse.json(
         { error: "'role' must be one of owner, admin, agent, viewer" },
         { status: 400 },
       );
     }
+    if (cambiaArea && !isArea(body?.area)) {
+      return NextResponse.json(
+        { error: "'area' must be marketing, legal, cobranzas, ventas or null" },
+        { status: 400 },
+      );
+    }
 
-    const { error } = await ctx.supabase.rpc("set_member_role", {
-      p_user_id: userId,
-      p_new_role: role,
-    });
+    if (cambiaRol) {
+      const { error } = await ctx.supabase.rpc("set_member_role", {
+        p_user_id: userId,
+        p_new_role: body?.role as string,
+      });
+      if (error) return rpcErrorToResponse(error);
+    }
 
-    if (error) return rpcErrorToResponse(error);
+    if (cambiaArea) {
+      const { error } = await ctx.supabase.rpc("set_member_area", {
+        p_user_id: userId,
+        p_area: (body?.area ?? null) as string | null,
+      });
+      if (error) return rpcErrorToResponse(error);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
