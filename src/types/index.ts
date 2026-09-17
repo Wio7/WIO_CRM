@@ -752,6 +752,14 @@ export interface Installment {
   payment_id?: string | null;
   paid_at?: string | null;
   paid_amount?: number | null;
+  /** Cómo pagó: "Yape", "BCP", "efectivo"… Texto libre (047). */
+  paid_method?: string | null;
+  /** Número de operación del voucher (047). */
+  paid_reference?: string | null;
+  /** Ruta en el bucket privado client-docs; con status pendiente = en revisión (047). */
+  voucher_path?: string | null;
+  notes?: string | null;
+  registered_by?: string | null;
   created_at: string;
   updated_at: string;
 }
