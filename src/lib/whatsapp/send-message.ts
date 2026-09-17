@@ -227,6 +227,22 @@ export async function sendMessageToConversation(
     .single();
 
   if (configError || !config) {
+    // No WhatsApp number connected. If this contact reads their messages
+    // inside the Golden App (they have a DNI and the account's client
+    // portal is on), the reply still has somewhere to land: store it and
+    // the app shows it. Templates are a WhatsApp concept and have no
+    // meaning in the app, so those still fail loudly.
+    if (messageType !== 'template' && (await leeEnLaApp(db, accountId, contact))) {
+      return entregarSoloEnLaApp(db, {
+        conversationId,
+        contactId: contact.id,
+        accountId,
+        messageType,
+        contentText: contentText ?? undefined,
+        mediaUrl: mediaUrl ?? undefined,
+        replyToMessageId: replyToMessageId ?? undefined,
+      });
+    }
     throw new SendMessageError(
       'whatsapp_not_configured',
       'WhatsApp not configured. Please set up your WhatsApp integration first.',
@@ -444,4 +460,80 @@ export async function sendMessageToConversation(
   }
 
   return { messageId: messageRecord.id, whatsappMessageId: waMessageId };
+}
+
+/**
+ * ¿Este contacto lee sus mensajes dentro de la Golden App?
+ *
+ * Es lo que autoriza a guardar una respuesta sin mandarla por WhatsApp:
+ * tiene DNI (con lo que entra a la app, migración 044) y su cuenta tiene
+ * el portal de clientes encendido (045). Si no, el mensaje no llegaría a
+ * ninguna parte y el asesor tiene que enterarse.
+ */
+async function leeEnLaApp(
+  db: SupabaseClient,
+  accountId: string,
+  contact: { dni?: string | null },
+): Promise<boolean> {
+  if (!contact?.dni) return false;
+  const { data, error } = await db
+    .from('accounts')
+    .select('client_portal_enabled')
+    .eq('id', accountId)
+    .maybeSingle();
+  if (error) {
+    console.error('[send-message] client portal lookup failed:', error.message);
+    return false;
+  }
+  return !!data?.client_portal_enabled;
+}
+
+/**
+ * Guarda la respuesta del asesor sin pasar por Meta. Mismo registro que
+ * un envío normal salvo `message_id`, que queda vacío porque no hay
+ * mensaje de WhatsApp al que corresponda. Cuando conecten el número, los
+ * envíos vuelven solos al camino de siempre.
+ */
+async function entregarSoloEnLaApp(
+  db: SupabaseClient,
+  args: {
+    conversationId: string;
+    contactId: string;
+    accountId: string;
+    messageType: string;
+    contentText?: string;
+    mediaUrl?: string;
+    replyToMessageId?: string;
+  },
+): Promise<SendMessageResult> {
+  const { data: messageRecord, error: msgError } = await db
+    .from('messages')
+    .insert({
+      conversation_id: args.conversationId,
+      sender_type: 'agent',
+      content_type: args.messageType,
+      content_text: args.contentText || null,
+      media_url: args.mediaUrl || null,
+      message_id: null,
+      status: 'sent',
+      reply_to_message_id: args.replyToMessageId || null,
+    })
+    .select()
+    .single();
+
+  if (msgError) {
+    console.error('[send-message] in-app delivery insert failed:', msgError);
+    throw new SendMessageError('db_error', msgError.message, 500);
+  }
+
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: args.contentText || `[${args.messageType}]`,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId);
+
+  return { messageId: messageRecord.id, whatsappMessageId: '' };
 }
