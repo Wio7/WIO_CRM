@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
 import { toast } from 'sonner';
+import { dniChange, dniErrorMessage } from '@/lib/contacts/dni';
 import type { Contact, Tag, ContactTag, ContactNote, CustomField, ContactCustomValue, Deal, MessageTemplate } from '@/types';
 import {
   TemplatePicker,
@@ -76,6 +77,7 @@ export function ContactDetailView({
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editCompany, setEditCompany] = useState('');
+  const [editDni, setEditDni] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
 
   // Tags tab
@@ -117,6 +119,7 @@ export function ContactDetailView({
       setEditPhone(data.phone);
       setEditEmail(data.email ?? '');
       setEditCompany(data.company ?? '');
+      setEditDni(data.dni ?? '');
     }
     setLoading(false);
   }, [contactId, supabase]);
@@ -236,6 +239,14 @@ export function ContactDetailView({
       return;
     }
 
+    // Only sent when it changed: a new DNI signs the client out of the
+    // Golden App, and contacts must still save where 044 isn't applied.
+    const dniResult = dniChange(contact?.dni, editDni);
+    if ('error' in dniResult) {
+      toast.error(dniResult.error);
+      return;
+    }
+
     setSavingDetails(true);
     const { error } = await supabase
       .from('contacts')
@@ -244,12 +255,13 @@ export function ContactDetailView({
         phone: editPhone.trim(),
         email: editEmail.trim() || null,
         company: editCompany.trim() || null,
+        ...dniResult.patch,
         updated_at: new Date().toISOString(),
       })
       .eq('id', contactId);
 
     if (error) {
-      toast.error('Failed to update contact');
+      toast.error(dniErrorMessage(error) ?? 'Failed to update contact');
     } else {
       toast.success('Contact updated');
       fetchContact();
@@ -566,6 +578,23 @@ export function ContactDetailView({
                       onChange={(e) => setEditCompany(e.target.value)}
                       className="bg-muted border-border text-foreground h-8 text-sm"
                     />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-muted-foreground text-xs">DNI / CE</Label>
+                    <Input
+                      value={editDni}
+                      onChange={(e) => setEditDni(e.target.value)}
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={14}
+                      placeholder="12345678"
+                      className="bg-muted border-border text-foreground h-8 text-sm"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      {contact.dni_registered_at
+                        ? `Registrado el ${new Date(contact.dni_registered_at).toLocaleDateString('es-PE')}. Con su celular y este DNI, el cliente entra a la Golden App; cambiarlo cierra su sesión.`
+                        : 'Con su celular y este DNI, el cliente entra a la Golden App.'}
+                    </p>
                   </div>
                   <Button
                     onClick={saveDetails}

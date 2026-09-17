@@ -101,6 +101,14 @@ export interface Contact {
   company?: string;
   avatar_url?: string;
   /**
+   * DNI / CE (migration 044). Digits only, unique per account: it's half
+   * of how a client signs into the Golden App (phone + DNI), so the
+   * advisor who registers it is recorded beside it.
+   */
+  dni?: string | null;
+  dni_registered_by?: string | null;
+  dni_registered_at?: string | null;
+  /**
    * Campaign attribution (migration 035) — where this lead came from.
    * First-touch: set once at capture and preserved thereafter. All
    * optional; populated by POST /api/v1/leads and the Meta Lead Ads
@@ -690,6 +698,74 @@ export interface Reservation {
   advisor?: Profile;
   units?: RealEstateUnit[];
   payments?: ReservationPayment[];
+}
+
+// ============================================================
+// Payment plans (migration 043) — what a client owes and when.
+// `installments` is one row per month; the balances come from the
+// `payment_plan_balances` view, never from arithmetic in the UI.
+// ============================================================
+
+export type PaymentPlanStatus = "activo" | "pagado" | "suspendido" | "cancelado";
+export type InstallmentStatus = "pendiente" | "pagada" | "condonada";
+
+export interface PaymentPlan {
+  id: string;
+  account_id: string;
+  contact_id: string | null;
+  unit_id?: string | null;
+  reservation_id?: string | null;
+  currency: string;
+  total_amount: number;
+  down_payment: number;
+  installments_count: number;
+  monthly_amount: number;
+  due_day?: number | null;
+  first_due_date: string;
+  notes?: string;
+  status: PaymentPlanStatus;
+  created_by?: string;
+  created_at: string;
+  updated_at: string;
+  contact?: Contact;
+  unit?: RealEstateUnit;
+  installments?: Installment[];
+  balance?: PaymentPlanBalance;
+}
+
+export interface Installment {
+  id: string;
+  plan_id: string;
+  account_id: string;
+  number: number;
+  amount: number;
+  due_date: string;
+  status: InstallmentStatus;
+  payment_id?: string | null;
+  paid_at?: string | null;
+  paid_amount?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One row of the `payment_plan_balances` view. */
+export interface PaymentPlanBalance {
+  plan_id: string;
+  account_id: string;
+  contact_id: string | null;
+  currency: string;
+  total_amount: number;
+  down_payment: number;
+  installments_count: number;
+  monthly_amount: number;
+  status: PaymentPlanStatus;
+  paid_amount: number;
+  paid_count: number;
+  pending_amount: number;
+  pending_count: number;
+  overdue_count: number;
+  overdue_amount: number;
+  next_due_date: string | null;
 }
 
 export interface ReservationPayment {

@@ -11,6 +11,7 @@ import {
   isUniqueViolation,
   type ExistingContact,
 } from '@/lib/contacts/dedupe';
+import { dniChange, dniErrorMessage } from '@/lib/contacts/dni';
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,7 @@ export function ContactForm({
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [company, setCompany] = useState('');
+  const [dni, setDni] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Duplicate-phone detection for NEW contacts. `exact` (same digits)
@@ -73,6 +75,7 @@ export function ContactForm({
       setPhone(contact?.phone ?? '');
       setEmail(contact?.email ?? '');
       setCompany(contact?.company ?? '');
+      setDni(contact?.dni ?? '');
       setSelectedTagIds(contactTags.map((ct) => ct.tag_id));
       setDupMatch(null);
       fetchTags();
@@ -134,6 +137,14 @@ export function ContactForm({
       return;
     }
 
+    // Only sent when it changed: a new DNI signs the client out of the
+    // Golden App, and contacts must still save where 044 isn't applied.
+    const dniResult = dniChange(contact?.dni, dni);
+    if ('error' in dniResult) {
+      toast.error(dniResult.error);
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -154,6 +165,7 @@ export function ContactForm({
             phone: phone.trim(),
             email: email.trim() || null,
             company: company.trim() || null,
+            ...dniResult.patch,
             updated_at: new Date().toISOString(),
           })
           .eq('id', contactId);
@@ -168,6 +180,7 @@ export function ContactForm({
             phone: phone.trim(),
             email: email.trim() || null,
             company: company.trim() || null,
+            ...dniResult.patch,
           })
           .select('id')
           .single();
@@ -198,6 +211,11 @@ export function ContactForm({
       onOpenChange(false);
       onSaved();
     } catch (err: unknown) {
+      const dniMessage = dniErrorMessage(err);
+      if (dniMessage) {
+        toast.error(dniMessage);
+        return;
+      }
       // The unique index (migration 022) rejects a duplicate phone that
       // slipped past the on-blur check (race, or a format that
       // normalizes equal). Surface it as the friendly duplicate notice
@@ -322,6 +340,25 @@ export function ContactForm({
               placeholder="Acme Inc."
               className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="cf-dni" className="text-muted-foreground">
+              DNI / CE
+            </Label>
+            <Input
+              id="cf-dni"
+              value={dni}
+              onChange={(e) => setDni(e.target.value)}
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={14}
+              placeholder="12345678"
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+            />
+            <p className="text-xs text-muted-foreground">
+              Con su celular y este DNI, el cliente entra a la Golden App.
+            </p>
           </div>
 
           <div className="space-y-2">
