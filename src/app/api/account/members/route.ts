@@ -47,18 +47,30 @@ async function listMembers(): Promise<Response> {
 
     // RLS on profiles allows reading any row whose account matches
     // the caller's, so this query is naturally account-scoped.
-    const [{ data, error }, { data: account }] = await Promise.all([
+    // `area` llega con la migración 046. Mientras no esté aplicada, pedirla
+    // haría fallar la lista entera y el equipo desaparecería de la app; por
+    // eso se vuelve a pedir sin ella.
+    const COLUMNAS = "user_id, full_name, email, avatar_url, account_role, created_at";
+    const pedirMiembros = (columnas: string) =>
       ctx.supabase
         .from("profiles")
-        .select("user_id, full_name, email, avatar_url, account_role, area, created_at")
+        .select(columnas)
         .eq("account_id", ctx.accountId)
-        .order("created_at", { ascending: true }),
+        .order("created_at", { ascending: true });
+
+    const [primera, { data: account }] = await Promise.all([
+      pedirMiembros(`${COLUMNAS}, area`),
       ctx.supabase
         .from("accounts")
         .select("owner_user_id")
         .eq("id", ctx.accountId)
         .maybeSingle(),
     ]);
+
+    let { data, error } = primera as { data: unknown; error: { code?: string; message?: string } | null };
+    if (error && (error.code === "42703" || /area/i.test(error.message ?? ""))) {
+      ({ data, error } = (await pedirMiembros(COLUMNAS)) as typeof primera);
+    }
 
     if (error) {
       console.error("[GET /api/account/members] fetch error:", error);
