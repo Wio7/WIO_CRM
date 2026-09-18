@@ -272,3 +272,126 @@ async function warnAdvisor(db: SupabaseClient, contact: ContactRow) {
     body: `${contact.name || contact.phone} no pudo entrar a la app: ${MAX_FAILS_PER_PHONE} intentos con un DNI que no coincide. Si es el cliente, revisa el DNI de su ficha.`,
   });
 }
+
+// ============================================================
+// Registro de un interesado nuevo desde la app.
+//
+// El que llega de un anuncio de Meta no está en el CRM: no tiene cómo
+// entrar con celular + DNI. Aquí se registra él mismo (nombre, celular y
+// DNI), queda como contacto con `lead_source = 'app'` y entra directo a
+// la portada de venta.
+//
+// Nunca se "reclama" un contacto que ya existe: si el celular ya está en
+// el CRM, quien lo registre tendría acceso a su chat con Golden. En ese
+// caso se le dice que entre con su DNI, o —si su ficha todavía no tiene
+// DNI— que escriba por WhatsApp para que su asesor le dé acceso.
+// ============================================================
+
+export type RegisterResult =
+  | SignInResult
+  | { ok: false; reason: "ya_existe" | "ya_existe_sin_dni" | "dni_en_uso" | "sin_cuenta" };
+
+/** La cuenta que recibe a los interesados: la única con el portal abierto, o la de CLIENT_SIGNUP_ACCOUNT_ID. */
+async function cuentaDeRegistro(db: SupabaseClient) {
+  const fija = process.env.CLIENT_SIGNUP_ACCOUNT_ID?.trim();
+  let q = db
+    .from("accounts")
+    .select("id, name, owner_user_id, client_portal_enabled")
+    .eq("client_portal_enabled", true)
+    .limit(2);
+  if (fija) q = q.eq("id", fija);
+  const { data } = await q;
+  return data && data.length === 1 ? data[0] : null;
+}
+
+export async function registerVisitor(
+  db: SupabaseClient,
+  input: { name: string; phone: string; dni: string; ip: string; userAgent: string | null },
+): Promise<RegisterResult> {
+  const nombre = String(input.name ?? "").trim().replace(/ +/g, " ").slice(0, 80);
+  const candidates = phoneCandidates(input.phone);
+  const dni = normalizeDni(input.dni);
+  if (nombre.length < 2 || !candidates.length || !dni) return { ok: false, reason: "invalid_input" };
+
+  const cuenta = await cuentaDeRegistro(db);
+  if (!cuenta) return { ok: false, reason: "sin_cuenta" };
+
+  // El mismo candado por IP que el ingreso: registrar en bucle no sale gratis.
+  const { data: porIp } = await db
+    .from("client_login_attempts")
+    .select("succeeded, created_at")
+    .eq("ip", input.ip)
+    .gte("created_at", since(IP_WINDOW_MS))
+    .order("created_at", { ascending: false })
+    .limit(100);
+  const bloqueo = ipLockedUntil(porIp ?? []) ?? 0;
+  if (bloqueo > Date.now()) {
+    return { ok: false, reason: "locked", retry_after_seconds: Math.ceil((bloqueo - Date.now()) / 1000) };
+  }
+
+  const [{ data: mismoCel }, { data: mismoDni }] = await Promise.all([
+    db
+      .from("contacts")
+      .select("id, dni")
+      .eq("account_id", cuenta.id)
+      .in("phone_normalized", candidates)
+      .limit(1),
+    db.from("contacts").select("id").eq("account_id", cuenta.id).eq("dni", dni).limit(1),
+  ]);
+
+  if (mismoCel?.length) {
+    await db.from("client_login_attempts").insert({
+      phone_digits: phoneKey(input.phone),
+      ip: input.ip,
+      succeeded: false,
+      contact_id: mismoCel[0].id,
+    });
+    return { ok: false, reason: mismoCel[0].dni ? "ya_existe" : "ya_existe_sin_dni" };
+  }
+  if (mismoDni?.length) return { ok: false, reason: "dni_en_uso" };
+
+  const telefono = candidates.find((c) => c.length === 11 && c.startsWith("51")) ?? candidates[0];
+  const { data: creado, error } = await db
+    .from("contacts")
+    .insert({
+      account_id: cuenta.id,
+      user_id: cuenta.owner_user_id,
+      name: nombre,
+      phone: `+${telefono}`,
+      dni,
+      lead_source: "app",
+    })
+    .select("id, account_id, name, phone, dni")
+    .single();
+  if (error || !creado) {
+    console.error("[client-portal] visitor registration failed:", error);
+    return { ok: false, reason: "server_error" };
+  }
+
+  await db.from("client_login_attempts").insert({
+    phone_digits: phoneKey(input.phone),
+    ip: input.ip,
+    succeeded: true,
+    contact_id: creado.id,
+  });
+
+  const token = newSessionToken();
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+  const { error: errSesion } = await db.from("client_sessions").insert({
+    account_id: cuenta.id,
+    contact_id: creado.id,
+    token_hash: hashSessionToken(token),
+    user_agent: input.userAgent?.slice(0, 300) ?? null,
+    expires_at: expiresAt,
+  });
+  if (errSesion) {
+    console.error("[client-portal] session insert failed:", errSesion);
+    return { ok: false, reason: "server_error" };
+  }
+
+  const contacto = {
+    ...creado,
+    accounts: { name: cuenta.name as string, client_portal_enabled: true },
+  } as unknown as ContactRow;
+  return { ok: true, token, expires_at: expiresAt, client: summary(contacto, "visitante") };
+}
