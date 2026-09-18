@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
-import { formatCurrency } from "@/lib/currency";
+import { CURRENCIES, formatCurrency } from "@/lib/currency";
 import type { Contact, RealEstateUnit } from "@/types";
 import {
   Sheet,
@@ -64,9 +64,16 @@ export function PaymentPlanForm({
 
   const [contactId, setContactId] = useState("");
   const [unitId, setUnitId] = useState("");
-  // La moneda de la cuenta, no una constante: el plan que se guarda y
-  // lo que el cliente ve después tienen que decir lo mismo.
-  const currency = defaultCurrency;
+  // La moneda de la cuenta, salvo que el asesor elija otra: un mismo
+  // negocio vende lotes en soles y alguno en dólares, y lo que se guarda
+  // aquí es lo que el cliente va a leer en su app para siempre.
+  //
+  // Derivada en vez de copiada con un efecto: `defaultCurrency` llega
+  // cuando termina de cargar la cuenta, y un estado copiado se habría
+  // quedado con el valor de antes.
+  const [monedaElegida, setMonedaElegida] = useState<string | null>(null);
+  const currency = monedaElegida ?? defaultCurrency;
+  const setCurrency = setMonedaElegida;
   const [total, setTotal] = useState("");
   const [down, setDown] = useState("0");
   const [months, setMonths] = useState("70");
@@ -246,6 +253,22 @@ export function PaymentPlanForm({
                 <option key={u.id} value={u.id}>
                   {u.code}
                   {u.manzana ? ` · Mz ${u.manzana}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="pp-moneda">Moneda</Label>
+            <select
+              id="pp-moneda"
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="h-10 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary"
+            >
+              {CURRENCIES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.symbol} · {c.label}
                 </option>
               ))}
             </select>

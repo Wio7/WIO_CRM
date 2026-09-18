@@ -28,6 +28,10 @@ export interface CurrencyOption {
  * list to offer more — nothing else needs to change.
  */
 export const CURRENCIES: CurrencyOption[] = [
+  // El sol va primero porque es la moneda de las cuentas que usan este
+  // CRM a diario (Golden Habitat vende en Ica). Faltaba, y por eso los
+  // planes de cuotas nacían en dólares sin que nadie lo eligiera.
+  { code: "PEN", label: "Sol peruano", symbol: "S/" },
   { code: "USD", label: "US Dollar", symbol: "$" },
   { code: "EUR", label: "Euro", symbol: "€" },
   { code: "GBP", label: "British Pound", symbol: "£" },

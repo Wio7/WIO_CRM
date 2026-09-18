@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { useCan } from "@/hooks/use-can";
-import { formatCurrency } from "@/lib/currency";
+import { CURRENCIES, formatCurrency } from "@/lib/currency";
 import {
   MEDIA_MAX_BYTES_BY_KIND,
   signedDocUrl,
@@ -378,6 +378,41 @@ export function PaymentPlanDetail({
                 titulo="Pagadas"
                 valor={`${balance?.paid_count ?? 0} de ${plan.installments_count}`}
               />
+            </div>
+
+            {/* Cambiar la moneda de un plan ya creado. Existe porque la
+                cuenta nació en dólares y los planes salieron en dólares
+                sin que nadie lo eligiera: sin esto, arreglarlo obligaba a
+                borrar el plan y volver a escribir las 70 cuotas. */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Moneda</span>
+              <select
+                value={plan.currency}
+                disabled={!canAct || guardando}
+                onChange={async (e) => {
+                  const moneda = e.target.value;
+                  setGuardando(true);
+                  const { error } = await supabase
+                    .from("payment_plans")
+                    .update({ currency: moneda })
+                    .eq("id", plan.id);
+                  setGuardando(false);
+                  if (error) {
+                    toast.error("No se pudo cambiar la moneda");
+                    return;
+                  }
+                  toast.success(`El plan queda en ${moneda}`);
+                  await cargar();
+                  onChanged();
+                }}
+                className="h-8 rounded-lg border border-border bg-muted px-2 text-xs text-foreground outline-none focus:border-primary"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.symbol} {c.code}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <p className="text-xs text-muted-foreground">
