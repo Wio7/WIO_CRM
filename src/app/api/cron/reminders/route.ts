@@ -1,5 +1,5 @@
 // ============================================================
-// /api/cron/reminders — "tu cita es en una hora"
+// /api/cron/reminders — "tu cita es en una hora" y "tu cuota vence"
 //
 //   GET|POST ?secret=<CRON_SECRET>  (o Authorization: Bearer <CRON_SECRET>)
 //
@@ -27,6 +27,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { notifyClient, notifyConversation } from "@/lib/push/send";
 import { nombreDeCita, tituloDeCita } from "@/lib/agenda/tipos";
+import { recordatoriosDeCuotas } from "@/lib/payment-plans/reminders";
 
 /** Ventana alrededor del objetivo, para que un pinger flojo no lo salte. */
 const MARGEN_MIN = 12;
@@ -123,7 +124,12 @@ async function correr(request: Request) {
 
   const db = supabaseAdmin();
   const [una, media] = [await tanda(db, 60, "reminded_60"), await tanda(db, 30, "reminded_30")];
-  return NextResponse.json({ ok: true, avisados: { una_hora: una, media_hora: media } });
+  // Y las cuotas (052): tres días antes, el día y tres días después.
+  const cuotas = await recordatoriosDeCuotas(db).catch((err) => {
+    console.error("[cron] cuota reminders failed:", err);
+    return { enviados: 0, omitidos: "error" };
+  });
+  return NextResponse.json({ ok: true, avisados: { una_hora: una, media_hora: media, cuotas } });
 }
 
 export async function GET(request: Request) {
