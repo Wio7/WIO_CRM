@@ -39,6 +39,7 @@ import {
 import type { MessageTemplate } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import { canalDe, insertarMensaje } from '@/lib/channels';
+import { enviarPorMeta, idEnRed } from '@/lib/meta-messaging';
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
 export const VALID_MESSAGE_TYPES = [
@@ -204,6 +205,52 @@ export async function sendMessageToConversation(
   }
 
   const contact = conversation.contact;
+
+  // Messenger o Instagram (053): el contacto no tiene celular, se le
+  // contesta por la red por la que escribió.
+  const canal = canalDe(conversation);
+  if ((canal === 'messenger' || canal === 'instagram') && messageType !== 'template') {
+    const destinatario = contact ? idEnRed(contact, canal) : null;
+    if (!destinatario) {
+      throw new SendMessageError('bad_request', `Este contacto no tiene id de ${canal}.`, 400);
+    }
+    let mid: string;
+    try {
+      mid = await enviarPorMeta(db, {
+        accountId,
+        canal,
+        destinatarioId: destinatario,
+        texto: contentText ?? null,
+        adjunto: mediaUrl ? { tipo: messageType, url: mediaUrl } : null,
+      });
+    } catch (err) {
+      throw new SendMessageError('meta_error', `Meta API error: ${err instanceof Error ? err.message : 'error'}`, 502);
+    }
+    const { data: guardado, error: errGuardado } = await insertarMensaje<{ id: string }>(db, {
+      conversation_id: conversationId,
+      sender_type: 'agent',
+      content_type: messageType,
+      content_text: contentText || null,
+      media_url: mediaUrl || null,
+      message_id: mid || null,
+      status: 'sent',
+      reply_to_message_id: replyToMessageId || null,
+      channel: canal,
+    });
+    if (errGuardado || !guardado) {
+      throw new SendMessageError('db_error', errGuardado?.message ?? 'insert failed', 500);
+    }
+    await db
+      .from('conversations')
+      .update({
+        last_message_text: contentText || `[${messageType}]`,
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', conversationId);
+    return { messageId: guardado.id, whatsappMessageId: mid };
+  }
+
   if (!contact?.phone) {
     throw new SendMessageError(
       'bad_request',

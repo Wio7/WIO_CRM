@@ -6,6 +6,7 @@ import { decrypt } from '@/lib/whatsapp/encryption';
 import {
   listLeadForms,
   subscribePageToApp,
+  instagramDePagina,
   unsubscribePageFromApp,
 } from '@/lib/meta-leads/oauth';
 
@@ -142,8 +143,9 @@ export async function PATCH(request: Request) {
       );
     }
 
+    let conMensajes = false;
     try {
-      if (isActive) await subscribePageToApp(pageId, pageToken);
+      if (isActive) conMensajes = (await subscribePageToApp(pageId, pageToken)).messaging;
       else await unsubscribePageFromApp(pageId, pageToken);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Error al comunicar con Meta';
@@ -166,6 +168,21 @@ export async function PATCH(request: Request) {
     if (updateErr) {
       console.error('[meta/pages PATCH] update failed:', updateErr);
       return NextResponse.json({ error: 'No se pudo guardar el cambio' }, { status: 500 });
+    }
+
+    // Messenger e Instagram (053). Aparte del update de arriba: sin la 053
+    // estas columnas no existen y no deben tumbar la activación de leads.
+    if (isActive) {
+      const ig = await instagramDePagina(pageId, pageToken).catch(() => null);
+      const { error: errMsj } = await supabase
+        .from('meta_pages')
+        .update({
+          messaging_at: conMensajes ? new Date().toISOString() : null,
+          instagram_id: ig?.id ?? null,
+          instagram_username: ig?.username ?? null,
+        })
+        .eq('id', page.id);
+      if (errMsj) console.warn('[meta/pages PATCH] messaging columns not saved:', errMsj.message);
     }
 
     return NextResponse.json({ success: true, page_id: pageId, is_active: isActive });

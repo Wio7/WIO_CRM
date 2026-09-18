@@ -43,6 +43,10 @@ export const META_OAUTH_SCOPES = [
   'pages_read_engagement',
   'pages_manage_metadata',
   'leads_retrieval',
+  // Messenger e Instagram en la bandeja (053).
+  'pages_messaging',
+  'instagram_basic',
+  'instagram_manage_messages',
 ] as const;
 
 /** State payload lifetime. Long enough to log in, short enough to matter. */
@@ -232,23 +236,51 @@ export async function listPages(userToken: string): Promise<MetaPageSummary[]> {
 export async function subscribePageToApp(
   pageId: string,
   pageAccessToken: string,
-): Promise<void> {
+): Promise<{ messaging: boolean }> {
   const url = `${GRAPH_BASE}/${pageId}/subscribed_apps`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      subscribed_fields: 'leadgen',
-      access_token: pageAccessToken,
-    }),
-  });
-  const json = (await res.json().catch(() => null)) as {
-    success?: boolean;
-    error?: { message?: string };
-  } | null;
-  if (!res.ok || json?.error) {
-    throw new Error(json?.error?.message ?? `Failed to subscribe page: ${res.status}`);
+  const intentar = async (campos: string) => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        subscribed_fields: campos,
+        access_token: pageAccessToken,
+      }),
+    });
+    const json = (await res.json().catch(() => null)) as {
+      success?: boolean;
+      error?: { message?: string };
+    } | null;
+    if (!res.ok || json?.error) {
+      throw new Error(json?.error?.message ?? `Failed to subscribe page: ${res.status}`);
+    }
+  };
+  // Leads + mensajes de Messenger. Una conexión hecha antes de pedir
+  // `pages_messaging` no puede suscribirse a mensajes: entonces se queda
+  // sólo con leads, que es lo que ya funcionaba.
+  try {
+    await intentar('leadgen,messages,messaging_postbacks');
+    return { messaging: true };
+  } catch {
+    await intentar('leadgen');
+    return { messaging: false };
   }
+}
+
+/** La cuenta profesional de Instagram vinculada a la página, si hay. */
+export async function instagramDePagina(
+  pageId: string,
+  pageAccessToken: string,
+): Promise<{ id: string; username: string | null } | null> {
+  const res = await fetch(
+    `${GRAPH_BASE}/${pageId}?fields=instagram_business_account{id,username}&access_token=${encodeURIComponent(pageAccessToken)}`,
+  );
+  if (!res.ok) return null;
+  const json = (await res.json().catch(() => null)) as {
+    instagram_business_account?: { id?: string; username?: string };
+  } | null;
+  const ig = json?.instagram_business_account;
+  return ig?.id ? { id: ig.id, username: ig.username ?? null } : null;
 }
 
 /** Undo `subscribePageToApp`. Best-effort — used on toggle-off and disconnect. */

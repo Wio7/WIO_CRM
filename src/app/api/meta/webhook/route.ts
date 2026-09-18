@@ -28,6 +28,7 @@ import {
   processLeadgenValues,
   type LeadgenValue,
 } from '@/lib/meta-leads/process-lead';
+import { eventosDeMensajes, recibirMensajeMeta } from '@/lib/meta-messaging';
 
 // ------------------------------------------------------------
 // GET — subscription verification.
@@ -75,8 +76,26 @@ export async function POST(request: Request) {
 
   const body = payload as {
     object?: string;
-    entry?: { id?: string; changes?: { field?: string; value?: LeadgenValue }[] }[];
+    entry?: {
+      id?: string;
+      changes?: { field?: string; value?: LeadgenValue }[];
+      messaging?: unknown[];
+    }[];
   };
+
+  // Mensajes de Messenger (`object: 'page'`) o de Instagram
+  // (`object: 'instagram'`), 053.
+  const mensajes = eventosDeMensajes(body);
+  if (mensajes.length > 0) {
+    after(async () => {
+      const db = supabaseAdmin();
+      for (const ev of mensajes) {
+        await recibirMensajeMeta(db, ev).catch((err) =>
+          console.error('[meta webhook] message failed:', err),
+        );
+      }
+    });
+  }
 
   // Group by page so one Graph token lookup covers all of that page's
   // events in the delivery.

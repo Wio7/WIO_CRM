@@ -17,6 +17,7 @@ import {
 import { supabaseAdmin } from './admin-client'
 import { canalDe, insertarMensaje } from '@/lib/channels'
 import { notifyClient } from '@/lib/push/send'
+import { enviarPorMeta, idEnRed } from '@/lib/meta-messaging'
 
 // ------------------------------------------------------------
 // Flows-side Meta sender (interactive variants).
@@ -73,7 +74,43 @@ export async function engineSendText(
     .eq('id', args.conversationId)
     .eq('account_id', args.accountId)
     .maybeSingle()
-  if (canalDe(conv) === 'app') {
+  // Messenger o Instagram (053): la IA contesta por la misma red.
+  const canalConv = canalDe(conv)
+  if (canalConv === 'messenger' || canalConv === 'instagram') {
+    const { data: c } = await db
+      .from('contacts')
+      .select('messenger_psid, instagram_id')
+      .eq('id', args.contactId)
+      .maybeSingle()
+    const destinatario = c ? idEnRed(c, canalConv) : null
+    if (!destinatario) throw new Error(`contact has no ${canalConv} id`)
+    const mid = await enviarPorMeta(db, {
+      accountId: args.accountId,
+      canal: canalConv,
+      destinatarioId: destinatario,
+      texto: args.text,
+    })
+    await insertarMensaje(db, {
+      conversation_id: args.conversationId,
+      sender_type: 'bot',
+      content_type: 'text',
+      content_text: args.text,
+      message_id: mid || null,
+      status: 'sent',
+      channel: canalConv,
+    }, 'id')
+    await db
+      .from('conversations')
+      .update({
+        last_message_text: args.text,
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', args.conversationId)
+    return { whatsapp_message_id: mid }
+  }
+
+  if (canalConv === 'app') {
     const { error: appErr } = await insertarMensaje(db, {
       conversation_id: args.conversationId,
       sender_type: 'bot',
