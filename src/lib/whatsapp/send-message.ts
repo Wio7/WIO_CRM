@@ -40,6 +40,7 @@ import type { MessageTemplate } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import { canalDe, insertarMensaje } from '@/lib/channels';
 import { enviarPorMeta, idEnRed } from '@/lib/meta-messaging';
+import { enviarCorreo } from '@/lib/gmail';
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
 export const VALID_MESSAGE_TYPES = [
@@ -209,6 +210,45 @@ export async function sendMessageToConversation(
   // Messenger o Instagram (053): el contacto no tiene celular, se le
   // contesta por la red por la que escribió.
   const canal = canalDe(conversation);
+
+  // Correo (054): la respuesta sale desde el Gmail conectado, en el hilo.
+  if (canal === 'correo' && messageType === 'text') {
+    if (!contact?.email) {
+      throw new SendMessageError('bad_request', 'Este contacto no tiene correo.', 400);
+    }
+    let idCorreo: string;
+    try {
+      idCorreo = await enviarCorreo(db, {
+        accountId,
+        conversationId,
+        para: contact.email,
+        texto: contentText ?? '',
+      });
+    } catch (err) {
+      throw new SendMessageError('meta_error', `Gmail: ${err instanceof Error ? err.message : 'error'}`, 502);
+    }
+    const { data: guardado, error: errGuardado } = await insertarMensaje<{ id: string }>(db, {
+      conversation_id: conversationId,
+      sender_type: 'agent',
+      content_type: 'text',
+      content_text: contentText || null,
+      message_id: idCorreo,
+      status: 'sent',
+      channel: 'correo',
+    });
+    if (errGuardado || !guardado) {
+      throw new SendMessageError('db_error', errGuardado?.message ?? 'insert failed', 500);
+    }
+    await db
+      .from('conversations')
+      .update({
+        last_message_text: contentText || '',
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', conversationId);
+    return { messageId: guardado.id, whatsappMessageId: idCorreo };
+  }
   if ((canal === 'messenger' || canal === 'instagram') && messageType !== 'template') {
     const destinatario = contact ? idEnRed(contact, canal) : null;
     if (!destinatario) {

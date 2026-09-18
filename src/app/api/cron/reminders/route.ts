@@ -28,6 +28,7 @@ import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { notifyClient, notifyConversation } from "@/lib/push/send";
 import { nombreDeCita, tituloDeCita } from "@/lib/agenda/tipos";
 import { recordatoriosDeCuotas } from "@/lib/payment-plans/reminders";
+import { sincronizarCorreos } from "@/lib/gmail";
 
 /** Ventana alrededor del objetivo, para que un pinger flojo no lo salte. */
 const MARGEN_MIN = 12;
@@ -129,7 +130,12 @@ async function correr(request: Request) {
     console.error("[cron] cuota reminders failed:", err);
     return { enviados: 0, omitidos: "error" };
   });
-  return NextResponse.json({ ok: true, avisados: { una_hora: una, media_hora: media, cuotas } });
+  // Y el correo (054): lo nuevo de cada buzón de Gmail conectado.
+  const correo = await sincronizarCorreos(db).catch((err) => {
+    console.error("[cron] gmail sync failed:", err);
+    return { nuevos: 0 };
+  });
+  return NextResponse.json({ ok: true, avisados: { una_hora: una, media_hora: media, cuotas }, correo });
 }
 
 export async function GET(request: Request) {
