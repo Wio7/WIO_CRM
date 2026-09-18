@@ -274,9 +274,18 @@ export async function POST(request: Request) {
     // /register when the user didn't provide a PIN this time around.
     const { data: existing } = await supabase
       .from('whatsapp_config')
-      .select('id, registered_at, phone_number_id')
+      .select('id, registered_at, phone_number_id, verify_token')
       .eq('account_id', accountId)
       .maybeSingle()
+
+    // The form never shows the verify token back (same as the access
+    // token), so it arrives empty on every later save — changing the PIN,
+    // rotating the access token. Empty means "unchanged", not "clear it":
+    // clearing it silently breaks the webhook the next time Meta
+    // re-verifies, long after whoever saved has forgotten touching it.
+    if (!encryptedVerifyToken && existing?.verify_token) {
+      encryptedVerifyToken = existing.verify_token as string
+    }
 
     const sameNumber =
       existing?.phone_number_id === phone_number_id &&

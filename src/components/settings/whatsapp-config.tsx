@@ -568,7 +568,13 @@ export function WhatsAppConfig() {
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label className="text-muted-foreground">Phone Number ID</Label>
+              {/* These are API credentials, not a login: the browser saw a text
+                  field followed by a password field and filled in the user's
+                  e-mail and saved password (seen 2026-09-18 — it nearly saved
+                  someone's Gmail password as the Meta token). `off` on the
+                  text fields and `new-password` on the token stop that. */}
               <Input
+                autoComplete="off"
                 placeholder="e.g. 100234567890123"
                 value={phoneNumberId}
                 onChange={(e) => setPhoneNumberId(e.target.value)}
@@ -579,6 +585,7 @@ export function WhatsAppConfig() {
             <div className="space-y-2">
               <Label className="text-muted-foreground">WhatsApp Business Account ID</Label>
               <Input
+                autoComplete="off"
                 placeholder="e.g. 100234567890456"
                 value={wabaId}
                 onChange={(e) => setWabaId(e.target.value)}
@@ -591,6 +598,9 @@ export function WhatsAppConfig() {
               <div className="relative">
                 <Input
                   type={showToken ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  data-1p-ignore
+                  data-lpignore="true"
                   placeholder="Enter your access token"
                   value={accessToken}
                   onChange={(e) => {
@@ -623,6 +633,7 @@ export function WhatsAppConfig() {
             <div className="space-y-2">
               <Label className="text-muted-foreground">Webhook Verify Token</Label>
               <Input
+                autoComplete="off"
                 placeholder="Create a custom verify token"
                 value={verifyToken}
                 onChange={(e) => setVerifyToken(e.target.value)}
@@ -640,6 +651,7 @@ export function WhatsAppConfig() {
               </Label>
               <Input
                 type="text"
+                autoComplete="off"
                 inputMode="numeric"
                 maxLength={6}
                 placeholder="6-digit PIN from Meta WhatsApp Manager"
