@@ -5,10 +5,11 @@ import {
   toErrorResponse,
 } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
-import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
+import { encrypt } from '@/lib/whatsapp/encryption'
 import { validateAiCredentials } from '@/lib/ai/validate'
 import { embedTexts } from '@/lib/ai/embeddings'
 import { AiError, type AiProvider } from '@/lib/ai/types'
+import { llaveDeUso } from '@/lib/ai/config'
 
 function bad(message: string) {
   return NextResponse.json({ error: message }, { status: 400 })
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
       apiKeyPlain = rawKey
     } else if (existing?.api_key) {
       try {
-        apiKeyPlain = decrypt(existing.api_key)
+        apiKeyPlain = llaveDeUso(existing.api_key, provider)
       } catch {
         return bad('Stored API key could not be decrypted — re-enter your key.')
       }

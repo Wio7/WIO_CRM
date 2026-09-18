@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { GatedButton } from "@/components/ui/gated-button";
 import { CalendarDays, Plus, Trash2, Video } from "lucide-react";
 import { toast } from "sonner";
+import { tituloDeCita } from "@/lib/agenda/tipos";
 
 const DIAS = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
@@ -332,7 +333,7 @@ function FilaCita({
       <div>
         <p className="text-sm font-medium text-foreground">
           {cita.contact?.name || cita.contact?.phone || "Cliente"}
-          <span className="ml-2 font-normal text-muted-foreground">{cita.kind}</span>
+          <span className="ml-2 font-normal text-muted-foreground">{tituloDeCita(cita.kind)}</span>
         </p>
         <p className="text-xs text-muted-foreground">{cuando(cita.starts_at)}</p>
       </div>

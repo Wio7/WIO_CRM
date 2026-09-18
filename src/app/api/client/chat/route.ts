@@ -14,7 +14,9 @@
 // el hilo salga por Meta no se corte a mitad.
 // ============================================================
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
+
+import { dispatchInboundToAiReply } from "@/lib/ai/auto-reply";
 
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { corsPreflight, withCors } from "@/lib/cors";
@@ -112,6 +114,30 @@ export async function POST(request: Request) {
       NextResponse.json({ ok: false, reason: "server_error" }, { status: 500 }),
     );
   }
+
+  // La IA 24/7 también contesta en la app, con las mismas reglas que en
+  // WhatsApp: sólo mientras ningún asesor haya escrito en el hilo. Va
+  // después de responder para que el cliente vea su mensaje al instante.
+  after(async () => {
+    const [{ data: conv }, { data: cuenta }] = await Promise.all([
+      db
+        .from("conversations")
+        .select("id")
+        .eq("contact_id", contacto.id)
+        .eq("account_id", contacto.account_id)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      db.from("accounts").select("owner_user_id").eq("id", contacto.account_id).maybeSingle(),
+    ]);
+    if (!conv || !cuenta?.owner_user_id) return;
+    await dispatchInboundToAiReply({
+      accountId: contacto.account_id,
+      conversationId: conv.id,
+      contactId: contacto.id,
+      configOwnerUserId: cuenta.owner_user_id,
+    });
+  });
 
   return withCors(request, NextResponse.json({ ok: true, mensaje }));
 }

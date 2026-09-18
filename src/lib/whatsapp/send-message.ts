@@ -38,6 +38,7 @@ import {
 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
+import { canalDe, insertarMensaje } from '@/lib/channels';
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
 export const VALID_MESSAGE_TYPES = [
@@ -218,6 +219,26 @@ export async function sendMessageToConversation(
       'Invalid phone number format',
       400
     );
+  }
+
+  // El cliente escribió por la Golden App (050): se le contesta ahí, no
+  // por WhatsApp. Es lo que pasa con los clientes de cobranzas, que
+  // hablan con Golden sólo desde la app. Las plantillas son cosa de
+  // WhatsApp y siguen su camino.
+  if (
+    canalDe(conversation) === 'app' &&
+    messageType !== 'template' &&
+    (await leeEnLaApp(db, accountId, contact))
+  ) {
+    return entregarSoloEnLaApp(db, {
+      conversationId,
+      contactId: contact.id,
+      accountId,
+      messageType,
+      contentText: contentText ?? undefined,
+      mediaUrl: mediaUrl ?? undefined,
+      replyToMessageId: replyToMessageId ?? undefined,
+    });
   }
 
   // WhatsApp config, account-scoped.
@@ -519,24 +540,21 @@ async function entregarSoloEnLaApp(
     replyToMessageId?: string;
   },
 ): Promise<SendMessageResult> {
-  const { data: messageRecord, error: msgError } = await db
-    .from('messages')
-    .insert({
-      conversation_id: args.conversationId,
-      sender_type: 'agent',
-      content_type: args.messageType,
-      content_text: args.contentText || null,
-      media_url: args.mediaUrl || null,
-      message_id: null,
-      status: 'sent',
-      reply_to_message_id: args.replyToMessageId || null,
-    })
-    .select()
-    .single();
+  const { data: messageRecord, error: msgError } = await insertarMensaje<{ id: string }>(db, {
+    conversation_id: args.conversationId,
+    sender_type: 'agent',
+    content_type: args.messageType,
+    content_text: args.contentText || null,
+    media_url: args.mediaUrl || null,
+    message_id: null,
+    status: 'sent',
+    reply_to_message_id: args.replyToMessageId || null,
+    channel: 'app',
+  });
 
-  if (msgError) {
+  if (msgError || !messageRecord) {
     console.error('[send-message] in-app delivery insert failed:', msgError);
-    throw new SendMessageError('db_error', msgError.message, 500);
+    throw new SendMessageError('db_error', msgError?.message ?? 'insert failed', 500);
   }
 
   await db

@@ -26,6 +26,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { notifyClient, notifyConversation } from "@/lib/push/send";
+import { nombreDeCita, tituloDeCita } from "@/lib/agenda/tipos";
 
 /** Ventana alrededor del objetivo, para que un pinger flojo no lo salte. */
 const MARGEN_MIN = 12;
@@ -57,7 +58,7 @@ async function avisar(db: SupabaseClient, cita: Cita, cuanto: "una hora" | "medi
     await notifyClient(db, {
       contactId: cita.contact_id,
       title: "Golden Habitat",
-      body: `Tu ${cita.kind} es en ${cuanto}, a las ${cuando}.`,
+      body: `Tu ${nombreDeCita(cita.kind)} es en ${cuanto}, a las ${cuando}.`,
     }).catch((err) => console.error("[cron] client reminder failed:", err));
 
     const { data: conv } = await db
@@ -73,7 +74,7 @@ async function avisar(db: SupabaseClient, cita: Cita, cuanto: "una hora" | "medi
         accountId: cita.account_id,
         conversationId: conv.id,
         assignedAgentId: cita.user_id,
-        title: `${cita.kind} en ${cuanto}`,
+        title: `${tituloDeCita(cita.kind)} en ${cuanto}`,
         body: `${quien}, a las ${cuando}.`,
       }).catch((err) => console.error("[cron] agent reminder failed:", err));
     }

@@ -15,6 +15,8 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { canalDe, insertarMensaje } from '@/lib/channels'
+import { notifyClient } from '@/lib/push/send'
 
 // ------------------------------------------------------------
 // Flows-side Meta sender (interactive variants).
@@ -61,6 +63,42 @@ export async function engineSendText(
   args: SendTextEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   const db = supabaseAdmin()
+
+  // Conversación de la Golden App (050): la respuesta de la IA o de un
+  // flujo se queda en la app, igual que la de un asesor. Mandarla por
+  // WhatsApp sería escribirle por un canal que no usó.
+  const { data: conv } = await db
+    .from('conversations')
+    .select('*')
+    .eq('id', args.conversationId)
+    .eq('account_id', args.accountId)
+    .maybeSingle()
+  if (canalDe(conv) === 'app') {
+    const { error: appErr } = await insertarMensaje(db, {
+      conversation_id: args.conversationId,
+      sender_type: 'bot',
+      content_type: 'text',
+      content_text: args.text,
+      message_id: null,
+      status: 'sent',
+      channel: 'app',
+    }, 'id')
+    if (appErr) throw new Error(`in-app insert failed: ${appErr.message}`)
+    await db
+      .from('conversations')
+      .update({
+        last_message_text: args.text,
+        last_message_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', args.conversationId)
+    await notifyClient(db, {
+      contactId: args.contactId,
+      title: 'Golden Habitat',
+      body: args.text,
+    }).catch((err: unknown) => console.error('[engine] client push failed:', err))
+    return { whatsapp_message_id: '' }
+  }
 
   const { data: contact, error: contactErr } = await db
     .from('contacts')

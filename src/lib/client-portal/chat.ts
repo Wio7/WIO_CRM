@@ -21,6 +21,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { notifyConversation } from "@/lib/push/send";
+import { insertarMensaje, actualizarConversacion } from "@/lib/channels";
 
 export interface MensajeChat {
   id: string;
@@ -180,32 +181,36 @@ export async function guardarMensajeDelCliente(
   const conv = await conversacionDelCliente(db, contacto);
   if (!conv) return null;
 
-  const { data: guardado, error } = await db
-    .from("messages")
-    .insert({
+  const { data: guardado, error } = await insertarMensaje<{ id: string; created_at: string }>(
+    db,
+    {
       conversation_id: conv.id,
       sender_type: "customer",
       content_type: "text",
       content_text: texto,
       status: "delivered",
-    })
-    .select("id, created_at")
-    .single();
+      channel: "app",
+    },
+    "id, created_at",
+  );
 
-  if (error) {
-    console.error("[client-portal] could not save the message:", error.message);
+  if (error || !guardado) {
+    console.error("[client-portal] could not save the message:", error?.message);
     return null;
   }
 
-  await db
-    .from("conversations")
-    .update({
+  // El cliente escribió por la app: por la app se le contesta.
+  await actualizarConversacion(
+    db,
+    conv.id,
+    {
       last_message_text: texto,
       last_message_at: new Date().toISOString(),
       unread_count: (conv.unread_count || 0) + 1,
       updated_at: new Date().toISOString(),
-    })
-    .eq("id", conv.id);
+    },
+    "app",
+  );
 
   try {
     await notifyConversation(db, {

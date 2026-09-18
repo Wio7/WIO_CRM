@@ -13,6 +13,22 @@ interface AiConfigRow {
   embeddings_api_key: string | null
 }
 
+/**
+ * `api_key = 'env'` (migración 050): la llave no vive en la base sino en
+ * el entorno del servidor — OPENAI_API_KEY o ANTHROPIC_API_KEY en Vercel.
+ * Así se enciende la IA de una cuenta sin que nadie pegue una llave.
+ */
+export const LLAVE_DEL_ENTORNO = 'env'
+
+/** La llave en claro: la del entorno o la guardada (cifrada). */
+export function llaveDeUso(stored: string, provider: 'openai' | 'anthropic'): string {
+  if (stored === LLAVE_DEL_ENTORNO) {
+    const env = provider === 'openai' ? process.env.OPENAI_API_KEY : process.env.ANTHROPIC_API_KEY
+    return (env ?? '').trim()
+  }
+  return decrypt(stored)
+}
+
 const CONFIG_COLUMNS =
   'provider, model, api_key, system_prompt, is_active, auto_reply_enabled, auto_reply_max_per_conversation, embeddings_api_key'
 
@@ -50,6 +66,9 @@ export async function loadAiConfig(
   // edit could leave it empty. Treat a missing key as "not configured"
   // rather than letting decrypt() throw on null.
   if (!row.api_key) return null
+  const apiKey = llaveDeUso(row.api_key, row.provider)
+  // 'env' sin la variable puesta en el servidor: como si no hubiera IA.
+  if (!apiKey) return null
 
   // The embeddings key is optional and independent of the chat key —
   // a corrupt/undecryptable one should downgrade to lexical KB, not
@@ -71,7 +90,7 @@ export async function loadAiConfig(
   return {
     provider: row.provider,
     model: row.model,
-    apiKey: decrypt(row.api_key),
+    apiKey,
     systemPrompt: row.system_prompt,
     isActive: row.is_active,
     autoReplyEnabled: row.auto_reply_enabled,

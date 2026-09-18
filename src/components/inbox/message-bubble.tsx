@@ -27,6 +27,15 @@ interface MessageBubbleProps {
   onToggleReaction?: (emoji: string) => void;
 }
 
+/** El cartelito del canal de cada mensaje (050). */
+const POR_CANAL: Record<string, string> = {
+  whatsapp: "Por WhatsApp",
+  app: "Por la app",
+  messenger: "Por Messenger",
+  instagram: "Por Instagram",
+  correo: "Por correo",
+};
+
 function StatusIcon({ status }: { status: Message["status"] }) {
   switch (status) {
     case "sending":
@@ -292,7 +301,7 @@ export function MessageBubble({
               isAgent ? "text-primary-foreground/70" : "text-muted-foreground",
             )}
           >
-            {time}
+            {POR_CANAL[message.channel ?? "whatsapp"] ?? "Por WhatsApp"} · {time}
           </span>
           {isAgent && <StatusIcon status={message.status} />}
         </div>

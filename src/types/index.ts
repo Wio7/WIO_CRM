@@ -188,6 +188,8 @@ export type ConversationStatus = 'open' | 'pending' | 'closed';
 
 export interface Conversation {
   id: string;
+  /** Canal por el que escribió el cliente la última vez (050). */
+  channel?: string;
   user_id: string;
   contact_id: string;
   status: ConversationStatus;
@@ -255,6 +257,8 @@ export interface Message {
    * cue (renders with a "↩ button reply" affordance).
    */
   interactive_reply_id?: string;
+  /** Por dónde llegó o salió (050): whatsapp, app, messenger, instagram, correo. */
+  channel?: string;
 }
 
 export type ReactionActor = 'customer' | 'agent';

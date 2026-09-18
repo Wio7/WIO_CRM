@@ -25,6 +25,7 @@ import { resolveClientSession } from "@/lib/client-portal/sessions";
 import { guardarMensajeDelCliente } from "@/lib/client-portal/chat";
 import { diasLibres, quienAtiende, PASO_MIN } from "@/lib/agenda/slots";
 import { notifyConversation } from "@/lib/push/send";
+import { nombreDeCita } from "@/lib/agenda/tipos";
 
 export function OPTIONS(request: Request) {
   return corsPreflight(request);
@@ -163,7 +164,7 @@ export async function POST(request: Request) {
     await guardarMensajeDelCliente(
       db,
       contacto,
-      `Agendé una ${tipo} para el ${hora(cita.starts_at)}.`,
+      `Agendé una ${nombreDeCita(tipo)} para el ${hora(cita.starts_at)}.`,
     );
     const { data: conv } = await db
       .from("conversations")
@@ -178,7 +179,7 @@ export async function POST(request: Request) {
         conversationId: conv.id,
         assignedAgentId: tramo.user_id,
         title: "Nueva cita",
-        body: `${contacto.name || contacto.phone}: ${tipo} el ${hora(cita.starts_at)}`,
+        body: `${contacto.name || contacto.phone}: ${nombreDeCita(tipo)} el ${hora(cita.starts_at)}`,
       }).catch(() => { /* el aviso puede fallar; la cita ya está */ });
     }
   }

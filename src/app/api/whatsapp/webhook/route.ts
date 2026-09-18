@@ -14,6 +14,7 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import { actualizarConversacion } from '@/lib/channels'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -742,20 +743,19 @@ async function processMessage(
     return
   }
 
-  // Update conversation
-  const { error: convError } = await supabaseAdmin()
-    .from('conversations')
-    .update({
+  // Update conversation. Escribió por WhatsApp: por WhatsApp se le
+  // contesta, aunque antes hubiera escrito desde la app (050).
+  await actualizarConversacion(
+    supabaseAdmin(),
+    conversation.id,
+    {
       last_message_text: contentText || `[${message.type}]`,
       last_message_at: new Date().toISOString(),
       unread_count: (conversation.unread_count || 0) + 1,
       updated_at: new Date().toISOString(),
-    })
-    .eq('id', conversation.id)
-
-  if (convError) {
-    console.error('Error updating conversation:', convError)
-  }
+    },
+    'whatsapp',
+  )
 
   // Wake the responsible advisor's phone (Golden App push, migration 039).
   // Awaited so the send isn't cut off when after() completes; a push
