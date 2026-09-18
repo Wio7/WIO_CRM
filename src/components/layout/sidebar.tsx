@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
-import {
+import { Ticket,
   Bell,
   Bot,
   Building2,
@@ -105,6 +105,7 @@ const navItems: NavItem[] = [
   { href: "/reservations", label: "Separaciones", icon: CalendarCheck },
   { href: "/payment-plans", label: "Cuotas", icon: Wallet },
   { href: "/calendar", label: "Calendario", icon: CalendarDays },
+  { href: "/coupons", label: "Cupones y referidos", icon: Ticket },
   { href: "/dialer", label: "Marcador", icon: PhoneCall },
   { href: "/calls", label: "Llamadas", icon: PhoneIncoming },
   { href: "/broadcasts", label: "Difusiones", icon: Radio },

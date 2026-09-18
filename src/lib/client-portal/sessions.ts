@@ -10,6 +10,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { notifyConversation } from "@/lib/push/send";
+import { anotarReferido } from "@/lib/referrals";
 import {
   IP_WINDOW_MS,
   MAX_FAILS_PER_PHONE,
@@ -306,7 +307,7 @@ async function cuentaDeRegistro(db: SupabaseClient) {
 
 export async function registerVisitor(
   db: SupabaseClient,
-  input: { name: string; phone: string; dni: string; ip: string; userAgent: string | null },
+  input: { name: string; phone: string; dni: string; ip: string; userAgent: string | null; ref?: string },
 ): Promise<RegisterResult> {
   const nombre = String(input.name ?? "").trim().replace(/ +/g, " ").slice(0, 80);
   const candidates = phoneCandidates(input.phone);
@@ -374,6 +375,9 @@ export async function registerVisitor(
     succeeded: true,
     contact_id: creado.id,
   });
+
+  // Llegó con el enlace de alguien: queda como su referido (051).
+  if (input.ref) await anotarReferido(db, creado, input.ref).catch(() => {});
 
   const token = newSessionToken();
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();

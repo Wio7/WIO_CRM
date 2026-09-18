@@ -47,6 +47,7 @@ export async function POST(request: Request) {
     name: texto(body?.name),
     phone: texto(body?.phone),
     dni: texto(body?.dni),
+    ref: texto(body?.ref),
     ip: clientIp(request),
     userAgent: request.headers.get("user-agent"),
   });
