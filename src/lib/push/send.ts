@@ -101,3 +101,55 @@ export async function notifyConversation(
     })
   );
 }
+
+/**
+ * Avisar al CLIENTE en su celular (Golden App, migración 048).
+ *
+ * El otro lado de `notifyConversation`: cuando el asesor responde, al
+ * cliente le suena el teléfono aunque tenga la app cerrada. Sin esto, el
+ * chat de la app obliga a que el cliente se acuerde de volver a mirar, y
+ * un canal al que hay que volver a mirar no es un canal.
+ *
+ * El aviso abre el chat, no la bandeja: para el cliente sólo existe una
+ * conversación, la suya.
+ *
+ * Nunca lanza. Una suscripción vencida (404/410) se borra.
+ */
+export async function notifyClient(
+  db: SupabaseClient,
+  push: { contactId: string; title: string; body: string }
+): Promise<void> {
+  if (!ensureConfigured()) return;
+
+  const { data: subscriptions } = await db
+    .from('client_push_subscriptions')
+    .select('id, endpoint, p256dh, auth')
+    .eq('contact_id', push.contactId);
+  if (!subscriptions?.length) return;
+
+  const payload = JSON.stringify({
+    title: truncate(push.title, 60),
+    body: truncate(push.body, 140),
+    url: '/#/',
+    tag: `cliente-${push.contactId}`,
+  });
+
+  await Promise.all(
+    subscriptions.map(async (s) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+          payload,
+          { TTL: 3600, urgency: 'high' }
+        );
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410) {
+          await db.from('client_push_subscriptions').delete().eq('id', s.id);
+        } else {
+          console.error('[push] client send failed:', status, (err as Error).message);
+        }
+      }
+    })
+  );
+}

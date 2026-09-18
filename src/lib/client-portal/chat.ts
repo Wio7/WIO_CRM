@@ -78,6 +78,7 @@ export async function conversacionDelCliente(
       contact_id: contacto.id,
       user_id: cuenta?.owner_user_id ?? null,
       status: "open",
+      assigned_agent_id: await aQuienLeToca(db, contacto),
     })
     .select("id, assigned_agent_id, unread_count")
     .single();
@@ -87,6 +88,43 @@ export async function conversacionDelCliente(
     return null;
   }
   return creada as { id: string; assigned_agent_id: string | null; unread_count: number };
+}
+
+/**
+ * A quién le toca este cliente.
+ *
+ * En Golden el asesor vende y suelta: al que ya está pagando lo lleva
+ * COBRANZAS, no quien se lo vendió. Así que si el contacto tiene plan de
+ * cuotas, la conversación nace asignada al de cobranzas menos cargado
+ * (función `pick_area_agent`, migración 048).
+ *
+ * `null` significa "que decida el reparto de siempre": es lo que pasa con
+ * quien todavía no compró —ése es de ventas— y también cuando nadie tiene
+ * todavía el cargo de cobranzas, porque dejar la conversación sin dueño
+ * es mejor que asignársela a alguien que no la va a atender.
+ */
+async function aQuienLeToca(
+  db: SupabaseClient,
+  contacto: ContactoMinimo,
+): Promise<string | null> {
+  const { count, error } = await db
+    .from("payment_plans")
+    .select("id", { count: "exact", head: true })
+    .eq("contact_id", contacto.id)
+    .in("status", ["activo", "pagado"]);
+  if (error || !count) return null;
+
+  const { data, error: errArea } = await db.rpc("pick_area_agent", {
+    p_account_id: contacto.account_id,
+    p_area: "cobranzas",
+  });
+  if (errArea) {
+    // Sin 048 aplicada la función no existe: seguir sin asignar es
+    // correcto, el reparto de 039 hace lo suyo.
+    console.error("[client-portal] pick_area_agent failed:", errArea.message);
+    return null;
+  }
+  return (data as string | null) ?? null;
 }
 
 /**

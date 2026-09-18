@@ -29,6 +29,7 @@ import {
 } from '@/lib/whatsapp/meta-api';
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
+import { notifyClient } from '@/lib/push/send';
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -436,6 +437,18 @@ export async function sendMessageToConversation(
     })
     .eq('id', conversationId);
 
+  // Si el cliente lee en la Golden App, que le suene el celular. Es un
+  // no-op cuando no tiene la app: no hay suscripciones que buscar.
+  try {
+    await notifyClient(db, {
+      contactId: contact.id,
+      title: 'Golden Habitat',
+      body: contentText || `[${messageType}]`,
+    });
+  } catch (err) {
+    console.error('[send-message] client push failed:', err);
+  }
+
   // Pause any active Flow run for this contact — the agent stepping in
   // is the strongest "yield, human is here" signal. Best-effort.
   try {
@@ -534,6 +547,16 @@ async function entregarSoloEnLaApp(
       updated_at: new Date().toISOString(),
     })
     .eq('id', args.conversationId);
+
+  try {
+    await notifyClient(db, {
+      contactId: args.contactId,
+      title: 'Golden Habitat',
+      body: args.contentText || `[${args.messageType}]`,
+    });
+  } catch (err) {
+    console.error('[send-message] client push failed:', err);
+  }
 
   return { messageId: messageRecord.id, whatsappMessageId: '' };
 }
