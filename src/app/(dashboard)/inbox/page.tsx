@@ -12,6 +12,12 @@ import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -56,6 +62,9 @@ export default function InboxPage() {
    * below reconciles to the stored value right after mount instead.
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
+  // La ficha en el celular, donde el panel de la derecha no existe. Se
+  // abre tocando el nombre en la cabecera, igual que en WhatsApp.
+  const [perfilMovil, setPerfilMovil] = useState(false);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
@@ -63,6 +72,17 @@ export default function InboxPage() {
     } catch {
       // localStorage can throw in private-browsing / sandboxed contexts.
     }
+  }, []);
+
+  /**
+   * Tocar el nombre del contacto. En escritorio abre (o deja abierto) el
+   * panel de la derecha; en el celular, la hoja. Se hacen las dos cosas
+   * porque el mismo botón sirve en los dos tamaños y no hay por qué
+   * preguntarle al navegador cuál es cuál: cada capa muestra la suya.
+   */
+  const handleOpenProfile = useCallback(() => {
+    setContactPanelOpen(true);
+    setPerfilMovil(true);
   }, []);
 
   const handleToggleContactPanel = useCallback(() => {
@@ -610,6 +630,7 @@ export default function InboxPage() {
             onRefresh={handleManualRefresh}
             contactPanelOpen={contactPanelOpen}
             onToggleContactPanel={handleToggleContactPanel}
+            onOpenProfile={handleOpenProfile}
           />
         </div>
 
@@ -622,6 +643,18 @@ export default function InboxPage() {
             <ContactSidebar contact={activeContact} />
           </div>
         )}
+
+        {/* La misma ficha, en el celular. `lg:hidden` en el contenido para
+            que no se abra por detrás del panel cuando alguien agranda la
+            ventana con la hoja abierta. */}
+        <Sheet open={perfilMovil} onOpenChange={setPerfilMovil}>
+          <SheetContent className="w-full overflow-y-auto p-0 sm:max-w-sm lg:hidden">
+            <SheetHeader className="px-4 pt-4">
+              <SheetTitle>Ficha del cliente</SheetTitle>
+            </SheetHeader>
+            <ContactSidebar contact={activeContact} />
+          </SheetContent>
+        </Sheet>
       </div>
     </div>
   );

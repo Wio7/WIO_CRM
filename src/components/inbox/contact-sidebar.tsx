@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { format } from "date-fns";
+import { ClientSummary } from "@/components/inbox/client-summary";
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -172,6 +173,14 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
+          </div>
+
+          {/* Lo que cobranzas necesita antes de contestar: su lote, su
+              saldo y si dejó un voucher esperando. Se pinta solo si el
+              contacto tiene plan; un interesado no tiene nada que ver
+              aquí. */}
+          <div className="mt-4">
+            <ClientSummary contactId={contact.id} />
           </div>
 
           {/* Divider */}

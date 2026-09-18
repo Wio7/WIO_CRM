@@ -104,6 +104,12 @@ interface MessageThreadProps {
    * callers keep working; the toggle button only renders when
    * `onToggleContactPanel` is wired up.
    */
+  /**
+   * Abrir la ficha del contacto tocando su nombre en la cabecera, como
+   * en WhatsApp. En escritorio despliega el panel de la derecha; en el
+   * celular, donde ese panel no existe, el padre abre una hoja.
+   */
+  onOpenProfile?: () => void;
   contactPanelOpen?: boolean;
   onToggleContactPanel?: () => void;
 }
@@ -162,6 +168,7 @@ export function MessageThread({
   onBack,
   resyncToken = 0,
   onRefresh,
+  onOpenProfile,
   contactPanelOpen,
   onToggleContactPanel,
 }: MessageThreadProps) {
@@ -834,13 +841,24 @@ export function MessageThread({
               <ArrowLeft className="h-5 w-5" />
             </button>
           )}
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
-            {displayName.charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-            <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
-          </div>
+          <button
+            type="button"
+            onClick={onOpenProfile}
+            disabled={!onOpenProfile}
+            title={onOpenProfile ? "Ver la ficha del cliente" : undefined}
+            className={cn(
+              "flex min-w-0 items-center gap-2 rounded-md text-left sm:gap-3",
+              onOpenProfile && "transition-colors hover:bg-muted/60",
+            )}
+          >
+            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
+              {displayName.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
+              <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+            </div>
+          </button>
           {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
           <Badge

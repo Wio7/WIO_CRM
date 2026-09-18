@@ -43,6 +43,7 @@ function hoyEnLima(): string {
 }
 
 interface CuotaFila {
+  id: string;
   number: number;
   amount: number | string;
   due_date: string;
@@ -104,8 +105,8 @@ export async function GET(request: Request) {
   // todavía no se corrió: el cliente tiene que poder ver lo que debe
   // aunque el CRM vaya una migración atrás.
   const CON_047 =
-    "number, amount, due_date, status, paid_at, paid_amount, paid_method, paid_reference, voucher_path";
-  const SIN_047 = "number, amount, due_date, status, paid_at, paid_amount";
+    "id, number, amount, due_date, status, paid_at, paid_amount, paid_method, paid_reference, voucher_path";
+  const SIN_047 = "id, number, amount, due_date, status, paid_at, paid_amount";
 
   const [{ data: balance }, cuotasRes] = await Promise.all([
     db.from("payment_plan_balances").select("*").eq("plan_id", plan.id).maybeSingle(),
@@ -161,6 +162,10 @@ export async function GET(request: Request) {
         },
       },
       cuotas: (cuotas ?? []).map((c) => ({
+        // El id viaja porque el cliente lo necesita para mandar el voucher
+        // de ESA cuota. Es suyo: la ruta que lo recibe vuelve a comprobar
+        // que la cuota sea de su plan.
+        id: c.id,
         numero: c.number,
         monto: Number(c.amount),
         vence: c.due_date,
