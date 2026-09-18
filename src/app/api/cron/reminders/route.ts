@@ -1,0 +1,134 @@
+// ============================================================
+// /api/cron/reminders — "tu cita es en una hora"
+//
+//   GET|POST ?secret=<CRON_SECRET>  (o Authorization: Bearer <CRON_SECRET>)
+//
+// Avisa dos veces, a los dos lados: al cliente en su celular (migración
+// 048) y a quien la va a atender (039). Una hora antes para que se
+// acomode, y media hora antes para que se conecte.
+//
+// Hay dos marcas de tiempo y no una (`reminded_60`, `reminded_30`) porque
+// son dos avisos distintos: si el que corre esto se retrasa y salta el de
+// la hora, el de la media hora todavía tiene que salir.
+//
+// Cada aviso se marca ANTES de mandarse. Si la notificación falla, se
+// pierde un aviso; si se marcara después y el proceso se cortara a mitad,
+// el cliente recibiría el mismo aviso en cada pasada. Molestar de más es
+// peor que avisar de menos.
+//
+// Esto necesita que algo lo llame cada pocos minutos. Vercel Hobby sólo
+// permite un cron diario, así que en producción lo llama un pinger
+// externo (cron-job.org o similar) con el secreto en la URL.
+// ============================================================
+
+import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { notifyClient, notifyConversation } from "@/lib/push/send";
+
+/** Ventana alrededor del objetivo, para que un pinger flojo no lo salte. */
+const MARGEN_MIN = 12;
+
+const enMinutos = (m: number) => new Date(Date.now() + m * 60_000).toISOString();
+
+const horaDe = (iso: string) =>
+  new Intl.DateTimeFormat("es-PE", {
+    timeZone: "America/Lima",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+
+interface Cita {
+  id: string;
+  account_id: string;
+  contact_id: string | null;
+  user_id: string;
+  starts_at: string;
+  kind: string;
+  contacts: { name: string | null; phone: string | null } | null;
+}
+
+async function avisar(db: SupabaseClient, cita: Cita, cuanto: "una hora" | "media hora") {
+  const cuando = horaDe(cita.starts_at);
+  const quien = cita.contacts?.name || cita.contacts?.phone || "tu cliente";
+
+  if (cita.contact_id) {
+    await notifyClient(db, {
+      contactId: cita.contact_id,
+      title: "Golden Habitat",
+      body: `Tu ${cita.kind} es en ${cuanto}, a las ${cuando}.`,
+    }).catch((err) => console.error("[cron] client reminder failed:", err));
+
+    const { data: conv } = await db
+      .from("conversations")
+      .select("id")
+      .eq("contact_id", cita.contact_id)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (conv) {
+      await notifyConversation(db, {
+        accountId: cita.account_id,
+        conversationId: conv.id,
+        assignedAgentId: cita.user_id,
+        title: `${cita.kind} en ${cuanto}`,
+        body: `${quien}, a las ${cuando}.`,
+      }).catch((err) => console.error("[cron] agent reminder failed:", err));
+    }
+  }
+}
+
+async function tanda(
+  db: SupabaseClient,
+  minutos: 60 | 30,
+  columna: "reminded_60" | "reminded_30",
+): Promise<number> {
+  const { data, error } = await db
+    .from("appointments")
+    .select("id, account_id, contact_id, user_id, starts_at, kind, contacts(name, phone)")
+    .eq("status", "agendada")
+    .is(columna, null)
+    .gte("starts_at", enMinutos(minutos - MARGEN_MIN))
+    .lte("starts_at", enMinutos(minutos + MARGEN_MIN))
+    .limit(200);
+
+  if (error) {
+    console.error("[cron] reminders lookup failed:", error.message);
+    return 0;
+  }
+
+  const citas = (data ?? []) as unknown as Cita[];
+  for (const cita of citas) {
+    await db
+      .from("appointments")
+      .update({ [columna]: new Date().toISOString() })
+      .eq("id", cita.id);
+    await avisar(db, cita, minutos === 60 ? "una hora" : "media hora");
+  }
+  return citas.length;
+}
+
+async function correr(request: Request) {
+  const url = new URL(request.url);
+  const secreto = process.env.CRON_SECRET;
+  const dado = url.searchParams.get("secret")
+    || (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+
+  if (!secreto || dado !== secreto) {
+    return NextResponse.json({ ok: false, reason: "unauthorized" }, { status: 401 });
+  }
+
+  const db = supabaseAdmin();
+  const [una, media] = [await tanda(db, 60, "reminded_60"), await tanda(db, 30, "reminded_30")];
+  return NextResponse.json({ ok: true, avisados: { una_hora: una, media_hora: media } });
+}
+
+export async function GET(request: Request) {
+  return correr(request);
+}
+
+export async function POST(request: Request) {
+  return correr(request);
+}

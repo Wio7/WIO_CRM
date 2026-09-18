@@ -27,6 +27,7 @@ const pageTitles: Record<string, string> = {
   "/projects": "Proyectos Inmobiliarios",
   "/reservations": "Centro de Separaciones",
   "/payment-plans": "Cuotas y Cobranzas",
+  "/calendar": "Calendario",
   "/dialer": "Marcador",
   "/calls": "Llamadas",
   "/broadcasts": "Difusiones",
