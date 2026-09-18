@@ -177,6 +177,7 @@ export async function guardarMensajeDelCliente(
   db: SupabaseClient,
   contacto: ContactoMinimo,
   texto: string,
+  adjunto?: { tipo: "image" | "document"; url: string },
 ): Promise<MensajeChat | null> {
   const conv = await conversacionDelCliente(db, contacto);
   if (!conv) return null;
@@ -186,8 +187,9 @@ export async function guardarMensajeDelCliente(
     {
       conversation_id: conv.id,
       sender_type: "customer",
-      content_type: "text",
-      content_text: texto,
+      content_type: adjunto?.tipo ?? "text",
+      content_text: texto || null,
+      media_url: adjunto?.url ?? null,
       status: "delivered",
       channel: "app",
     },
@@ -204,7 +206,7 @@ export async function guardarMensajeDelCliente(
     db,
     conv.id,
     {
-      last_message_text: texto,
+      last_message_text: adjunto ? (adjunto.tipo === "image" ? "📷 Foto" : "📄 Documento") : texto,
       last_message_at: new Date().toISOString(),
       unread_count: (conv.unread_count || 0) + 1,
       updated_at: new Date().toISOString(),
@@ -218,7 +220,9 @@ export async function guardarMensajeDelCliente(
       conversationId: conv.id,
       assignedAgentId: conv.assigned_agent_id ?? null,
       title: contacto.name || contacto.phone || "Cliente",
-      body: texto,
+      body: adjunto
+        ? `${adjunto.tipo === "image" ? "📷 Foto" : "📄 Documento"}${texto ? `: ${texto}` : ""}`
+        : texto,
     });
   } catch (err) {
     console.error("[client-portal] push notify failed:", err);
@@ -227,9 +231,9 @@ export async function guardarMensajeDelCliente(
   return {
     id: guardado.id as string,
     de: "cliente",
-    texto,
-    tipo: "text",
-    media_url: null,
+    texto: texto || null,
+    tipo: adjunto?.tipo ?? "text",
+    media_url: adjunto?.url ?? null,
     enviado_el: guardado.created_at as string,
   };
 }
