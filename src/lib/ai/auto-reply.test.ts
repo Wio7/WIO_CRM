@@ -13,6 +13,8 @@ const h = vi.hoisted(() => ({
     autoResponders: [] as { id: string }[],
     account: null as Record<string, unknown> | null,
     agentMessages: [] as { id: string }[],
+    contact: { name: 'Ana', dni: null } as Record<string, unknown> | null,
+    balance: null as Record<string, unknown> | null,
     claim: true as boolean,
     updatePayload: null as Record<string, unknown> | null,
     rpcCalls: [] as { name: string; args: unknown }[],
@@ -45,6 +47,24 @@ vi.mock('./admin-client', () => ({
           eq: () => chain,
           maybeSingle: () =>
             Promise.resolve({ data: h.state.account, error: null }),
+        }
+        return chain
+      }
+      if (table === 'contacts') {
+        // .select().eq().maybeSingle() → con quién habla la IA
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () => Promise.resolve({ data: h.state.contact, error: null }),
+        }
+        return chain
+      }
+      if (table === 'payment_plan_balances') {
+        // .select().eq().maybeSingle() → su saldo, si ya compró
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: () => Promise.resolve({ data: h.state.balance, error: null }),
         }
         return chain
       }
@@ -247,11 +267,14 @@ describe('dispatchInboundToAiReply — eligibility gates', () => {
 })
 
 describe('dispatchInboundToAiReply — handoff', () => {
-  it('disables auto-reply and does not send on handoff', async () => {
+  it('al pasar a un humano apaga la IA, avisa al cliente y no gasta un turno', async () => {
     h.generateReply.mockResolvedValue({ text: '', handoff: true })
     await dispatchInboundToAiReply(ARGS)
-    expect(h.engineSendText).not.toHaveBeenCalled()
     expect(h.state.updatePayload).toEqual({ ai_autoreply_disabled: true })
+    // El traspaso no consume una de las respuestas del tope.
     expect(h.state.rpcCalls).toHaveLength(0)
+    // Y sobre todo: el cliente ya no se queda hablando solo.
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
+    expect(h.engineSendText.mock.calls[0][0].text).toMatch(/asesor/i)
   })
 })

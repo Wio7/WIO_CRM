@@ -256,12 +256,25 @@ async function aiCoversAssignedThread(
     .maybeSingle()
   if (accountErr || !account?.ai_replies_until_agent_responds) return false
 
-  const { data: agentMessages, error: msgErr } = await db
+  // Desde cuándo cuentan los mensajes del equipo: si al hilo se lo
+  // devolvieron a la IA (botón "que siga la IA", 056), lo que el asesor
+  // escribió antes ya no la silencia.
+  const { data: conv } = await db
+    .from('conversations')
+    .select('ai_resumed_at')
+    .eq('id', conversationId)
+    .maybeSingle()
+  const desde = (conv as { ai_resumed_at?: string | null } | null)?.ai_resumed_at ?? null
+
+  let consulta = db
     .from('messages')
     .select('id')
     .eq('conversation_id', conversationId)
     .eq('sender_type', 'agent')
     .limit(1)
+  if (desde) consulta = consulta.gt('created_at', desde)
+
+  const { data: agentMessages, error: msgErr } = await consulta
   if (msgErr || !agentMessages) return false
   return agentMessages.length === 0
 }
