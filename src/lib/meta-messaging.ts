@@ -16,6 +16,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { insertarMensaje, actualizarConversacion, type Canal } from "@/lib/channels";
 import { notifyConversation } from "@/lib/push/send";
+import { dispatchInboundToAiReply } from "@/lib/ai/auto-reply";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
@@ -203,6 +204,17 @@ export async function recibirMensajeMeta(db: SupabaseClient, ev: EventoMensaje):
     title: `${contacto.name || "Cliente"} · ${ev.canal === "messenger" ? "Messenger" : "Instagram"}`,
     body: resumen,
   }).catch(() => {});
+
+  // La IA contesta 24/7 por WhatsApp y por la app; por Messenger e
+  // Instagram callaba, y ahí llega la gente de las campañas. Sale por el
+  // mismo canal por el que entró (`engineSendText` mira el canal de la
+  // conversación) y nunca lanza: si falla, el mensaje ya quedó guardado.
+  await dispatchInboundToAiReply({
+    accountId: pagina.account_id,
+    conversationId: conv.id,
+    contactId: contacto.id,
+    configOwnerUserId: cuenta.owner_user_id,
+  });
 }
 
 /**

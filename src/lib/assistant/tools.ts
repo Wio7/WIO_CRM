@@ -59,7 +59,7 @@ export const HERRAMIENTAS = [
     function: {
       name: "mis_clientes",
       description:
-        "Lista los clientes/conversaciones que atiende quien pregunta, con su último mensaje, si hay mensajes sin leer y si deben cuotas.",
+        "Lista los clientes/conversaciones que atiende quien pregunta. De cada uno trae lo que el CLIENTE escribió con sus propias palabras (`dijo_el_cliente`), quién habló al final, las señales de interés detectadas, si hay mensajes sin leer y si debe cuotas. Úsala siempre que pregunten por interés, por quién está caliente o a quién seguir.",
       parameters: {
         type: "object",
         properties: {
@@ -369,31 +369,32 @@ async function misClientes(
 
   if (args.filtro === "atrasados") filas = filas.filter((f) => (deuda.get(f.contact?.id ?? "")?.atrasadas ?? 0) > 0);
 
-  let ultimos = new Map<string, string>();
-  if (args.filtro === "sin_responder" && filas.length) {
-    const { data: msjs } = await ctx.db
-      .from("messages")
-      .select("conversation_id, sender_type, created_at")
-      .in("conversation_id", filas.map((f) => f.id))
-      .order("created_at", { ascending: false })
-      .limit(400);
-    ultimos = new Map();
-    for (const m of msjs ?? []) {
-      if (!ultimos.has(m.conversation_id as string)) ultimos.set(m.conversation_id as string, m.sender_type as string);
-    }
-    filas = filas.filter((f) => ultimos.get(f.id) === "customer");
+  // Lo que el cliente escribió, con sus palabras. `last_message_text` es
+  // sólo la última línea del hilo y muchas veces es la respuesta de la IA,
+  // no la del cliente: con eso el asistente concluía "no hay interés" de
+  // alguien que había dejado su nombre y pedido información. Una sola
+  // consulta para toda la lista.
+  const voz = await vozDeLosClientes(ctx, filas.map((f) => f.id));
+
+  if (args.filtro === "sin_responder") {
+    filas = filas.filter((f) => voz.get(f.id)?.ultimo === "cliente");
   }
 
   return {
     datos: {
       total: filas.length,
+      nota: "‘dijo_el_cliente’ son las palabras del propio cliente. No juzgues su interés por ‘ultimo_mensaje’, que puede ser la respuesta de la IA.",
       clientes: filas.slice(0, 25).map((f) => {
         const d = deuda.get(f.contact?.id ?? "");
+        const v = voz.get(f.id);
         return {
           cliente: f.contact?.name || f.contact?.phone || "Sin nombre",
           telefono: f.contact?.phone,
           sin_leer: f.unread_count || 0,
           ultimo_mensaje: (f.last_message_text ?? "").slice(0, 90),
+          escribio_ultimo: v?.ultimo ?? null,
+          dijo_el_cliente: v?.dijo ?? [],
+          senales_de_interes: v?.senales ?? [],
           cuando: f.last_message_at ? cuandoLima(f.last_message_at) : null,
           cerrada: f.status === "closed",
           ...(d ? { cuotas_atrasadas: d.atrasadas, monto_atrasado: `${d.moneda} ${d.monto.toFixed(2)}` } : {}),
@@ -401,6 +402,69 @@ async function misClientes(
       }),
     },
   };
+}
+
+/**
+ * Señales de que alguien va en serio, en las palabras de un cliente
+ * peruano escribiendo por WhatsApp. No es un veredicto —eso lo pone el
+ * modelo leyendo `dijo_el_cliente`—, es una ayuda para que no se le pase
+ * lo evidente: nadie pregunta el precio de un lote por casualidad.
+ */
+const SENALES: [RegExp, string][] = [
+  [/\bprecio|cu[aá]nto (cuesta|est[aá]|sale)|costo|vale\b/i, "pregunta el precio"],
+  [/informaci[oó]n|informes|\binfo\b|d[ée]tall|brochure|cat[aá]logo/i, "pide información"],
+  [/ubicaci[oó]n|d[oó]nde (queda|est[aá]|es)|direcci[oó]n|c[oó]mo llego|mapa/i, "pregunta la ubicación"],
+  [/cuota|financi|inicial|cr[eé]dito|banco|letra|adelanto|pago\b/i, "pregunta por el financiamiento"],
+  [/separ|reserv|apart|quiero compr|comprar|adquirir/i, "quiere separar o comprar"],
+  [/visit|cita|verlo|conocer|ir a ver|agendar|reuni[oó]n|videollamada/i, "quiere ver el proyecto"],
+  [/\bm2\b|metros|[aá]rea|metraje|tama[ñn]o|dimension/i, "pregunta el metraje"],
+  [/disponib|quedan|hay lotes|hay casas|hay departamentos|stock/i, "pregunta disponibilidad"],
+  [/me interesa|interesad|estoy viendo|me gustar[ií]a/i, "dice que le interesa"],
+  [/\bdni\b|mi nombre es|me llamo|mi correo|mi n[uú]mero|mi celular|\b\d{8}\b/i, "dejó sus datos"],
+  [/t[ií]tulo|partida|registr|minuta|contrato|documento/i, "pregunta por los papeles"],
+];
+
+/**
+ * Los últimos mensajes escritos por el cliente en cada conversación, más
+ * quién habló al final y qué señales dejó.
+ */
+async function vozDeLosClientes(
+  ctx: ContextoAsistente,
+  conversationIds: string[],
+): Promise<Map<string, { ultimo: "cliente" | "asesor" | "IA"; dijo: string[]; senales: string[] }>> {
+  const mapa = new Map<string, { ultimo: "cliente" | "asesor" | "IA"; dijo: string[]; senales: string[] }>();
+  if (!conversationIds.length) return mapa;
+
+  const { data } = await ctx.db
+    .from("messages")
+    .select("conversation_id, sender_type, content_text, content_type, created_at")
+    .in("conversation_id", conversationIds)
+    .order("created_at", { ascending: false })
+    .limit(600);
+
+  const deQuien = (t: string) => (t === "customer" ? "cliente" : t === "bot" ? "IA" : "asesor");
+
+  for (const m of (data ?? []) as unknown as {
+    conversation_id: string;
+    sender_type: string;
+    content_text: string | null;
+    content_type: string | null;
+  }[]) {
+    let fila = mapa.get(m.conversation_id);
+    if (!fila) {
+      fila = { ultimo: deQuien(m.sender_type), dijo: [], senales: [] };
+      mapa.set(m.conversation_id, fila);
+    }
+    if (m.sender_type !== "customer" || fila.dijo.length >= 3) continue;
+    const texto = (m.content_text ?? "").trim()
+      || (m.content_type && m.content_type !== "text" ? `[${m.content_type}]` : "");
+    if (!texto) continue;
+    fila.dijo.unshift(texto.slice(0, 160)); // del más viejo al más nuevo
+    for (const [patron, senal] of SENALES) {
+      if (patron.test(texto) && !fila.senales.includes(senal)) fila.senales.push(senal);
+    }
+  }
+  return mapa;
 }
 
 async function resumenCliente(ctx: ContextoAsistente, args: { buscar: string }): Promise<Resultado> {

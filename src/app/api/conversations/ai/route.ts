@@ -1,7 +1,7 @@
 // ============================================================
 // /api/conversations/ai — quién sigue la conversación: la IA o yo
 //
-//   POST { conversation_id, ia: boolean } → { ok, ia }
+//   POST { conversation_id, ia: boolean } → { ok, ia, avisado, motivo? }
 //
 // Los dos botones del chat. Al tomarla, la IA se calla y el cliente sabe
 // con quién habla; al devolverla, la IA vuelve a contestar desde ahora
@@ -9,11 +9,20 @@
 // los dos casos el aviso sale por el canal del cliente: WhatsApp, la app,
 // Messenger, Instagram o correo, lo que esté usando.
 //
+// ORDEN IMPORTANTE al devolvérsela a la IA: el aviso lo manda el asesor,
+// así que es un mensaje `sender_type='agent'`. La regla de la 041 dice
+// que la IA calla en cuanto el equipo escribe, y `ai_resumed_at` es la
+// raya a partir de la cual eso cuenta. Si la raya se pusiera ANTES de
+// mandar el aviso, el propio aviso quedaría después de la raya y volvería
+// a callar a la IA en el acto — que es exactamente lo que pasaba. Por eso
+// la raya se corre hasta la hora del aviso una vez enviado.
+//
 // Corre con la sesión de quien toca el botón, así que la base decide si
 // puede: sólo se cambia una conversación que esa persona puede ver (055).
 // ============================================================
 
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getRequestAuth } from "@/lib/supabase/request-auth";
 import { corsPreflight, withCors } from "@/lib/cors";
@@ -28,6 +37,37 @@ const AVISO_ASESOR = (nombre: string) =>
 
 const AVISO_IA =
   "Te dejo con la asistente virtual de Golden Habitat, que te responde al instante a cualquier hora. Si necesitas a una persona, dilo y te paso con un asesor. 🙌";
+
+/** La columna `ai_resumed_at` no existe todavía (056 sin correr). */
+const faltaColumna = (error: { code?: string; message?: string } | null) =>
+  !!error && (error.code === "42703" || error.code === "PGRST204" || /ai_resumed_at/i.test(error.message ?? ""));
+
+/**
+ * Corre la raya hasta el mensaje de aviso recién guardado. Se usa su
+ * `created_at` real —el del reloj de la base, no el de este servidor— para
+ * que el filtro `created_at > ai_resumed_at` lo deje fuera con certeza,
+ * aunque los dos relojes no estén sincronizados al milisegundo.
+ */
+async function correrLaRaya(
+  db: SupabaseClient,
+  conversationId: string,
+  accountId: string,
+  messageId: string | null,
+): Promise<void> {
+  let cuando: string | null = null;
+  if (messageId) {
+    const { data } = await db.from("messages").select("created_at").eq("id", messageId).maybeSingle();
+    cuando = (data?.created_at as string | undefined) ?? null;
+  }
+  const { error } = await db
+    .from("conversations")
+    .update({ ai_resumed_at: cuando ?? new Date().toISOString() })
+    .eq("id", conversationId)
+    .eq("account_id", accountId);
+  if (error && !faltaColumna(error)) {
+    console.error("[conversations/ai] no se pudo correr ai_resumed_at:", error.message);
+  }
+}
 
 export async function POST(request: Request) {
   const { supabase, user } = await getRequestAuth(request);
@@ -50,27 +90,28 @@ export async function POST(request: Request) {
   if (!perfil?.account_id || perfil.account_role === "viewer") {
     return withCors(request, NextResponse.json({ ok: false, reason: "forbidden" }, { status: 403 }));
   }
+  const accountId = perfil.account_id as string;
 
   // Con SU cliente: si la base no le deja ver esta conversación, no hay
-  // fila que actualizar y se queda en 404.
+  // fila que actualizar y no se cambia nada.
   const cambios: Record<string, unknown> = ia
-    ? { ai_autoreply_disabled: false, ai_resumed_at: new Date().toISOString(), ai_reply_count: 0 }
+    ? { ai_autoreply_disabled: false, ai_reply_count: 0, ai_resumed_at: new Date().toISOString() }
     : { ai_autoreply_disabled: true };
 
   let { error } = await supabase
     .from("conversations")
     .update(cambios)
     .eq("id", conversationId)
-    .eq("account_id", perfil.account_id);
+    .eq("account_id", accountId);
 
   // Sin la 056 no existe `ai_resumed_at`: se hace lo que sí se puede.
-  if (error && /ai_resumed_at/i.test(error.message)) {
+  if (error && faltaColumna(error)) {
     delete cambios.ai_resumed_at;
     ({ error } = await supabase
       .from("conversations")
       .update(cambios)
       .eq("id", conversationId)
-      .eq("account_id", perfil.account_id));
+      .eq("account_id", accountId));
   }
   if (error) {
     console.error("[conversations/ai] update failed:", error.message);
@@ -78,19 +119,28 @@ export async function POST(request: Request) {
   }
 
   // El aviso al cliente. Si no se puede mandar (ventana de 24 h de
-  // WhatsApp cerrada, por ejemplo), el cambio ya quedó hecho igual.
+  // WhatsApp cerrada, por ejemplo), el cambio ya quedó hecho igual y se
+  // devuelve el motivo para poder decírselo al asesor.
   const nombre = (perfil.full_name as string | null)?.trim().split(/\s+/)[0] ?? "";
   let avisado = true;
+  let motivo: string | undefined;
+  let mensajeDelAviso: string | null = null;
   try {
-    await sendMessageToConversation(supabase, perfil.account_id as string, {
+    const r = await sendMessageToConversation(supabase, accountId, {
       conversationId,
       messageType: "text",
       contentText: ia ? AVISO_IA : AVISO_ASESOR(nombre),
     });
+    mensajeDelAviso = r.messageId ?? null;
   } catch (err) {
     avisado = false;
+    motivo = err instanceof SendMessageError ? err.message : "No se pudo entregar el aviso.";
     if (!(err instanceof SendMessageError)) console.error("[conversations/ai] aviso falló:", err);
   }
 
-  return withCors(request, NextResponse.json({ ok: true, ia, avisado }));
+  // Ya con el aviso guardado, la raya se corre hasta él: si no, el propio
+  // aviso —que es un mensaje del equipo— volvería a callar a la IA.
+  if (ia) await correrLaRaya(supabase, conversationId, accountId, mensajeDelAviso);
+
+  return withCors(request, NextResponse.json({ ok: true, ia, avisado, ...(motivo ? { motivo } : {}) }));
 }

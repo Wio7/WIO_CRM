@@ -110,9 +110,18 @@ async function createInvitation(request: Request): Promise<Response> {
         { status: 400 },
       );
     }
-    if (role === "owner" && ctx.role !== "owner") {
+    // Misma jerarquía que set_member_role (057): un administrador reparte
+    // asesores y solo-lectura; hacer administradores o dueños es del dueño.
+    // Si no, un admin invita a un admin y se salta la regla por la puerta
+    // de al lado.
+    if ((role === "owner" || role === "admin") && ctx.role !== "owner") {
       return NextResponse.json(
-        { error: "Only an owner can invite another owner" },
+        {
+          error:
+            role === "owner"
+              ? "Only an owner can invite another owner"
+              : "Only an owner can invite an admin",
+        },
         { status: 403 },
       );
     }
