@@ -68,9 +68,10 @@ export const HERRAMIENTAS = [
             enum: ["todos", "sin_leer", "atrasados", "sin_responder"],
             description: "sin_responder = el último mensaje es del cliente.",
           },
-          de_todo_el_equipo: {
+          solo_mios: {
             type: "boolean",
-            description: "Sólo dueños y administradores: incluir los clientes de todos.",
+            description:
+              "true = sólo las conversaciones asignadas a quien pregunta. Por defecto: un asesor ve las suyas; un dueño o administrador, las de todo el equipo.",
           },
         },
         additionalProperties: false,
@@ -261,13 +262,16 @@ async function resumenDelDia(ctx: ContextoAsistente): Promise<Resultado> {
   const inicio = new Date(`${hoy}T00:00:00-05:00`).toISOString();
   const fin = new Date(`${hoy}T23:59:59-05:00`).toISOString();
 
+  const sinLeerQ = ctx.db
+    .from("conversations")
+    .select("unread_count, contact:contacts(name, phone)")
+    .eq("account_id", ctx.accountId)
+    .gt("unread_count", 0);
+  // El asesor, lo suyo; el dueño y los administradores, todo.
+  if (!esJefe(ctx.rol)) sinLeerQ.eq("assigned_agent_id", ctx.userId);
+
   const [sinLeer, citas, atrasadas, vouchers] = await Promise.all([
-    ctx.db
-      .from("conversations")
-      .select("unread_count, contact:contacts(name, phone)")
-      .eq("account_id", ctx.accountId)
-      .eq("assigned_agent_id", ctx.userId)
-      .gt("unread_count", 0)
+    sinLeerQ
       .order("last_message_at", { ascending: false })
       .limit(10),
     ctx.db
@@ -317,15 +321,20 @@ async function resumenDelDia(ctx: ContextoAsistente): Promise<Resultado> {
 
 async function misClientes(
   ctx: ContextoAsistente,
-  args: { filtro?: string; de_todo_el_equipo?: boolean },
+  args: { filtro?: string; solo_mios?: boolean; de_todo_el_equipo?: boolean },
 ): Promise<Resultado> {
+  // Un asesor ve lo suyo; el dueño y los administradores, todo lo que la
+  // base les deja ver. Antes se filtraba siempre por "asignadas a mí", y
+  // al dueño —que no tiene ninguna asignada— el asistente le decía que no
+  // había nada justo después de haberle listado tres.
+  const soloMios = args.solo_mios ?? (args.de_todo_el_equipo === true ? false : !esJefe(ctx.rol));
   let q = ctx.db
     .from("conversations")
     .select("id, unread_count, last_message_text, last_message_at, status, assigned_agent_id, contact:contacts(id, name, phone)")
     .eq("account_id", ctx.accountId)
     .order("last_message_at", { ascending: false, nullsFirst: false })
     .limit(40);
-  if (!(args.de_todo_el_equipo && esJefe(ctx.rol))) q = q.eq("assigned_agent_id", ctx.userId);
+  if (soloMios) q = q.eq("assigned_agent_id", ctx.userId);
   if (args.filtro === "sin_leer") q = q.gt("unread_count", 0);
 
   const { data, error } = await q;

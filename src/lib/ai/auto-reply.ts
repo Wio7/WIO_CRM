@@ -6,6 +6,7 @@ import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { latestUserMessage } from './query'
 import { engineSendText } from '@/lib/flows/meta-send'
+import { notifyConversation } from '@/lib/push/send'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -85,6 +86,9 @@ export async function dispatchInboundToAiReply(
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
 
+    // Con quién está hablando: si ya compró, la conversación es otra.
+    const ficha = await fichaDelContacto(db, contactId)
+
     // Ground the reply in the account's knowledge base (best-effort).
     const knowledge = await retrieveKnowledge(
       db,
@@ -94,7 +98,7 @@ export async function dispatchInboundToAiReply(
     )
 
     const systemPrompt = buildSystemPrompt({
-      userPrompt: config.systemPrompt,
+      userPrompt: [config.systemPrompt, ficha].filter(Boolean).join('\n\n'),
       mode: 'auto_reply',
       knowledge,
     })
@@ -106,13 +110,21 @@ export async function dispatchInboundToAiReply(
     })
 
     if (handoff || !text) {
-      // The model can't (or shouldn't) answer — stop auto-replying on
-      // this thread and leave the inbound unanswered so it surfaces in
-      // the inbox for a human. Sticky until an admin re-enables.
+      // El modelo no puede (o no debe) seguir. Se apaga la IA en este
+      // hilo, PERO no se deja a nadie a oscuras: al cliente se le dice
+      // que un asesor le responde, y al asesor le suena el celular. Antes
+      // esto era silencio en los dos lados, y el cliente se quedaba
+      // escribiendo "¿hola?" sin que nadie apareciera.
       await db
         .from('conversations')
         .update({ ai_autoreply_disabled: true })
         .eq('id', conversationId)
+      await avisarQueSigueUnHumano(db, {
+        accountId,
+        conversationId,
+        contactId,
+        configOwnerUserId,
+      })
       return
     }
 
@@ -140,6 +152,89 @@ export async function dispatchInboundToAiReply(
   } catch (err) {
     console.error('[ai auto-reply] dispatch failed:', err)
   }
+}
+
+/**
+ * Lo que la IA necesita saber de esta persona para no tratar igual al que
+ * ya compró que al que recién pregunta: nombre, si tiene plan de cuotas,
+ * cuánto debe y cuándo vence lo próximo. Sale de la misma vista que ve el
+ * asesor (`payment_plan_balances`), así que nunca se contradicen.
+ */
+async function fichaDelContacto(
+  db: ReturnType<typeof supabaseAdmin>,
+  contactId: string,
+): Promise<string> {
+  const { data: contacto } = await db
+    .from('contacts')
+    .select('name, dni')
+    .eq('id', contactId)
+    .maybeSingle()
+  if (!contacto) return ''
+
+  const nombre = (contacto.name ?? '').trim()
+  const partes: string[] = ['Con quién estás hablando:']
+  if (nombre) partes.push(`- Se llama ${nombre}. Úsalo.`)
+
+  const { data: saldo } = await db
+    .from('payment_plan_balances')
+    .select('currency, pending_amount, overdue_count, next_due_date')
+    .eq('contact_id', contactId)
+    .maybeSingle()
+
+  if (saldo) {
+    const moneda = saldo.currency === 'PEN' ? 'S/' : String(saldo.currency ?? '')
+    partes.push(
+      `- YA ES CLIENTE de Golden: tiene un plan de cuotas. Le quedan ${moneda} ${Number(saldo.pending_amount ?? 0).toFixed(2)} por pagar` +
+        `${Number(saldo.overdue_count ?? 0) > 0 ? `, con ${saldo.overdue_count} cuota(s) atrasada(s)` : ''}` +
+        `${saldo.next_due_date ? `, y su próxima cuota vence el ${saldo.next_due_date}` : ''}.`,
+      '- No le ofrezcas comprar: ayúdalo con su cuota, su voucher o su documento, y si pide detalles de su caso pásalo a cobranzas.',
+    )
+  } else {
+    partes.push(
+      '- TODAVÍA NO ES CLIENTE: es alguien interesado. Averigua qué busca (lote, casa o departamento, zona y presupuesto) y llévalo a agendar una cita con un asesor, por videollamada o presencial.',
+      '- Si te pide una hora concreta, no la confirmes tú: pídele su nombre y en qué horario le queda bien, dile que un asesor se lo confirma, y pasa la conversación.',
+    )
+  }
+  if (contacto.dni) {
+    partes.push('- Puede entrar a la Golden App con su celular y su DNI, sin contraseña.');
+  }
+  return partes.join('\n')
+}
+
+/**
+ * "Te paso con un asesor": se lo decimos al cliente y le suena el celular
+ * a quien lleva la conversación. Todo mejor que el silencio.
+ */
+async function avisarQueSigueUnHumano(
+  db: ReturnType<typeof supabaseAdmin>,
+  args: { accountId: string; conversationId: string; contactId: string; configOwnerUserId: string },
+): Promise<void> {
+  const { data: conv } = await db
+    .from('conversations')
+    .select('assigned_agent_id, contact:contacts(name, phone)')
+    .eq('id', args.conversationId)
+    .maybeSingle()
+
+  try {
+    await engineSendText({
+      accountId: args.accountId,
+      userId: args.configOwnerUserId,
+      conversationId: args.conversationId,
+      contactId: args.contactId,
+      text: 'Con esto mejor te ayuda un asesor de Golden Habitat. Le aviso ahora mismo y te escribe en un momento. 🙌',
+    })
+  } catch (err) {
+    console.error('[ai auto-reply] no se pudo avisar al cliente del traspaso:', err)
+  }
+
+  const quien = conv?.contact as unknown as { name?: string | null; phone?: string | null } | null
+  await notifyConversation(db, {
+    accountId: args.accountId,
+    conversationId: args.conversationId,
+    assignedAgentId: (conv?.assigned_agent_id as string | null) ?? null,
+    title: 'Te toca a ti',
+    body: `${quien?.name || quien?.phone || 'Un cliente'} necesita a una persona: la IA ya no puede seguir.`,
+  }).catch((err) => console.error('[ai auto-reply] push del traspaso falló:', err))
 }
 
 /**

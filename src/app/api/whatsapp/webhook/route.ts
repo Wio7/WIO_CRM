@@ -15,6 +15,7 @@ import {
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
 import { actualizarConversacion } from '@/lib/channels'
+import { transcribirAudioDeWhatsApp } from '@/lib/ai/transcribir'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -830,7 +831,25 @@ async function processMessage(
   // message all exist before any step — including send_message — runs.
   // Fire-and-forget: a slow or failing automation must not block the
   // webhook's 200 OK response to Meta.
-  const inboundText = contentText ?? message.text?.body ?? ''
+  let inboundText = contentText ?? message.text?.body ?? ''
+
+  // Nota de voz: se transcribe y el texto entra en el mensaje. Así lo lee
+  // la IA (que si no se quedaría callada) y también el asesor, que puede
+  // contestar sin ponerse los audífonos.
+  if (message.type === 'audio' && message.audio?.id) {
+    const dicho = await transcribirAudioDeWhatsApp(message.audio.id, accessToken)
+    if (dicho) {
+      inboundText = dicho
+      await supabaseAdmin()
+        .from('messages')
+        .update({ content_text: dicho })
+        .eq('message_id', message.id)
+      await supabaseAdmin()
+        .from('conversations')
+        .update({ last_message_text: `🎤 ${dicho.slice(0, 120)}` })
+        .eq('id', conversation.id)
+    }
+  }
   const automationTriggers: (
     | 'new_contact_created'
     | 'first_inbound_message'
