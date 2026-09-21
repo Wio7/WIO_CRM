@@ -9,6 +9,7 @@ import { engineSendText } from '@/lib/flows/meta-send'
 import { notifyConversation } from '@/lib/push/send'
 import { diasLibres, equipoQuePuedeAgendar } from '@/lib/agenda/slots'
 import { agendaEnTexto, esTipoDeCita, reservarCita } from '@/lib/agenda/reservar'
+import { catalogoDeGolden, catalogoEnTexto, sinCatalogoPegado } from '@/lib/golden/catalogo'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -111,12 +112,18 @@ export async function dispatchInboundToAiReply(
     // existen en vez de prometer que "un asesor coordinará".
     const agenda = modo.agenda ? await agendaParaElPrompt(db, accountId, contactId) : null
 
+    // Y el catálogo de verdad, leído de la app donde el equipo sube las
+    // casas, los lotes y los departamentos.
+    const catalogo = await catalogoDeGolden()
+    const instrucciones = catalogo ? sinCatalogoPegado(config.systemPrompt) : config.systemPrompt
+
     const systemPrompt = buildSystemPrompt({
-      userPrompt: [config.systemPrompt, ficha].filter(Boolean).join('\n\n'),
+      userPrompt: [instrucciones, ficha].filter(Boolean).join('\n\n'),
       mode: 'auto_reply',
       knowledge,
       agenda,
       nuncaSeCalla: modo.soloElBoton,
+      catalogo: catalogo ? catalogoEnTexto(catalogo) : null,
     })
 
     const generado = await generateReply({ config, systemPrompt, messages })

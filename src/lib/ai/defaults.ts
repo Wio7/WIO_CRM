@@ -79,6 +79,11 @@ export function buildSystemPrompt(args: {
    * traspaso.
    */
   nuncaSeCalla?: boolean
+  /**
+   * El catálogo leído de la Golden App (`catalogoEnTexto`). Es lo que
+   * evita que la IA derive en cuanto le preguntan cuánto cuesta algo.
+   */
+  catalogo?: string | null
 }): string {
   const { userPrompt, mode, knowledge } = args
   const parts: string[] = [
@@ -132,6 +137,10 @@ export function buildSystemPrompt(args: {
   if (userPrompt && userPrompt.trim()) {
     parts.push(`Business context and instructions:\n${userPrompt.trim()}`)
   }
+
+  // El catálogo va DESPUÉS de las instrucciones de la cuenta a propósito:
+  // es el dato más fresco que hay y tiene que ganar si algo se contradice.
+  if (args.catalogo) parts.push(args.catalogo)
 
   if (knowledge && knowledge.length > 0) {
     const fallback =

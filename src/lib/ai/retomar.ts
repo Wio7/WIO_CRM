@@ -20,6 +20,7 @@ import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { diasLibres, equipoQuePuedeAgendar } from '@/lib/agenda/slots'
 import { agendaEnTexto } from '@/lib/agenda/reservar'
+import { catalogoDeGolden, catalogoEnTexto, sinCatalogoPegado } from '@/lib/golden/catalogo'
 import { engineSendText } from '@/lib/flows/meta-send'
 
 /**
@@ -75,13 +76,17 @@ export async function retomarConLaIa(args: {
       }
     }
 
+    const catalogo = await catalogoDeGolden()
+    const instrucciones = catalogo ? sinCatalogoPegado(config.systemPrompt) : config.systemPrompt
+
     const { text } = await generateReply({
       config,
       systemPrompt: buildSystemPrompt({
-        userPrompt: [config.systemPrompt, INSTRUCCION].filter(Boolean).join('\n\n'),
+        userPrompt: [instrucciones, INSTRUCCION].filter(Boolean).join('\n\n'),
         mode: 'auto_reply',
         agenda,
         nuncaSeCalla: true,
+        catalogo: catalogo ? catalogoEnTexto(catalogo) : null,
       }),
       messages,
     })

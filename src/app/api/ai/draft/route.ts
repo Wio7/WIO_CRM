@@ -6,6 +6,7 @@ import { buildConversationContext } from '@/lib/ai/context'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
 import { generateReply } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
+import { catalogoDeGolden, catalogoEnTexto, sinCatalogoPegado } from '@/lib/golden/catalogo'
 import { latestUserMessage } from '@/lib/ai/query'
 import { AiError } from '@/lib/ai/types'
 
@@ -96,10 +97,15 @@ export async function POST(request: Request) {
       latestUserMessage(messages),
     )
 
+    // El borrador que se le sugiere al asesor sale del mismo catálogo que
+    // usa la IA al contestar sola: si no, el CRM le propondría un precio y
+    // el chat automático le diría otro.
+    const catalogo = await catalogoDeGolden()
     const systemPrompt = buildSystemPrompt({
-      userPrompt: config.systemPrompt,
+      userPrompt: catalogo ? sinCatalogoPegado(config.systemPrompt) : config.systemPrompt,
       mode: 'draft',
       knowledge,
+      catalogo: catalogo ? catalogoEnTexto(catalogo) : null,
     })
 
     const { text } = await generateReply({ config, systemPrompt, messages })
