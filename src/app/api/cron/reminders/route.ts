@@ -29,6 +29,7 @@ import { notifyClient, notifyConversation } from "@/lib/push/send";
 import { nombreDeCita, tituloDeCita } from "@/lib/agenda/tipos";
 import { recordatoriosDeCuotas } from "@/lib/payment-plans/reminders";
 import { sincronizarCorreos } from "@/lib/gmail";
+import { seguimientosPendientes } from "@/lib/ai/seguimiento";
 
 /** Ventana alrededor del objetivo, para que un pinger flojo no lo salte. */
 const MARGEN_MIN = 12;
@@ -135,7 +136,18 @@ async function correr(request: Request) {
     console.error("[cron] gmail sync failed:", err);
     return { nuevos: 0 };
   });
-  return NextResponse.json({ ok: true, avisados: { una_hora: una, media_hora: media, cuotas }, correo });
+  // Y los que dejaron de contestar (059): a la hora, a las tres, a las
+  // seis y una última vez antes de que se cierre la ventana de 24 h.
+  const seguimiento = await seguimientosPendientes(db).catch((err) => {
+    console.error("[cron] seguimiento failed:", err);
+    return { escritos: 0, avisados: 0, motivo: "error" };
+  });
+  return NextResponse.json({
+    ok: true,
+    avisados: { una_hora: una, media_hora: media, cuotas },
+    correo,
+    seguimiento,
+  });
 }
 
 export async function GET(request: Request) {

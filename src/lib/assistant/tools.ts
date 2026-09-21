@@ -17,6 +17,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { diasLibres } from "@/lib/agenda/slots";
+import { catalogoDeGolden } from "@/lib/golden/catalogo";
 import { nombreDeCita } from "@/lib/agenda/tipos";
 import { notifyClient } from "@/lib/push/send";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
@@ -81,6 +82,33 @@ export const HERRAMIENTAS = [
   {
     type: "function",
     function: {
+      name: "catalogo",
+      description:
+        "QUÉ VENDE GOLDEN: los proyectos que hay en la app —casas, lotes y departamentos— con su precio, su ubicación, su financiamiento, cuántos lotes quedan libres de cada tamaño y qué unidades siguen en venta. Úsala SIEMPRE que pregunten por precios, por lo que se ofrece, por qué hay disponible o por qué mandarle a un cliente. No tiene nada que ver con los clientes asignados: contesta aunque la persona no tenga ninguno.",
+      parameters: {
+        type: "object",
+        properties: {
+          buscar: {
+            type: "string",
+            description: "Nombre de un proyecto, o 'casas' / 'lotes' / 'departamentos' para filtrar. Vacío = todo.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "equipo",
+      description:
+        "Quién es quién en Golden: nombre, rol, área, cuántas conversaciones lleva cada uno y si tiene horarios publicados para que le agenden. Para un dueño o un jefe: cómo está repartido el trabajo.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "resumen_cliente",
       description:
         "Todo sobre un cliente: datos, lo que compró, saldo y atraso, próximas cuotas, vouchers, citas, separaciones, notas y los últimos mensajes del chat. Busca por nombre, teléfono o DNI.",
@@ -98,12 +126,16 @@ export const HERRAMIENTAS = [
     type: "function",
     function: {
       name: "mi_agenda",
-      description: "Las citas agendadas de quien pregunta entre dos fechas (por defecto, hoy y los próximos 7 días).",
+      description: "Las citas agendadas entre dos fechas (por defecto, hoy y los próximos 7 días). Las de quien pregunta, o las de todo el equipo si lo pide un dueño o un jefe.",
       parameters: {
         type: "object",
         properties: {
           desde: { type: "string", description: "Fecha YYYY-MM-DD (hora de Lima)." },
           hasta: { type: "string", description: "Fecha YYYY-MM-DD (hora de Lima), inclusive." },
+          de_todo_el_equipo: {
+            type: "boolean",
+            description: "true = las citas de todos, con el nombre de quien atiende cada una. Sólo para dueño o administrador.",
+          },
         },
         additionalProperties: false,
       },
@@ -327,18 +359,35 @@ async function misClientes(
   // base les deja ver. Antes se filtraba siempre por "asignadas a mí", y
   // al dueño —que no tiene ninguna asignada— el asistente le decía que no
   // había nada justo después de haberle listado tres.
-  const soloMios = args.solo_mios ?? (args.de_todo_el_equipo === true ? false : !esJefe(ctx.rol));
-  let q = ctx.db
-    .from("conversations")
-    .select("id, unread_count, last_message_text, last_message_at, status, assigned_agent_id, contact:contacts(id, name, phone)")
-    .eq("account_id", ctx.accountId)
-    .order("last_message_at", { ascending: false, nullsFirst: false })
-    .limit(40);
-  if (soloMios) q = q.eq("assigned_agent_id", ctx.userId);
-  if (args.filtro === "sin_leer") q = q.gt("unread_count", 0);
+  let soloMios = args.solo_mios ?? (args.de_todo_el_equipo === true ? false : !esJefe(ctx.rol));
 
-  const { data, error } = await q;
+  const pedir = (mios: boolean) => {
+    let q = ctx.db
+      .from("conversations")
+      .select("id, unread_count, last_message_text, last_message_at, status, assigned_agent_id, contact:contacts(id, name, phone)")
+      .eq("account_id", ctx.accountId)
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .limit(40);
+    if (mios) q = q.eq("assigned_agent_id", ctx.userId);
+    if (args.filtro === "sin_leer") q = q.gt("unread_count", 0);
+    return q;
+  };
+
+  let { data, error } = await pedir(soloMios);
   if (error) return { datos: { error: error.message } };
+
+  // Un dueño o un jefe no tiene conversaciones asignadas a su nombre casi
+  // nunca: las llevan sus asesores. Filtrar por "las mías" le devolvía
+  // cero, y el asistente le contestaba "no tengo clientes visibles"
+  // habiéndole listado tres un minuto antes. Si no hay nada suyo y puede
+  // ver las del equipo, se le enseñan ésas y se le dice.
+  let ampliado = false;
+  if (soloMios && !data?.length && esJefe(ctx.rol)) {
+    ({ data, error } = await pedir(false));
+    if (error) return { datos: { error: error.message } };
+    soloMios = false;
+    ampliado = true;
+  }
 
   type Fila = {
     id: string;
@@ -346,6 +395,7 @@ async function misClientes(
     last_message_text: string | null;
     last_message_at: string | null;
     status: string;
+    assigned_agent_id: string | null;
     contact: { id: string; name: string | null; phone: string | null } | null;
   };
   let filas = (data ?? []) as unknown as Fila[];
@@ -380,9 +430,15 @@ async function misClientes(
     filas = filas.filter((f) => voz.get(f.id)?.ultimo === "cliente");
   }
 
+  const quien = soloMios ? new Map<string, string>() : await nombresDelEquipo(ctx);
+
   return {
     datos: {
       total: filas.length,
+      de: soloMios ? "sólo las tuyas" : "todo el equipo",
+      ...(ampliado
+        ? { aviso: "No tienes ninguna conversación asignada a tu nombre, así que aquí van las de todo el equipo. Dilo así; no digas que no hay clientes." }
+        : {}),
       nota: "‘dijo_el_cliente’ son las palabras del propio cliente. No juzgues su interés por ‘ultimo_mensaje’, que puede ser la respuesta de la IA.",
       clientes: filas.slice(0, 25).map((f) => {
         const d = deuda.get(f.contact?.id ?? "");
@@ -390,6 +446,7 @@ async function misClientes(
         return {
           cliente: f.contact?.name || f.contact?.phone || "Sin nombre",
           telefono: f.contact?.phone,
+          ...(soloMios ? {} : { lleva: quien.get(f.assigned_agent_id ?? "") ?? "sin asignar" }),
           sin_leer: f.unread_count || 0,
           ultimo_mensaje: (f.last_message_text ?? "").slice(0, 90),
           escribio_ultimo: v?.ultimo ?? null,
@@ -565,24 +622,40 @@ async function resumenCliente(ctx: ContextoAsistente, args: { buscar: string }):
   };
 }
 
-async function miAgenda(ctx: ContextoAsistente, args: { desde?: string; hasta?: string }): Promise<Resultado> {
+async function miAgenda(
+  ctx: ContextoAsistente,
+  args: { desde?: string; hasta?: string; de_todo_el_equipo?: boolean },
+): Promise<Resultado> {
   const desde = /^\d{4}-\d{2}-\d{2}$/.test(args.desde ?? "") ? args.desde! : hoyLima();
   const hasta = /^\d{4}-\d{2}-\d{2}$/.test(args.hasta ?? "")
     ? args.hasta!
     : new Intl.DateTimeFormat("en-CA", { timeZone: LIMA }).format(new Date(Date.now() + 7 * 864e5));
-  const { data, error } = await ctx.db
+
+  // Un jefe que pregunta "¿qué citas hay esta semana?" quiere las del
+  // equipo, no las suyas —que suelen ser ninguna—. Sigue mandando RLS:
+  // sólo salen las que esa persona ya podía ver.
+  const delEquipo = args.de_todo_el_equipo === true && esJefe(ctx.rol);
+
+  let q = ctx.db
     .from("appointments")
-    .select("starts_at, minutes, kind, notes, contact:contacts(name, phone)")
-    .eq("user_id", ctx.userId)
+    .select("starts_at, minutes, kind, notes, user_id, contact:contacts(name, phone)")
+    .eq("account_id", ctx.accountId)
     .eq("status", "agendada")
     .gte("starts_at", new Date(`${desde}T00:00:00-05:00`).toISOString())
     .lte("starts_at", new Date(`${hasta}T23:59:59-05:00`).toISOString())
     .order("starts_at");
+  if (!delEquipo) q = q.eq("user_id", ctx.userId);
+
+  const { data, error } = await q;
   if (error) return { datos: { error: "La agenda no está disponible: falta correr la migración 049." } };
+
+  const quien = delEquipo ? await nombresDelEquipo(ctx) : new Map<string, string>();
+
   return {
     datos: {
       desde,
       hasta,
+      de: delEquipo ? "todo el equipo" : "sólo tuyas",
       citas: (data ?? []).map((c) => {
         const contacto = c.contact as unknown as { name: string | null; phone: string | null } | null;
         return {
@@ -590,9 +663,148 @@ async function miAgenda(ctx: ContextoAsistente, args: { desde?: string; hasta?: 
           minutos: c.minutes,
           tipo: nombreDeCita(c.kind as string),
           cliente: contacto?.name || contacto?.phone || "Cliente",
+          ...(delEquipo ? { atiende: quien.get(c.user_id as string) ?? "?" } : {}),
           notas: c.notes,
         };
       }),
+    },
+  };
+}
+
+/** user_id → nombre, para no repetir la consulta en cada fila. */
+async function nombresDelEquipo(ctx: ContextoAsistente): Promise<Map<string, string>> {
+  const { data } = await ctx.db
+    .from("profiles")
+    .select("user_id, full_name, email")
+    .eq("account_id", ctx.accountId);
+  return new Map(
+    (data ?? []).map((p) => [p.user_id as string, (p.full_name as string) || (p.email as string) || "?"]),
+  );
+}
+
+/**
+ * Qué vende Golden. Sale de la app —lo mismo que ve el cliente— y no de
+ * una lista pegada a mano, así que el asesor y el cliente nunca oyen dos
+ * precios distintos.
+ */
+async function catalogo(ctx: ContextoAsistente, args: { buscar?: string }): Promise<Resultado> {
+  const datos = await catalogoDeGolden();
+  if (!datos) {
+    return {
+      datos: {
+        error:
+          "No se pudo leer el catálogo de la app. Falta configurar GOLDEN_APP_URL en el CRM, o la app no respondió.",
+      },
+    };
+  }
+
+  const buscado = (args.buscar ?? "").trim().toLowerCase();
+  const porTipo: Record<string, string[]> = {
+    casa: ["casa"],
+    casas: ["casa"],
+    lote: ["lotes"],
+    lotes: ["lotes"],
+    terreno: ["lotes"],
+    terrenos: ["lotes"],
+    departamento: ["residencial"],
+    departamentos: ["residencial"],
+    depa: ["residencial"],
+    depas: ["residencial"],
+  };
+
+  let proyectos = datos.proyectos;
+  if (buscado) {
+    const tipos = porTipo[buscado];
+    proyectos = tipos
+      ? proyectos.filter((p) => tipos.includes(p.categoria ?? ""))
+      : proyectos.filter((p) =>
+          `${p.nombre} ${p.nombreCorto ?? ""} ${p.donde.ciudad ?? ""} ${p.donde.distrito ?? ""}`
+            .toLowerCase()
+            .includes(buscado),
+        );
+    // Una búsqueda que no encuentra nada no puede dejar al modelo sin
+    // datos: es cuando empieza a inventar.
+    if (!proyectos.length) proyectos = datos.proyectos;
+  }
+
+  return {
+    datos: {
+      leido_de: "la Golden App",
+      proyectos: proyectos.map((p) => {
+        const c = p.comercial;
+        const libres = p.lotes?.filter((l) => l.estado === "libre") ?? null;
+        return {
+          proyecto: p.nombre,
+          tipo: p.categoria === "residencial" ? "departamentos" : p.categoria,
+          estado: p.estado === "ACTIVE" ? "en venta" : p.estado === "SOLD_OUT" ? "vendido" : p.estado,
+          donde: [p.donde.direccion, p.donde.ciudad].filter(Boolean).join(", "),
+          precio_desde: c.precioDesde ? `${c.moneda === "PEN" ? "S/" : c.moneda} ${c.precioDesde.toLocaleString("es-PE")}` : null,
+          area: c.rangoAreas,
+          dormitorios: c.dormitorios,
+          financiamiento: c.financiamiento,
+          inicial_desde: c.inicialDesde,
+          cuota_desde: c.cuotaDesde,
+          plazo_meses: c.plazoMeses,
+          ...(libres
+            ? {
+                lotes_libres: libres.length,
+                lotes_totales: p.lotes!.length,
+                tamanos_libres: [...new Set(libres.map((l) => Math.round(l.area ?? 0)).filter(Boolean))].sort((a, b) => a - b),
+              }
+            : {}),
+          ...(p.unidades
+            ? {
+                unidades_en_venta: p.unidades
+                  .filter((u) => u.disponible)
+                  .map((u) => `${u.nombre}: ${u.area} m²${u.precio ? `, S/ ${u.precio.toLocaleString("es-PE")}` : ""}`),
+              }
+            : {}),
+          por_que_gusta: p.puntosVenta.slice(0, 5),
+        };
+      }),
+    },
+  };
+}
+
+/** Cómo está repartido el trabajo: quién es quién y cuánto lleva cada uno. */
+async function equipo(ctx: ContextoAsistente): Promise<Resultado> {
+  const { data: gente, error } = await ctx.db
+    .from("profiles")
+    .select("user_id, full_name, email, account_role, area")
+    .eq("account_id", ctx.accountId);
+  if (error) return { datos: { error: "No se pudo leer el equipo." } };
+
+  const [{ data: convs }, { data: horarios }] = await Promise.all([
+    ctx.db.from("conversations").select("assigned_agent_id").eq("account_id", ctx.accountId),
+    ctx.db.from("staff_availability").select("user_id").eq("account_id", ctx.accountId),
+  ]);
+
+  const carga = new Map<string, number>();
+  for (const c of convs ?? []) {
+    const id = c.assigned_agent_id as string | null;
+    if (id) carga.set(id, (carga.get(id) ?? 0) + 1);
+  }
+  const conHorario = new Set((horarios ?? []).map((h) => h.user_id as string));
+
+  const ROL: Record<string, string> = {
+    owner: "dueño",
+    admin: "administrador",
+    agent: "asesor",
+    viewer: "solo lectura",
+  };
+
+  return {
+    datos: {
+      miembros: (gente ?? []).map((p) => ({
+        nombre: (p.full_name as string) || (p.email as string) || "?",
+        rol: ROL[p.account_role as string] ?? p.account_role,
+        area: p.area ?? "sin área",
+        conversaciones: carga.get(p.user_id as string) ?? 0,
+        // Sin horarios publicados no se le puede agendar nada, y es la
+        // causa más común de "la IA no ofrece horas".
+        tiene_horarios: conHorario.has(p.user_id as string),
+      })),
+      nota: "Quien no tiene horarios publicados no aparece cuando alguien quiere agendar una cita.",
     },
   };
 }
@@ -734,8 +946,12 @@ export async function ejecutarHerramienta(
         return await misClientes(ctx, args as { filtro?: string; de_todo_el_equipo?: boolean });
       case "resumen_cliente":
         return await resumenCliente(ctx, args as { buscar: string });
+      case "catalogo":
+        return await catalogo(ctx, args as { buscar?: string });
+      case "equipo":
+        return await equipo(ctx);
       case "mi_agenda":
-        return await miAgenda(ctx, args as { desde?: string; hasta?: string });
+        return await miAgenda(ctx, args as { desde?: string; hasta?: string; de_todo_el_equipo?: boolean });
       case "horas_libres":
         return await horasLibres(ctx, args as { dias?: number });
       case "agendar_cita":
