@@ -189,6 +189,59 @@ export async function diasLibres(
 }
 
 /**
+ * Los de `userIds` que de verdad han publicado horarios.
+ *
+ * Quien no ha dicho cuándo trabaja no tiene horas que ofrecer, y
+ * ofrecerlas igual es inventarse una cita que nadie va a atender. Hoy en
+ * Golden sólo una asesora tiene su semana puesta, así que esto es la
+ * diferencia entre agendar de verdad y agendar al aire.
+ */
+export async function conAgendaPublicada(
+  db: SupabaseClient,
+  accountId: string,
+  userIds: string[],
+): Promise<string[]> {
+  if (!userIds.length) return [];
+  const { data, error } = await db
+    .from("staff_availability")
+    .select("user_id")
+    .eq("account_id", accountId)
+    .in("user_id", userIds);
+  if (error) return [];
+  return [...new Set((data ?? []).map((f) => f.user_id as string))];
+}
+
+/**
+ * A quién puede ofrecerle horas la IA para este contacto.
+ *
+ * Parte de `quienAtiende` —el de siempre si ya tiene asesor, cobranzas si
+ * paga cuotas, ventas si todavía mira— pero se queda sólo con los que
+ * tienen horarios publicados. Si el asesor que ya lo atiende no tiene
+ * agenda, se mira la de su área antes que dejar al cliente sin hora:
+ * vale más una cita con otro asesor que ninguna.
+ */
+export async function equipoQuePuedeAgendar(
+  db: SupabaseClient,
+  accountId: string,
+  contactId: string,
+): Promise<string[]> {
+  const suyos = await quienAtiende(db, accountId, contactId);
+  const conAgenda = await conAgendaPublicada(db, accountId, suyos);
+  if (conAgenda.length) return conAgenda;
+
+  // El que lo atiende no publicó horarios: se abre a todo el equipo que
+  // podría atenderlo, y de ésos, a los que sí tienen agenda.
+  const { data: equipo } = await db
+    .from("profiles")
+    .select("user_id, account_role")
+    .eq("account_id", accountId);
+  const todos = (equipo ?? [])
+    .filter((p) => ["owner", "admin", "agent"].includes(p.account_role as string))
+    .map((p) => p.user_id as string);
+  return conAgendaPublicada(db, accountId, todos);
+}
+
+/**
  * A quién le toca atender a este contacto.
  *
  * El que ya paga es de cobranzas; el que todavía mira, de ventas — y si

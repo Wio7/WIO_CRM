@@ -39,6 +39,12 @@ export interface GenerateResult {
   text: string
   /** True when the model asked to hand off to a human (auto-reply mode). */
   handoff: boolean
+  /**
+   * La cita que el modelo pidió reservar (`[[AGENDAR:…]]`, migración
+   * 058). Es una petición, no una reserva: quien la confirma contra la
+   * agenda real es el servidor.
+   */
+  cita?: { cuandoIso: string; tipo: string } | null
 }
 
 /**

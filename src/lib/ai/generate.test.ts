@@ -42,15 +42,57 @@ describe('parseGeneration', () => {
     expect(parseGeneration('Hello there')).toEqual({
       text: 'Hello there',
       handoff: false,
+      cita: null,
     })
   })
 
   it('detects + strips the handoff sentinel', () => {
-    expect(parseGeneration('[[HANDOFF]]')).toEqual({ text: '', handoff: true })
+    expect(parseGeneration('[[HANDOFF]]')).toEqual({ text: '', handoff: true, cita: null })
     expect(parseGeneration('Let me get a human [[HANDOFF]]')).toEqual({
       text: 'Let me get a human',
       handoff: true,
+      cita: null,
     })
+  })
+
+  // El sello de cita (058). Lo que el cliente ve nunca puede llevarlo.
+  it('saca la cita del sello y la quita del texto', () => {
+    const r = parseGeneration(
+      'Listo, te agendo el jueves a las 10:30. [[AGENDAR:2026-09-24T15:30:00.000Z|videollamada]]',
+    )
+    expect(r.cita).toEqual({ cuandoIso: '2026-09-24T15:30:00.000Z', tipo: 'videollamada' })
+    expect(r.text).toBe('Listo, te agendo el jueves a las 10:30.')
+    expect(r.handoff).toBe(false)
+  })
+
+  it('sin tipo, la cita es videollamada', () => {
+    expect(parseGeneration('Va. [[AGENDAR:2026-09-24T15:30:00.000Z]]').cita).toEqual({
+      cuandoIso: '2026-09-24T15:30:00.000Z',
+      tipo: 'videollamada',
+    })
+  })
+
+  it('un sello con fecha inválida no agenda, pero tampoco se le enseña al cliente', () => {
+    const r = parseGeneration('Ahí te va. [[AGENDAR:el jueves|visita]]')
+    expect(r.cita).toBeNull()
+    expect(r.text).toBe('Ahí te va.')
+  })
+
+  it('quita todos los sellos si el modelo repite', () => {
+    const r = parseGeneration(
+      'Uno [[AGENDAR:2026-09-24T15:30:00.000Z|visita]] y dos [[AGENDAR:2026-09-25T15:30:00.000Z|visita]]',
+    )
+    expect(r.text).toBe('Uno  y dos')
+    expect(r.cita?.cuandoIso).toBe('2026-09-24T15:30:00.000Z')
+  })
+
+  it('convive con el traspaso', () => {
+    const r = parseGeneration(
+      'Te agendo y aviso al asesor. [[AGENDAR:2026-09-24T15:30:00.000Z|llamada]][[HANDOFF]]',
+    )
+    expect(r.handoff).toBe(true)
+    expect(r.cita?.tipo).toBe('llamada')
+    expect(r.text).toBe('Te agendo y aviso al asesor.')
   })
 })
 
@@ -69,7 +111,7 @@ describe('generateReply — OpenAI', () => {
       messages: [{ role: 'user', content: 'Hi' }],
     })
 
-    expect(res).toEqual({ text: 'Sure — happy to help!', handoff: false })
+    expect(res).toEqual({ text: 'Sure — happy to help!', handoff: false, cita: null })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.openai.com')
     expect(opts.headers.Authorization).toBe('Bearer sk-test')
@@ -120,7 +162,7 @@ describe('generateReply — Anthropic', () => {
       messages: [{ role: 'user', content: 'Hello' }],
     })
 
-    expect(res).toEqual({ text: 'Hi there!', handoff: false })
+    expect(res).toEqual({ text: 'Hi there!', handoff: false, cita: null })
     const [url, opts] = fetchMock.mock.calls[0]
     expect(url).toContain('api.anthropic.com')
     expect(opts.headers['x-api-key']).toBe('sk-ant-x')

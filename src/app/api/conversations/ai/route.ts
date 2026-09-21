@@ -21,12 +21,13 @@
 // puede: sólo se cambia una conversación que esa persona puede ver (055).
 // ============================================================
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getRequestAuth } from "@/lib/supabase/request-auth";
 import { corsPreflight, withCors } from "@/lib/cors";
 import { sendMessageToConversation, SendMessageError } from "@/lib/whatsapp/send-message";
+import { retomarConLaIa } from "@/lib/ai/retomar";
 
 export function OPTIONS(request: Request) {
   return corsPreflight(request);
@@ -140,7 +141,16 @@ export async function POST(request: Request) {
 
   // Ya con el aviso guardado, la raya se corre hasta él: si no, el propio
   // aviso —que es un mensaje del equipo— volvería a callar a la IA.
-  if (ia) await correrLaRaya(supabase, conversationId, accountId, mensajeDelAviso);
+  if (ia) {
+    await correrLaRaya(supabase, conversationId, accountId, mensajeDelAviso);
+    // Y la IA retoma la conversación ella misma, sin esperar a que el
+    // cliente vuelva a escribir: si nadie dice nada, el hilo se muere
+    // justo donde el asesor lo dejó. Va en `after()` para que el botón
+    // responda al instante — generar el mensaje tarda unos segundos.
+    after(async () => {
+      await retomarConLaIa({ accountId, conversationId });
+    });
+  }
 
   return withCors(request, NextResponse.json({ ok: true, ia, avisado, ...(motivo ? { motivo } : {}) }));
 }
