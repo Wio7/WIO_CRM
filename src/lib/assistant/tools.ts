@@ -125,6 +125,97 @@ export const HERRAMIENTAS = [
   {
     type: "function",
     function: {
+      name: "resumen_de_conversacion",
+      description:
+        "LEE EL CHAT ENTERO de un contacto y devuelve todo lo que hace falta para saber qué decirle: qué pidió con sus palabras, en qué punto quedó, quién habló al final, cuánto lleva callado, sus señales de interés y si tiene cita o deuda. Úsala cuando pidan el resumen de una conversación, qué contestarle a alguien o cómo seguir con un cliente.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente: { type: "string", description: "Nombre, teléfono o DNI." },
+        },
+        required: ["cliente"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_lote",
+      description:
+        "Busca lotes concretos en los planos de la app: por proyecto, por manzana o por metraje, y dice cuáles están libres. Para contestar '¿qué te queda de 200 m²?' o '¿está libre el A-12?'.",
+      parameters: {
+        type: "object",
+        properties: {
+          proyecto: { type: "string", description: "Nombre del proyecto, p. ej. 'Colinas II'. Vacío = todos." },
+          manzana: { type: "string", description: "Letra de la manzana, p. ej. 'K'." },
+          area_minima: { type: "number", description: "Metros cuadrados mínimos." },
+          area_maxima: { type: "number", description: "Metros cuadrados máximos." },
+          lote: { type: "string", description: "Código exacto de un lote, p. ej. 'A-12'." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "quien_no_contesta",
+      description:
+        "Los clientes que escribieron, se les respondió y llevan horas o días sin volver. Ordenados por cuánto llevan callados, con lo último que dijeron y cuánto queda antes de que se cierre la ventana de 24 h de WhatsApp. Para saber a quién rescatar hoy.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "embudo",
+      description:
+        "Cómo va el negocio en números: cuántos contactos escribieron, cuántos siguen en conversación, cuántos tienen cita, cuántos compraron y cuánto se está cobrando. Acepta un periodo en días.",
+      parameters: {
+        type: "object",
+        properties: {
+          dias: { type: "integer", minimum: 1, maximum: 365, description: "Cuántos días hacia atrás (por defecto 30)." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "rendimiento_del_equipo",
+      description:
+        "Cuánto lleva y cómo va cada asesor: conversaciones, sin responder, citas agendadas y clientes con plan de pago. Sólo para dueño o administrador.",
+      parameters: {
+        type: "object",
+        properties: {
+          dias: { type: "integer", minimum: 1, maximum: 365, description: "Periodo de las citas, por defecto 30 días." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "poner_quien_responde",
+      description:
+        "Cambia quién lleva una conversación: la IA o la persona que pregunta. Tomarla calla a la IA en ese chat; devolverla hace que la IA siga. Llámala sólo si te lo piden claramente.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente: { type: "string", description: "Nombre, teléfono o DNI." },
+          quien: { type: "string", enum: ["ia", "yo"], description: "'yo' = la tomo yo; 'ia' = que siga la asistente." },
+        },
+        required: ["cliente", "quien"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "mi_agenda",
       description: "Las citas agendadas entre dos fechas (por defecto, hoy y los próximos 7 días). Las de quien pregunta, o las de todo el equipo si lo pide un dueño o un jefe.",
       parameters: {
@@ -766,6 +857,327 @@ async function catalogo(ctx: ContextoAsistente, args: { buscar?: string }): Prom
   };
 }
 
+/**
+ * El chat entero de alguien, masticado para poder decidir qué contestarle.
+ *
+ * `resumen_cliente` da su ficha; esto da la CONVERSACIÓN: lo que pidió con
+ * sus palabras, quién habló al final, cuánto lleva callado y cuánto queda
+ * de la ventana de 24 h. Es lo que hacía falta para que el asistente
+ * pudiera proponer una respuesta en vez de describir al cliente.
+ */
+async function resumenDeConversacion(ctx: ContextoAsistente, args: { cliente: string }): Promise<Resultado> {
+  const { uno, varios } = await buscarContacto(ctx, args.cliente);
+  if (!uno) return { datos: candidatos(varios) };
+
+  const { data: conv } = await ctx.db
+    .from("conversations")
+    .select("id, channel, unread_count, assigned_agent_id, ai_autoreply_disabled, followup_count")
+    .eq("contact_id", uno.id)
+    .eq("account_id", ctx.accountId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!conv) return { datos: { cliente: uno.name || uno.phone, sin_conversacion: true } };
+
+  const { data: msjs } = await ctx.db
+    .from("messages")
+    .select("sender_type, content_text, content_type, created_at")
+    .eq("conversation_id", conv.id)
+    .order("created_at", { ascending: false })
+    .limit(40);
+
+  const mensajes = (msjs ?? []).slice().reverse();
+  const delCliente = mensajes.filter((m) => m.sender_type === "customer");
+  const ultimo = mensajes[mensajes.length - 1];
+  const ultimoDelCliente = delCliente[delCliente.length - 1];
+
+  const senales: string[] = [];
+  for (const m of delCliente) {
+    for (const [patron, senal] of SENALES) {
+      if (patron.test((m.content_text as string) ?? "") && !senales.includes(senal)) senales.push(senal);
+    }
+  }
+
+  const desde = ultimoDelCliente ? Date.parse(ultimoDelCliente.created_at as string) : null;
+  const calladoMin = desde ? Math.round((Date.now() - desde) / 60_000) : null;
+  const ventanaMin = desde ? Math.round(24 * 60 - (Date.now() - desde) / 60_000) : null;
+
+  const [{ data: saldo }, { data: citas }] = await Promise.all([
+    ctx.db
+      .from("payment_plan_balances")
+      .select("currency, pending_amount, overdue_count, next_due_date")
+      .eq("contact_id", uno.id)
+      .maybeSingle(),
+    ctx.db
+      .from("appointments")
+      .select("starts_at, kind, status")
+      .eq("contact_id", uno.id)
+      .eq("status", "agendada")
+      .gte("starts_at", new Date().toISOString())
+      .order("starts_at")
+      .limit(2),
+  ]);
+
+  const quien = conv.assigned_agent_id ? await nombresDelEquipo(ctx) : new Map<string, string>();
+
+  return {
+    datos: {
+      cliente: uno.name || uno.phone,
+      telefono: uno.phone,
+      llego_por: uno.lead_source ?? null,
+      canal: conv.channel ?? "whatsapp",
+      lleva: quien.get((conv.assigned_agent_id as string) ?? "") ?? "sin asignar",
+      responde_ahora: conv.ai_autoreply_disabled ? "un asesor" : "la asistente virtual",
+      veces_que_se_le_insistio: conv.followup_count ?? 0,
+      escribio_ultimo:
+        ultimo?.sender_type === "customer" ? "el cliente" : ultimo?.sender_type === "bot" ? "la IA" : "el equipo",
+      minutos_callado: calladoMin,
+      // Cuánto queda para no poder escribirle libremente. En negativo, ya
+      // pasó: sólo se le puede mandar una plantilla.
+      minutos_de_ventana_restantes: ventanaMin,
+      senales_de_interes: senales,
+      ya_es_cliente: Boolean(saldo),
+      ...(saldo
+        ? {
+            por_pagar: `${saldo.currency === "PEN" ? "S/" : saldo.currency} ${Number(saldo.pending_amount ?? 0).toFixed(2)}`,
+            cuotas_atrasadas: saldo.overdue_count ?? 0,
+            proxima_cuota: saldo.next_due_date ?? null,
+          }
+        : {}),
+      citas: (citas ?? []).map((c) => `${nombreDeCita(c.kind as string)} el ${cuandoLima(c.starts_at as string)}`),
+      conversacion: mensajes.map((m) => ({
+        de: m.sender_type === "customer" ? "cliente" : m.sender_type === "bot" ? "IA" : "equipo",
+        texto: ((m.content_text as string) || `[${m.content_type}]`).slice(0, 300),
+        cuando: cuandoLima(m.created_at as string),
+      })),
+    },
+  };
+}
+
+/** Lotes concretos del plano: por proyecto, manzana, metraje o código. */
+async function buscarLote(
+  ctx: ContextoAsistente,
+  args: { proyecto?: string; manzana?: string; area_minima?: number; area_maxima?: number; lote?: string },
+): Promise<Resultado> {
+  const datos = await catalogoDeGolden();
+  if (!datos) return { datos: { error: "No se pudo leer el catálogo de la app." } };
+
+  const buscadoProyecto = (args.proyecto ?? "").trim().toLowerCase();
+  const mz = (args.manzana ?? "").trim().toUpperCase().replace(/^MZ\.?\s*/i, "");
+  const codigo = (args.lote ?? "").trim().toUpperCase();
+
+  const proyectos = datos.proyectos.filter(
+    (p) =>
+      p.lotes?.length &&
+      (!buscadoProyecto ||
+        `${p.nombre} ${p.nombreCorto ?? ""}`.toLowerCase().includes(buscadoProyecto)),
+  );
+
+  const encontrados: Record<string, unknown>[] = [];
+  for (const p of proyectos) {
+    for (const l of p.lotes ?? []) {
+      if (codigo && l.id.toUpperCase() !== codigo) continue;
+      if (mz && (l.mz ?? "").toUpperCase() !== mz) continue;
+      if (args.area_minima && (l.area ?? 0) < args.area_minima) continue;
+      if (args.area_maxima && (l.area ?? 0) > args.area_maxima) continue;
+      encontrados.push({
+        proyecto: p.nombreCorto || p.nombre,
+        lote: l.id,
+        manzana: l.mz,
+        area: l.area,
+        estado: l.estado,
+        precio_del_proyecto_desde: p.comercial.precioDesde,
+        moneda: p.comercial.moneda,
+      });
+    }
+  }
+
+  const libres = encontrados.filter((l) => l.estado === "libre");
+  return {
+    datos: {
+      total_encontrados: encontrados.length,
+      libres: libres.length,
+      // Una lista larga no la va a leer nadie por WhatsApp: se dan los
+      // primeros y el recuento, que es lo que se usa para contestar.
+      lotes: (libres.length ? libres : encontrados).slice(0, 25),
+      nota: "El estado de un lote cambia durante el día: confírmalo con el asesor antes de prometérselo a nadie.",
+    },
+  };
+}
+
+/** A quién hay que rescatar hoy: escribieron y se callaron. */
+async function quienNoContesta(ctx: ContextoAsistente): Promise<Resultado> {
+  const { data: convs, error } = await ctx.db
+    .from("conversations")
+    .select("id, last_message_at, assigned_agent_id, followup_count, contact:contacts(id, name, phone)")
+    .eq("account_id", ctx.accountId)
+    .order("last_message_at", { ascending: false, nullsFirst: false })
+    .limit(60);
+  if (error) return { datos: { error: error.message } };
+
+  const filas = (convs ?? []) as unknown as {
+    id: string;
+    last_message_at: string | null;
+    assigned_agent_id: string | null;
+    followup_count: number | null;
+    contact: { id: string; name: string | null; phone: string | null } | null;
+  }[];
+  if (!filas.length) return { datos: { total: 0, clientes: [] } };
+
+  const voz = await vozDeLosClientes(ctx, filas.map((f) => f.id));
+  const quien = await nombresDelEquipo(ctx);
+
+  const callados = filas
+    .filter((f) => {
+      const v = voz.get(f.id);
+      // Escribió alguna vez, y el último en hablar no fue él.
+      return v && v.ultimo !== "cliente" && v.dijo.length > 0;
+    })
+    .map((f) => {
+      const v = voz.get(f.id)!;
+      const min = f.last_message_at ? Math.round((Date.now() - Date.parse(f.last_message_at)) / 60_000) : null;
+      return {
+        cliente: f.contact?.name || f.contact?.phone || "Sin nombre",
+        telefono: f.contact?.phone,
+        lleva: quien.get(f.assigned_agent_id ?? "") ?? "sin asignar",
+        horas_callado: min == null ? null : Math.round(min / 60),
+        veces_que_se_le_insistio: f.followup_count ?? 0,
+        lo_ultimo_que_dijo: v.dijo[v.dijo.length - 1] ?? null,
+        senales_de_interes: v.senales,
+      };
+    })
+    .sort((a, b) => (b.horas_callado ?? 0) - (a.horas_callado ?? 0));
+
+  return {
+    datos: {
+      total: callados.length,
+      clientes: callados.slice(0, 20),
+      nota: "Pasadas 24 h desde su último mensaje ya no se les puede escribir libremente por WhatsApp: hace falta una plantilla.",
+    },
+  };
+}
+
+/** Cómo va el negocio, en números. */
+async function embudo(ctx: ContextoAsistente, args: { dias?: number }): Promise<Resultado> {
+  const dias = Math.min(Math.max(Number(args.dias) || 30, 1), 365);
+  const desde = new Date(Date.now() - dias * 864e5).toISOString();
+
+  const [contactos, convs, citas, planes, saldos] = await Promise.all([
+    ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("account_id", ctx.accountId).gte("created_at", desde),
+    ctx.db.from("conversations").select("id, status").eq("account_id", ctx.accountId).gte("created_at", desde),
+    ctx.db.from("appointments").select("id, status").eq("account_id", ctx.accountId).gte("created_at", desde),
+    ctx.db.from("payment_plans").select("id, status").eq("account_id", ctx.accountId),
+    ctx.db.from("payment_plan_balances").select("pending_amount, overdue_amount, currency"),
+  ]);
+
+  const citasFilas = (citas.data ?? []) as { status: string }[];
+  const planesFilas = (planes.data ?? []) as { status: string }[];
+  const saldosFilas = (saldos.data ?? []) as { pending_amount: number | null; overdue_amount: number | null; currency: string | null }[];
+  const suma = (campo: "pending_amount" | "overdue_amount") =>
+    saldosFilas.reduce((t, s) => t + (Number(s[campo]) || 0), 0);
+
+  return {
+    datos: {
+      periodo: `últimos ${dias} días`,
+      contactos_nuevos: contactos.count ?? 0,
+      conversaciones_abiertas: ((convs.data ?? []) as { status: string }[]).filter((c) => c.status !== "closed").length,
+      citas_agendadas: citasFilas.filter((c) => c.status === "agendada").length,
+      citas_canceladas: citasFilas.filter((c) => c.status === "cancelada").length,
+      clientes_con_plan_de_pago: planesFilas.filter((p) => p.status === "activo").length,
+      planes_ya_pagados: planesFilas.filter((p) => p.status === "pagado").length,
+      por_cobrar_total: suma("pending_amount").toFixed(2),
+      atrasado_total: suma("overdue_amount").toFixed(2),
+      moneda: saldosFilas[0]?.currency ?? "PEN",
+      nota: "Las cifras de cobranza son del total vigente, no sólo del periodo.",
+    },
+  };
+}
+
+/** Cuánto lleva y cómo va cada asesor. */
+async function rendimientoDelEquipo(ctx: ContextoAsistente, args: { dias?: number }): Promise<Resultado> {
+  if (!esJefe(ctx.rol)) {
+    return { datos: { error: "Esto sólo lo puede ver un dueño o un administrador." } };
+  }
+  const dias = Math.min(Math.max(Number(args.dias) || 30, 1), 365);
+  const desde = new Date(Date.now() - dias * 864e5).toISOString();
+
+  const [{ data: gente }, { data: convs }, { data: citas }] = await Promise.all([
+    ctx.db.from("profiles").select("user_id, full_name, email, account_role, area").eq("account_id", ctx.accountId),
+    ctx.db.from("conversations").select("id, assigned_agent_id, status").eq("account_id", ctx.accountId),
+    ctx.db
+      .from("appointments")
+      .select("user_id, status")
+      .eq("account_id", ctx.accountId)
+      .gte("created_at", desde),
+  ]);
+
+  const convFilas = (convs ?? []) as { id: string; assigned_agent_id: string | null; status: string }[];
+  const voz = await vozDeLosClientes(ctx, convFilas.map((c) => c.id));
+
+  return {
+    datos: {
+      periodo: `últimos ${dias} días`,
+      asesores: (gente ?? [])
+        .filter((p) => p.account_role !== "viewer")
+        .map((p) => {
+          const suyas = convFilas.filter((c) => c.assigned_agent_id === p.user_id);
+          return {
+            nombre: (p.full_name as string) || (p.email as string) || "?",
+            conversaciones: suyas.length,
+            abiertas: suyas.filter((c) => c.status !== "closed").length,
+            // Las que esperan respuesta suya: el último que habló fue el cliente.
+            sin_responder: suyas.filter((c) => voz.get(c.id)?.ultimo === "cliente").length,
+            citas_agendadas: ((citas ?? []) as { user_id: string; status: string }[]).filter(
+              (c) => c.user_id === p.user_id && c.status === "agendada",
+            ).length,
+          };
+        })
+        .sort((a, b) => b.conversaciones - a.conversaciones),
+    },
+  };
+}
+
+/** Tomar o devolver una conversación desde el asistente. */
+async function ponerQuienResponde(
+  ctx: ContextoAsistente,
+  args: { cliente: string; quien: string },
+): Promise<Resultado> {
+  const { uno, varios } = await buscarContacto(ctx, args.cliente);
+  if (!uno) return { datos: candidatos(varios) };
+  const ia = args.quien === "ia";
+
+  const { data: conv } = await ctx.db
+    .from("conversations")
+    .select("id")
+    .eq("contact_id", uno.id)
+    .eq("account_id", ctx.accountId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!conv) return { datos: { error: "Ese contacto no tiene ninguna conversación." } };
+
+  // Con SU cliente: si la base no le deja verla, no se cambia nada.
+  const cambios: Record<string, unknown> = ia
+    ? { ai_autoreply_disabled: false, ai_reply_count: 0, ai_resumed_at: new Date().toISOString() }
+    : { ai_autoreply_disabled: true };
+  let { error } = await ctx.db.from("conversations").update(cambios).eq("id", conv.id);
+  if (error && /ai_resumed_at/i.test(error.message)) {
+    delete cambios.ai_resumed_at;
+    ({ error } = await ctx.db.from("conversations").update(cambios).eq("id", conv.id));
+  }
+  if (error) return { datos: { error: "No se pudo cambiar quién responde." } };
+
+  return {
+    datos: {
+      cliente: uno.name || uno.phone,
+      responde_ahora: ia ? "la asistente virtual" : "tú",
+      // El aviso al cliente lo manda la pantalla del chat, no esto: desde
+      // aquí no se le escribe a nadie sin que se vea venir.
+      nota: "Se cambió quién responde. Al cliente no se le ha avisado: si quieres que lo sepa, escríbele tú o hazlo desde el chat.",
+    },
+  };
+}
+
 /** Cómo está repartido el trabajo: quién es quién y cuánto lleva cada uno. */
 async function equipo(ctx: ContextoAsistente): Promise<Resultado> {
   const { data: gente, error } = await ctx.db
@@ -950,6 +1362,18 @@ export async function ejecutarHerramienta(
         return await catalogo(ctx, args as { buscar?: string });
       case "equipo":
         return await equipo(ctx);
+      case "resumen_de_conversacion":
+        return await resumenDeConversacion(ctx, args as { cliente: string });
+      case "buscar_lote":
+        return await buscarLote(ctx, args as { proyecto?: string; manzana?: string; area_minima?: number; area_maxima?: number; lote?: string });
+      case "quien_no_contesta":
+        return await quienNoContesta(ctx);
+      case "embudo":
+        return await embudo(ctx, args as { dias?: number });
+      case "rendimiento_del_equipo":
+        return await rendimientoDelEquipo(ctx, args as { dias?: number });
+      case "poner_quien_responde":
+        return await ponerQuienResponde(ctx, args as { cliente: string; quien: string });
       case "mi_agenda":
         return await miAgenda(ctx, args as { desde?: string; hasta?: string; de_todo_el_equipo?: boolean });
       case "horas_libres":

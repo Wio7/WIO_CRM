@@ -282,7 +282,13 @@ export async function quienAtiende(
   if (error || !equipo?.length) return [];
 
   const area = esCliente ? "cobranzas" : "ventas";
-  const conArea = equipo.filter((p) => p.area === area);
+  // En ventas entran el jefe de ventas y TODOS los asesores: un asesor
+  // inmobiliario no lleva área —es su trabajo entero, no un
+  // departamento que dirija— y filtrar por la etiqueta lo dejaba fuera
+  // de su propio equipo (migración 060).
+  const conArea = equipo.filter(
+    (p) => p.area === area || (area === "ventas" && !p.area && p.account_role === "agent"),
+  );
   if (conArea.length) return conArea.map((p) => p.user_id as string);
 
   // Nadie tiene ese cargo todavía: se ofrece la agenda de quien pueda
