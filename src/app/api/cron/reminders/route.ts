@@ -19,6 +19,10 @@
 // Esto necesita que algo lo llame cada pocos minutos. Vercel Hobby sólo
 // permite un cron diario, así que en producción lo llama un pinger
 // externo (cron-job.org o similar) con el secreto en la URL.
+//
+// Para configurarlo sin disparar avisos de verdad:
+//   GET ...?secret=<CRON_SECRET>&comprobar=1
+// responde si el secreto coincide y no toca nada.
 // ============================================================
 
 import { NextResponse } from "next/server";
@@ -117,10 +121,32 @@ async function tanda(
 async function correr(request: Request) {
   const url = new URL(request.url);
   const secreto = process.env.CRON_SECRET;
-  const dado = url.searchParams.get("secret")
-    || (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  // Un espacio o un salto de línea de más al pegar el valor en Vercel
+  // deja el cron en 401 para siempre, y desde fuera es indistinguible de
+  // no haberlo puesto. Se recortan los dos lados: nadie quiere un
+  // secreto que empiece por espacio.
+  const esperado = (secreto ?? "").trim();
+  const dado = (url.searchParams.get("secret")
+    || (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "")).trim();
 
-  if (!secreto || dado !== secreto) {
+  // Comprobación de instalación: dice si el secreto es correcto SIN
+  // mandarle nada a ningún cliente. Es lo que se usa para configurar el
+  // pinger sin disparar avisos de verdad, y lo que permite averiguar por
+  // qué falla sin tener que adivinar.
+  if (url.searchParams.get("comprobar") === "1") {
+    return NextResponse.json({
+      ok: esperado.length > 0 && dado === esperado,
+      hay_secreto_en_el_servidor: esperado.length > 0,
+      // Nunca el valor, sólo su forma: suficiente para ver un espacio de
+      // más o un copiado a medias, inútil para nadie más.
+      largo_esperado: esperado.length,
+      largo_recibido: dado.length,
+      coincide: esperado.length > 0 && dado === esperado,
+      nota: "Esto no manda ningún aviso. Quita &comprobar=1 para que el cron trabaje de verdad.",
+    });
+  }
+
+  if (!esperado || dado !== esperado) {
     return NextResponse.json({ ok: false, reason: "unauthorized" }, { status: 401 });
   }
 
