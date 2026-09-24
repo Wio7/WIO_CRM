@@ -320,6 +320,32 @@ export default function JoinPage() {
     await entrar(modo === 'entrar' ? 'login' : 'create');
   };
 
+  /**
+   * Le manda un correo para poner una contraseña nueva. Es la única
+   * forma de desencallar a quien ya tenía cuenta y no se acuerda de la
+   * suya: hasta ahora la invitación era un callejón sin salida.
+   */
+  const recuperar = async () => {
+    const destino = correo.trim().toLowerCase();
+    if (!destino) {
+      setError('Escribe tu correo primero.');
+      return;
+    }
+    setEnviando(true);
+    setError(null);
+    const { error: recError } = await createClient().auth.resetPasswordForEmail(destino, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setEnviando(false);
+    if (recError) {
+      setError('No se pudo enviar el correo. Inténtalo de nuevo en un momento.');
+      return;
+    }
+    setAviso(
+      `Te mandamos un correo a ${destino} para poner una contraseña nueva. Revisa también la carpeta de spam; cuando la cambies, vuelve a abrir este mismo enlace.`,
+    );
+  };
+
   const cambiarModo = (siguiente: Modo) => {
     setModo(siguiente);
     setError(null);
@@ -457,6 +483,23 @@ export default function JoinPage() {
                 </button>
               </div>
             </div>
+
+            {/* La salida de emergencia. Quien ya tenía cuenta y no
+                recuerda su contraseña se quedaba encallado aquí: el
+                formulario le pedía "tu contraseña de siempre" y no había
+                ningún otro camino, ni hacia adelante ni hacia atrás.
+                Sólo aparece cuando se le está pidiendo una contraseña que
+                ya existe, que es cuando hace falta. */}
+            {modo === 'entrar' && (
+              <button
+                type="button"
+                onClick={recuperar}
+                disabled={enviando}
+                className="-mt-1 self-start text-sm font-medium text-primary underline underline-offset-2"
+              >
+                No recuerdo mi contraseña
+              </button>
+            )}
 
             {error && <Mensaje texto={error} />}
 

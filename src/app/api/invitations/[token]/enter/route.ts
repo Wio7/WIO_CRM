@@ -186,15 +186,25 @@ export async function POST(
       }
       emailTaken = true;
 
-      // The invitee Supabase created when this email invite went out, who
-      // never signed in: no password exists yet, and holding this link
-      // is holding that inbox's message.
+      // La cuenta que Supabase creó al mandar una invitación y que nadie
+      // llegó a usar: no tiene contraseña, y tener este enlace es tener
+      // el mensaje que la anunciaba.
+      //
+      // Antes esto sólo valía para las invitaciones POR CORREO
+      // (`inv.email === email`). Las que se mandan por WhatsApp no llevan
+      // correo, así que la persona escribía el suyo, Supabase decía "ese
+      // correo ya existe" y se quedaba encallada pidiéndole una
+      // contraseña que nunca había puesto: no había forma de entrar ni de
+      // crearla. Ahora también vale para el enlace suelto, con las mismas
+      // condiciones de siempre — la cuenta nació de una invitación y no
+      // se usó nunca—, que es el mismo grado de confianza con el que este
+      // enlace ya deja crear un usuario nuevo con cualquier correo.
       const { data: profile } = await admin
         .from("profiles")
         .select("user_id")
         .eq("email", email)
         .maybeSingle();
-      if (profile?.user_id && inv.email === email) {
+      if (profile?.user_id) {
         const { data: found } = await admin.auth.admin.getUserById(profile.user_id);
         const user = found?.user;
         if (user && user.invited_at && !user.last_sign_in_at) {
