@@ -20,42 +20,11 @@
 
 import { NextResponse } from "next/server";
 
+import { transcribirAudio, MAXIMO_BYTES } from "@/lib/whisper";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { corsPreflight, withCors } from "@/lib/cors";
 import { bearerToken } from "@/lib/client-portal/http";
 import { resolveClientSession } from "@/lib/client-portal/sessions";
-
-/** Un minuto y medio de voz sobra para un mensaje y no cuesta casi nada. */
-const MAXIMO_BYTES = 8 * 1024 * 1024;
-
-const WHISPER = "https://api.openai.com/v1/audio/transcriptions";
-
-/**
- * Lo que Whisper se inventa cuando el audio no tiene voz.
- *
- * Con silencio o ruido no devuelve vacío: devuelve una de las frases que
- * aprendió de tanto video subtitulado. Comprobado contra producción el
- * 2026-09-17 con un tono puro — contestó "Subtítulos realizados por la
- * comunidad de Amara.org". Si eso llegara al cuadro de texto del cliente,
- * pensaría que la app se volvió loca.
- *
- * Se comparan sin tildes ni mayúsculas, y por "contiene": las variantes
- * son muchas y todas llevan una de estas marcas dentro.
- */
-const INVENTOS = [
-  "amara.org",
-  "subtitulos realizados por",
-  "subtitulado por la comunidad",
-  "subtitulos por",
-  "gracias por ver el video",
-  "www.youtube.com",
-];
-
-// El rango del replace son los signos diacríticos que deja `NFD` al
-// separar las tildes de su letra. No se ven en el editor: si alguien toca
-// esta línea, que sea copiándola entera.
-const sinTildes = (t: string) =>
-  t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 export function OPTIONS(request: Request) {
   return corsPreflight(request);
@@ -96,42 +65,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const envio = new FormData();
-  envio.append("file", audio, audio.name || "voz.webm");
-  envio.append("model", "whisper-1");
-  // Español fijo: el cliente es peruano y decírselo mejora bastante los
-  // nombres propios y los números, que es justo lo que va a dictar
-  // ("mi cuota de mayo", "operación 884512").
-  envio.append("language", "es");
-
-  let res: Response;
-  try {
-    res = await fetch(WHISPER, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: envio,
-    });
-  } catch (err) {
-    console.error("[client-portal] whisper unreachable:", err);
+  const r = await transcribirAudio(audio, apiKey);
+  if (!r.ok) {
     return withCors(
       request,
       NextResponse.json({ ok: false, reason: "server_error" }, { status: 502 }),
     );
   }
-
-  if (!res.ok) {
-    console.error("[client-portal] whisper said", res.status, await res.text().catch(() => ""));
-    return withCors(
-      request,
-      NextResponse.json({ ok: false, reason: "server_error" }, { status: 502 }),
-    );
-  }
-
-  const datos = (await res.json().catch(() => ({}))) as { text?: string };
-  const texto = (datos.text ?? "").trim();
-  const limpio = INVENTOS.some((f) => sinTildes(texto).includes(f)) ? "" : texto;
-
   // Texto vacío es una respuesta legítima: "no se te oyó". La app lo dice
   // así en vez de pegar un invento en el mensaje del cliente.
-  return withCors(request, NextResponse.json({ ok: true, texto: limpio }));
+  return withCors(request, NextResponse.json({ ok: true, texto: r.texto }));
 }
