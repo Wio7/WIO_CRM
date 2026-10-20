@@ -66,12 +66,41 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => createClient(),
 }));
 
-const { getCurrentAccount, UnauthorizedError, ForbiddenError } = await import(
+const { getCurrentAccount, requireSuperAdmin, UnauthorizedError, ForbiddenError } = await import(
   "./account"
 );
 
 afterEach(() => {
   vi.clearAllMocks();
+});
+
+describe("requireSuperAdmin", () => {
+  it("rechaza sesiones anónimas", async () => {
+    const { client } = makeClient({ user: null, byTable: {} });
+    createClient.mockReturnValue(client);
+    await expect(requireSuperAdmin()).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  it.each([null, { code: "42P01" }])("rechaza sin una fila verificable (%j)", async (error) => {
+    const { client } = makeClient({
+      user: { id: "owner" },
+      byTable: { platform_admins: { data: null, error } },
+    });
+    createClient.mockReturnValue(client);
+    await expect(requireSuperAdmin()).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("autoriza por user_id sin depender de correo, perfil ni cuenta visitada", async () => {
+    const { client, calls } = makeClient({
+      user: { id: "platform-admin" },
+      byTable: { platform_admins: {
+        data: { user_id: "platform-admin", home_account_id: "home", visiting_account_id: "client" }, error: null,
+      } },
+    });
+    createClient.mockReturnValue(client);
+    expect(await requireSuperAdmin()).toMatchObject({ userId: "platform-admin" });
+    expect(calls).toEqual([{ table: "platform_admins", columns: "user_id, home_account_id, visiting_account_id", eqArgs: [["user_id", "platform-admin"]] }]);
+  });
 });
 
 describe("getCurrentAccount", () => {

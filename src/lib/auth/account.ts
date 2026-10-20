@@ -185,3 +185,19 @@ export async function requireRole(min: AccountRole): Promise<AccountContext> {
   }
   return ctx;
 }
+
+/** Permiso de plataforma independiente del rol y de la cuenta visitada. */
+export async function requireSuperAdmin() {
+  const { supabase, user } = await getIncomingRequestAuth();
+  if (!user) throw new UnauthorizedError();
+
+  const { data, error } = await supabase
+    .from("platform_admins")
+    .select("user_id, home_account_id, visiting_account_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error) throw new ForbiddenError("No se pudo verificar el permiso de superadmin");
+  if (!data) throw new ForbiddenError("Requiere privilegios de superadmin");
+
+  return { supabase, userId: user.id, platformAdmin: data };
+}

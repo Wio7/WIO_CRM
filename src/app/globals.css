@@ -231,3 +231,27 @@ html[data-theme="rose"] {
     @apply transition-all duration-200 ease-in-out;
   }
 }
+
+/* Reservar espacio al aviso incluso en las navegaciones fijas de Caja/móvil. */
+body:has([data-platform-admin-banner]) {
+  --platform-banner-height: 5rem;
+}
+@media (min-width: 640px) {
+  body:has([data-platform-admin-banner]) {
+    --platform-banner-height: 3.5rem;
+  }
+}
+.platform-dashboard {
+  height: calc(100vh - var(--platform-banner-height, 0px));
+}
+@media (max-width: 1023px) {
+  body:has([data-platform-admin-banner]) [data-dashboard-sidebar] {
+    top: var(--platform-banner-height);
+    height: calc(100% - var(--platform-banner-height));
+  }
+}
+@media (min-width: 761px) {
+  body:has([data-platform-admin-banner]) .cash-sidebar {
+    top: var(--platform-banner-height);
+  }
+}

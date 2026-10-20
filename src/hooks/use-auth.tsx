@@ -44,6 +44,9 @@ interface AccountSummary {
   /** Default deal currency (ISO-4217). NOT NULL DEFAULT 'USD' in the
    *  DB (migration 021); narrowed to DEFAULT_CURRENCY when absent. */
   default_currency: string;
+  /** Route prefixes this account has switched off (migration 066).
+   *  Empty when none, or when the migration isn't applied yet. */
+  disabled_modules: string[];
 }
 
 interface AuthContextValue {
@@ -105,6 +108,8 @@ interface AuthContextValue {
   canSendMessages: boolean;
   /** True if the caller is the global super admin. */
   isSuperAdmin: boolean;
+  isVisiting: boolean;
+  homeAccountId: string | null;
   /** True if the current account is inactive and the caller is not the super admin. */
   isAccountInactive: boolean;
 }
@@ -112,7 +117,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 /**
- * AuthProvider — wrap this around the dashboard layout.
+ * AuthProvider — compartido por el layout raíz, dashboard y Caja.
  * Makes ONE getSession() call for the whole tree instead of one per
  * component, avoiding internal lock contention in the Supabase client.
  */
@@ -120,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
+  const [platformAdmin, setPlatformAdmin] = useState<{ home_account_id: string; visiting_account_id: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   // Tracked separately from `loading`. The session settles fast (one
   // local cookie read); the profile fetch crosses the network and
@@ -140,6 +146,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfileLoading(true);
     lastFetchedUserIdRef.current = userId;
     try {
+      const { data: admin, error: adminError } = await supabase
+        .from("platform_admins")
+        .select("home_account_id, visiting_account_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      setPlatformAdmin(adminError ? null : admin);
       const { data, error } = await supabase
         .from("profiles")
         .select(
@@ -187,11 +199,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               code: accountErr.code,
             });
           } else if (account) {
+            // Separate lookup so an unapplied migration 066 (column
+            // missing) can't take the whole account context down.
+            const { data: mods } = await supabase
+              .from("accounts")
+              .select("disabled_modules")
+              .eq("id", data.account_id)
+              .maybeSingle();
             accountRow = {
               id: account.id,
               name: account.name,
               status: account.status ?? 'active',
               default_currency: account.default_currency ?? DEFAULT_CURRENCY,
+              disabled_modules: mods?.disabled_modules ?? [],
             };
           }
         }
@@ -293,6 +313,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         lastFetchedUserIdRef.current = null;
         setProfile(null);
         setAccount(null);
+        setPlatformAdmin(null);
         setProfileLoading(false);
       }
 
@@ -312,6 +333,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setAccount(null);
+    setPlatformAdmin(null);
     window.location.href = "/login";
   }, []);
 
@@ -339,11 +361,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [profile?.account_role, profile?.account_id]);
 
-  const isSuperAdmin = useMemo(() => {
-    const email = user?.email?.toLowerCase();
-    const superAdminEmail = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAIL || "admin@wiocrm.com").toLowerCase();
-    return email === superAdminEmail;
-  }, [user?.email]);
+  const isSuperAdmin = platformAdmin !== null;
+  const isVisiting = platformAdmin?.visiting_account_id != null;
+  const homeAccountId = platformAdmin?.home_account_id ?? null;
 
   const isAccountInactive = useMemo(() => {
     return account?.status === 'inactive' && !isSuperAdmin;
@@ -361,6 +381,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         account,
         defaultCurrency: account?.default_currency ?? DEFAULT_CURRENCY,
         isSuperAdmin,
+        isVisiting,
+        homeAccountId,
         isAccountInactive,
         ...derived,
       }}
@@ -402,6 +424,8 @@ export function useAuth(): AuthContextValue {
       canEditSettings: false,
       canSendMessages: false,
       isSuperAdmin: false,
+      isVisiting: false,
+      homeAccountId: null,
       isAccountInactive: false,
     };
   }

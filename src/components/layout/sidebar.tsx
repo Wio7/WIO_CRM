@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
+import { isModuleDisabled } from "@/lib/modules";
 import { Ticket,
   Bell,
   Bot,
@@ -104,6 +105,7 @@ const navItems: NavItem[] = [
   { href: "/projects", label: "Proyectos", icon: Building2 },
   { href: "/reservations", label: "Separaciones", icon: CalendarCheck },
   { href: "/payment-plans", label: "Cuotas", icon: Wallet },
+  { href: "/caja", label: "Golden Caja", icon: Wallet },
   { href: "/calendar", label: "Calendario", icon: CalendarDays },
   { href: "/coupons", label: "Cupones y referidos", icon: Ticket },
   { href: "/dialer", label: "Marcador", icon: PhoneCall },
@@ -184,6 +186,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       />
 
       <aside
+        data-dashboard-sidebar
         className={cn(
           // Mobile: fixed drawer that slides in from the left.
           "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-border bg-card",
@@ -219,7 +222,9 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             {(isSuperAdmin
               ? [...navItems, { href: "/saas-owner", label: "Administración SaaS", icon: Shield }]
               : navItems
-            ).map((item) => {
+            )
+              .filter((item) => !isModuleDisabled(item.href, account?.disabled_modules))
+              .map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));

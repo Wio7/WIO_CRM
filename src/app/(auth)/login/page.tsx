@@ -14,7 +14,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { MessageSquare, UsersRound } from "lucide-react";
 
 // `useSearchParams` opts the component out of static prerendering
 // unless it sits under a Suspense boundary. We split the form into
@@ -67,7 +66,7 @@ function LoginPageInner() {
     setError(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -81,7 +80,20 @@ function LoginPageInner() {
     if (inviteToken) {
       router.push(`/join/${encodeURIComponent(inviteToken)}`);
     } else {
-      router.push("/dashboard");
+      const { data: admin, error: adminError } = await supabase
+        .from("platform_admins")
+        .select("visiting_account_id")
+        .eq("user_id", data.user.id)
+        .maybeSingle();
+      if (adminError) {
+        setError("No se pudo verificar la cuenta de acceso. Vuelve a intentarlo.");
+        setLoading(false);
+        return;
+      }
+      const destination = admin
+        ? (admin.visiting_account_id === null ? "/saas-owner" : "/dashboard")
+        : (searchParams.get("next") === "/caja" ? "/caja" : "/dashboard");
+      window.location.assign(destination);
     }
   };
 

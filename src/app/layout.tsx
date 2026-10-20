@@ -4,6 +4,8 @@ import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ThemedToaster } from "@/components/themed-toaster";
+import { AuthProvider } from "@/hooks/use-auth";
+import { PlatformAdminBanner } from "@/components/platform-admin-banner";
 import {
   DEFAULT_MODE,
   DEFAULT_THEME,
@@ -30,6 +32,13 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [{ url: "/logo.png" }],
+    apple: "/app-icon-apple.png",
+  },
+  // iOS ignores the web manifest for "Add to Home Screen" chrome.
+  appleWebApp: {
+    capable: true,
+    title: "Wio CRM",
+    statusBarStyle: "black",
   },
   formatDetection: {
     email: false,
@@ -104,7 +113,10 @@ export default function RootLayout({
       </head>
       <body className="min-h-full bg-background text-foreground font-sans">
         <ThemeProvider>
-          {children}
+          <AuthProvider>
+            <PlatformAdminBanner />
+            {children}
+          </AuthProvider>
           <ThemedToaster />
         </ThemeProvider>
       </body>

@@ -1,21 +1,20 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { createClient } from "@/lib/supabase/client";
+import { switchPlatformAccount } from "@/lib/auth/account-switch";
 import { useRouter } from "next/navigation";
 import {
   Building2,
+  LogIn,
   Search,
   Trash2,
   ToggleLeft,
   ToggleRight,
-  Activity,
   ShieldAlert,
   CheckCircle,
   XCircle,
-  ExternalLink,
-  ChevronRight,
   TrendingUp,
   Plus,
   Mail,
@@ -47,13 +46,15 @@ interface Account {
 }
 
 export default function SaasOwnerPage() {
-  const { isSuperAdmin, loading: authLoading } = useAuth();
+  const { isSuperAdmin, loading: sessionLoading, profileLoading, isVisiting, accountId, homeAccountId } = useAuth();
+  const authLoading = sessionLoading || profileLoading;
   const router = useRouter();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [enteringId, setEnteringId] = useState<string | null>(null);
   const [inviteTarget, setInviteTarget] = useState<Account | null>(null);
 
   // Invitation / Account Creation modal state
@@ -68,13 +69,23 @@ export default function SaasOwnerPage() {
 
   const supabase = createClient();
 
+  const handleEnterAccount = async (id: string) => {
+    setEnteringId(id);
+    try {
+      await switchPlatformAccount(supabase, id);
+    } catch {
+      toast.error("No se pudo entrar a la cuenta. Vuelve a intentarlo.");
+      setEnteringId(null);
+    }
+  };
+
   useEffect(() => {
     if (!authLoading && !isSuperAdmin) {
       router.push("/dashboard");
     }
   }, [isSuperAdmin, authLoading, router]);
 
-  const fetchAccounts = async () => {
+  const fetchAccounts = useCallback(async () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -84,19 +95,19 @@ export default function SaasOwnerPage() {
 
       if (error) throw error;
       setAccounts(data || []);
-    } catch (err: any) {
-      console.error("Error fetching accounts:", err.message);
+    } catch (err: unknown) {
+      console.error("Error fetching accounts:", err);
       toast.error("Error al cargar las cuentas");
     } finally {
       setLoading(false);
     }
-  };
+  }, [supabase]);
 
   useEffect(() => {
     if (isSuperAdmin) {
       fetchAccounts();
     }
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, fetchAccounts]);
 
   const handleToggleStatus = async (account: Account) => {
     const nextStatus = account.status === "active" ? "inactive" : "active";
@@ -113,8 +124,8 @@ export default function SaasOwnerPage() {
         prev.map(acc => (acc.id === account.id ? { ...acc, status: nextStatus } : acc))
       );
       toast.success(`Cuenta "${account.name}" ${nextStatus === "active" ? "activada" : "desactivada"}`);
-    } catch (err: any) {
-      console.error("Error toggling status:", err.message);
+    } catch (err: unknown) {
+      console.error("Error toggling status:", err);
       toast.error("Error al actualizar el estado");
     } finally {
       setTogglingId(null);
@@ -140,9 +151,9 @@ export default function SaasOwnerPage() {
 
       setAccounts(prev => prev.filter(acc => acc.id !== account.id));
       toast.success(`Cuenta "${account.name}" eliminada exitosamente`);
-    } catch (err: any) {
-      console.error("Error deleting account:", err.message);
-      toast.error(err.message || "Error al eliminar la cuenta");
+    } catch (err: unknown) {
+      console.error("Error deleting account:", err);
+      toast.error(err instanceof Error ? err.message : "Error al eliminar la cuenta");
     } finally {
       setDeletingId(null);
     }
@@ -175,9 +186,9 @@ export default function SaasOwnerPage() {
         password: ""
       });
       fetchAccounts();
-    } catch (err: any) {
-      console.error("Error creating account:", err.message);
-      toast.error(err.message || "Error al crear la cuenta");
+    } catch (err: unknown) {
+      console.error("Error creating account:", err);
+      toast.error(err instanceof Error ? err.message : "Error al crear la cuenta");
     } finally {
       setIsCreating(false);
     }
@@ -379,6 +390,15 @@ export default function SaasOwnerPage() {
                     </td>
                     <td className="py-4 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <Button
+                          onClick={() => handleEnterAccount(account.id)}
+                          disabled={enteringId !== null || (isVisiting && accountId === account.id)}
+                          variant="outline"
+                          className="h-9 rounded-xl border-primary/30 text-primary"
+                        >
+                          <LogIn className="h-4 w-4" />
+                          {isVisiting && accountId === account.id ? "Dentro" : enteringId === account.id ? "Entrando…" : "Entrar"}
+                        </Button>
                         {/* Invite by Email Button */}
                         <Button
                           onClick={() => setInviteTarget(account)}
@@ -409,7 +429,7 @@ export default function SaasOwnerPage() {
                         {/* Delete Button */}
                         <Button
                           onClick={() => handleDeleteAccount(account)}
-                          disabled={deletingId === account.id}
+                          disabled={deletingId === account.id || account.id === homeAccountId || (isVisiting && account.id === accountId)}
                           variant="ghost"
                           className="h-9 w-9 rounded-xl border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/20 p-0 text-rose-400 hover:text-rose-300"
                           title="Eliminar Cuenta"

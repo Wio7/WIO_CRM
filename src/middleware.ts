@@ -63,7 +63,7 @@ export async function middleware(request: NextRequest) {
       url.pathname = `/join/${encodeURIComponent(inviteToken)}`
       url.search = ''
     } else {
-      url.pathname = '/dashboard'
+      url.pathname = request.nextUrl.searchParams.get('next') === '/caja' ? '/caja' : '/dashboard'
       url.search = ''
     }
     return withRefreshedCookies(NextResponse.redirect(url))

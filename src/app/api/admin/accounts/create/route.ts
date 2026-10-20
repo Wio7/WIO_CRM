@@ -1,22 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { requireSuperAdmin, toErrorResponse } from "@/lib/auth/account";
 import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: Request) {
   try {
-    // 1. Authenticate user
-    const client = await createServerClient();
-    const { data: { user }, error: authError } = await client.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
-
-    // 2. Verify Super Admin email
-    const superAdminEmail = (process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAIL || "admin@wiocrm.com").toLowerCase();
-    if (user.email?.toLowerCase() !== superAdminEmail) {
-      return NextResponse.json({ error: "No autorizado: Requiere privilegios de Super Administrador" }, { status: 403 });
-    }
+    await requireSuperAdmin();
 
     // 3. Parse request payload
     const { accountName, ownerName, email, password } = await req.json();
@@ -68,7 +56,7 @@ export async function POST(req: Request) {
     // The database trigger should have inserted this row. We retry a few times if there is a tiny delay.
     let profile = null;
     for (let i = 0; i < 5; i++) {
-      const { data, error } = await supabaseAdmin
+      const { data } = await supabaseAdmin
         .from("profiles")
         .select("account_id")
         .eq("user_id", createdUser.id)
@@ -104,8 +92,8 @@ export async function POST(req: Request) {
         ownerEmail: email
       }
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("[API admin/accounts/create] Exception:", error);
-    return NextResponse.json({ error: "Error interno del servidor", details: error.message }, { status: 500 });
+    return toErrorResponse(error);
   }
 }

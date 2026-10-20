@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { requireSuperAdmin, toErrorResponse } from "@/lib/auth/account";
 import { createClient } from "@supabase/supabase-js";
 import {
   clampExpiryDays,
@@ -18,10 +18,8 @@ const MAX_LABEL_LEN = 80;
  * The SaaS-owner equivalent of /api/account/invitations — same
  * token/link mechanics (see src/lib/auth/invitations.ts), but for
  * an arbitrary account chosen from the /saas-owner panel rather
- * than the caller's own account. Auth follows the same pattern as
- * the other admin/accounts/* routes: a direct email check against
- * NEXT_PUBLIC_SUPER_ADMIN_EMAIL, not requireRole('admin') — the
- * caller isn't necessarily a member of the target account at all.
+ * than the caller's own account. requireSuperAdmin verifica platform_admins.
+ * El rol owner/admin de una cuenta no concede este permiso.
  */
 export async function POST(
   req: Request,
@@ -30,24 +28,7 @@ export async function POST(
   try {
     const { accountId } = await params;
 
-    const client = await createServerClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await client.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-    }
-
-    const superAdminEmail = (
-      process.env.NEXT_PUBLIC_SUPER_ADMIN_EMAIL || "admin@wiocrm.com"
-    ).toLowerCase();
-    if (user.email?.toLowerCase() !== superAdminEmail) {
-      return NextResponse.json(
-        { error: "No autorizado: Requiere privilegios de Super Administrador" },
-        { status: 403 },
-      );
-    }
+    const { userId } = await requireSuperAdmin();
 
     const body = (await req.json().catch(() => null)) as
       | { role?: unknown; expiresInDays?: unknown; label?: unknown }
@@ -102,7 +83,7 @@ export async function POST(
         account_id: accountId,
         token_hash: hash,
         role,
-        created_by_user_id: user.id,
+        created_by_user_id: userId,
         label,
         expires_at: expiresAt.toISOString(),
       })
@@ -128,6 +109,6 @@ export async function POST(
     );
   } catch (error: unknown) {
     console.error("[admin/accounts/[id]/invitations POST] Exception:", error);
-    return NextResponse.json({ error: "Error interno del servidor" }, { status: 500 });
+    return toErrorResponse(error);
   }
 }

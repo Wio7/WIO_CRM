@@ -54,6 +54,16 @@ const ROTATED = {
 };
 
 describe("middleware — refreshed auth cookies survive redirects", () => {
+  it("keeps the direct Caja destination after sign-in", async () => {
+    mockUser = { id: "user-1" };
+    const res = await middleware(new NextRequest("https://app.test/login?next=/caja"));
+    expect(res.headers.get("location")).toBe("https://app.test/caja");
+  });
+  it("does not accept an external sign-in destination", async () => {
+    mockUser = { id: "user-1" };
+    const res = await middleware(new NextRequest("https://app.test/login?next=https://evil.test"));
+    expect(res.headers.get("location")).toBe("https://app.test/dashboard");
+  });
   it("carries the rotated token when redirecting a signed-in user off /login", async () => {
     mockUser = { id: "user-1" };
     refreshedCookies = [ROTATED];
