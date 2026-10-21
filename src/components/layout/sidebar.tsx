@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import { isModuleDisabled } from "@/lib/modules";
+import { resolveAccountBrand } from "@/lib/account-brand";
 import { Ticket,
   Bell,
   Bot,
@@ -130,6 +131,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut, isSuperAdmin } = useAuth();
   const totalUnread = useTotalUnread();
+  const brand = resolveAccountBrand(account);
   const unreadNotifications = useUnreadNotifications();
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
@@ -201,9 +203,11 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
           <Link href="/dashboard" className="flex items-center gap-2">
-            <img src="/logo.png" alt="Wio CRM" className="h-8 w-auto object-contain rounded-md" />
+            <img src={brand.logo} alt={brand.name} className={brand.custom
+              ? "h-8 w-8 shrink-0 object-contain rounded-md bg-[#021736]"
+              : "h-8 w-auto object-contain rounded-md"} />
             <span className="text-sm font-semibold text-foreground">
-              Wio CRM
+              {brand.name}
             </span>
           </Link>
           <button

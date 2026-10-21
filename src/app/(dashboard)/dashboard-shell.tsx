@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { isModuleDisabled } from "@/lib/modules";
+import { resolveAccountBrand } from "@/lib/account-brand";
 import { useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
@@ -57,7 +58,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
           </div>
           <h2 className="text-2xl font-black text-white uppercase tracking-tight">Cuenta Inactiva</h2>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            Tu cuenta de Wio CRM está actualmente inactiva o suspendida. Por favor, ponte en contacto con el soporte o el administrador principal para reactivarla.
+            Tu cuenta de {resolveAccountBrand(account).name} está actualmente inactiva o suspendida. Por favor, ponte en contacto con el soporte o el administrador principal para reactivarla.
           </p>
           <Button
             onClick={() => signOut()}

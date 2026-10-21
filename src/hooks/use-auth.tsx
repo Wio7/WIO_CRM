@@ -13,6 +13,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
+import { loadAccountBrand, type AccountBrand } from "@/lib/account-brand";
 import {
   canEditSettings as canEditSettingsFor,
   canManageMembers as canManageMembersFor,
@@ -37,7 +38,7 @@ interface Profile {
   account_role: AccountRole | null;
 }
 
-interface AccountSummary {
+interface AccountSummary extends AccountBrand {
   id: string;
   name: string;
   status: string;
@@ -206,7 +207,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               .select("disabled_modules")
               .eq("id", data.account_id)
               .maybeSingle();
+            // Consulta independiente: la 068 pendiente no afecta módulos ni perfil.
+            const brand = await loadAccountBrand(() => supabase
+              .from("accounts")
+              .select("brand_name, logo_url")
+              .eq("id", data.account_id)
+              .maybeSingle());
             accountRow = {
+              ...brand,
               id: account.id,
               name: account.name,
               status: account.status ?? 'active',
