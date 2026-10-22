@@ -87,7 +87,7 @@ function instrucciones(ctx: ContextoAsistente): string {
   ].join("\n");
 }
 
-async function llamar(apiKey: string, model: string, mensajes: MensajeOpenAi[]) {
+async function llamar(apiKey: string, model: string, mensajes: MensajeOpenAi[], herramientas: readonly unknown[]) {
   let res: Response;
   try {
     res = await fetch(OPENAI_URL, {
@@ -96,7 +96,7 @@ async function llamar(apiKey: string, model: string, mensajes: MensajeOpenAi[]) 
       body: JSON.stringify({
         model,
         messages: mensajes,
-        tools: HERRAMIENTAS,
+        tools: herramientas,
         tool_choice: "auto",
         max_completion_tokens: 1400,
       }),
@@ -126,39 +126,64 @@ export async function responder(
   historial: { role: "user" | "assistant"; content: string }[],
   pregunta: string,
 ): Promise<{ texto: string; acciones: Accion[] }> {
-  const llave = await credenciales(ctx.db, ctx.accountId);
+  const acciones: Accion[] = [];
+  const texto = await conversar({
+    db: ctx.db,
+    accountId: ctx.accountId,
+    sistema: instrucciones(ctx),
+    herramientas: HERRAMIENTAS,
+    ejecutar: async (nombre, argumentos) => {
+      const r = await ejecutarHerramienta(ctx, nombre, argumentos);
+      if (r.accion) acciones.push(r.accion);
+      return r.datos;
+    },
+    historial,
+    pregunta,
+  });
+  return { texto, acciones };
+}
+
+/**
+ * La vuelta de cualquier asistente: instrucciones, herramientas propias y
+ * su propio hilo. La usan el Asistente Golden y los modos de WhatsApp.
+ */
+export async function conversar(opciones: {
+  db: SupabaseClient;
+  accountId: string;
+  sistema: string;
+  herramientas: readonly unknown[];
+  ejecutar: (nombre: string, argumentos: string) => Promise<unknown>;
+  historial: { role: "user" | "assistant"; content: string }[];
+  pregunta: string;
+}): Promise<string> {
+  const llave = await credenciales(opciones.db, opciones.accountId);
   if (!llave) {
     throw new ErrorAsistente("Falta OPENAI_API_KEY en el servidor del CRM.", "sin_llave");
   }
 
   const mensajes: MensajeOpenAi[] = [
-    { role: "system", content: instrucciones(ctx) },
-    ...historial.slice(-MENSAJES_DE_MEMORIA).map((m) => ({ role: m.role, content: m.content })),
-    { role: "user", content: pregunta },
+    { role: "system", content: opciones.sistema },
+    ...opciones.historial.slice(-MENSAJES_DE_MEMORIA).map((m) => ({ role: m.role, content: m.content })),
+    { role: "user", content: opciones.pregunta },
   ];
-  const acciones: Accion[] = [];
 
   for (let vuelta = 0; vuelta < VUELTAS_MAXIMAS; vuelta += 1) {
-    const respuesta = await llamar(llave.apiKey, llave.model, mensajes);
+    const respuesta = await llamar(llave.apiKey, llave.model, mensajes, opciones.herramientas);
     const llamadas = respuesta.tool_calls ?? [];
     if (!llamadas.length) {
-      return { texto: (respuesta.content ?? "").trim() || "No tengo una respuesta para eso.", acciones };
+      return (respuesta.content ?? "").trim() || "No tengo una respuesta para eso.";
     }
 
     mensajes.push({ role: "assistant", content: respuesta.content ?? null, tool_calls: llamadas });
     for (const llamada of llamadas) {
-      const r = await ejecutarHerramienta(ctx, llamada.function.name, llamada.function.arguments);
-      if (r.accion) acciones.push(r.accion);
+      const datos = await opciones.ejecutar(llamada.function.name, llamada.function.arguments);
       mensajes.push({
         role: "tool",
         tool_call_id: llamada.id,
-        content: JSON.stringify(r.datos).slice(0, 12_000),
+        content: JSON.stringify(datos).slice(0, 12_000),
       });
     }
   }
 
-  return {
-    texto: "Me enredé con tantas consultas. ¿Me lo preguntas de otra forma, más concreto?",
-    acciones,
-  };
+  return "Me enredé con tantas consultas. ¿Me lo preguntas de otra forma, más concreto?";
 }
