@@ -6,6 +6,20 @@
 
 export const MARCA_CAJA = "💼 Caja";
 
+export type Modo = "caja" | "app" | "legal";
+
+/** Cada respuesta empieza con la marca de su modo, para saber dónde se está. */
+export const MODOS: Record<Modo, { marca: string; boton: string; nombre: string }> = {
+  caja: { marca: MARCA_CAJA, boton: "💼 Golden Caja", nombre: "Golden Caja" },
+  app: { marca: "🏠 App", boton: "🏠 Golden App", nombre: "Golden App" },
+  legal: { marca: "⚖️ Legal", boton: "⚖️ Golden Legal", nombre: "Golden Legal" },
+};
+
+/** El Asistente Golden escribe **negrita** de Markdown; WhatsApp la quiere con un asterisco. */
+export function aWhatsApp(texto: string): string {
+  return texto.replace(/\*\*(.+?)\*\*/g, "*$1*").replace(/^#{1,6}\s+/gm, "");
+}
+
 export const METODOS = {
   cash: "Efectivo",
   yape: "Yape",
