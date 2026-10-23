@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { WhatsAppEmbeddedSignup } from './whatsapp-embedded-signup';
 import { SettingsPanelHead } from './settings-panel-head';
 import {
   Accordion,
@@ -373,8 +374,8 @@ export function WhatsAppConfig() {
     return (
       <section className="animate-in fade-in-50 duration-200">
         <SettingsPanelHead
-          title="WhatsApp connection"
-          description="Connect your Meta WhatsApp Business API. Credentials, webhook, and setup steps all live here."
+          title="Conexión de WhatsApp"
+          description="Conecta tu número de WhatsApp Business con Wio CRM."
         />
         <div className="flex items-center justify-center py-12">
           <Loader2 className="size-6 animate-spin text-primary" />
@@ -388,9 +389,12 @@ export function WhatsAppConfig() {
   return (
     <section className="animate-in fade-in-50 duration-200">
       <SettingsPanelHead
-        title="WhatsApp connection"
-        description="Connect your Meta WhatsApp Business API. Credentials, webhook, and setup steps all live here."
+        title="Conexión de WhatsApp"
+        description="Conecta tu número de WhatsApp Business con Wio CRM."
       />
+      <WhatsAppEmbeddedSignup key={accountId} onConnected={() => { if (accountId) void fetchConfig(accountId); }} />
+      <details open={Boolean(config)}>
+      <summary className="mb-4 cursor-pointer text-sm text-muted-foreground">Opciones avanzadas: configuración manual con token</summary>
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       {/* Main config form */}
       <div className="space-y-6">
@@ -863,6 +867,7 @@ export function WhatsAppConfig() {
         </Card>
       </div>
     </div>
+      </details>
     </section>
   );
 }
