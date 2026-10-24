@@ -52,6 +52,8 @@ Se desarrolla y prueba mientras Meta revisa; se prueba de verdad con la cuenta d
 8. Rechazar si ese `phone_number_id` ya esta en otra cuenta (el webhook enruta por ese id).
 
 ### B4. Webhook
+- **Hecho (2026-10-23):** ecos salientes, historial por lotes y contactos con nombres protegidos; dedupe por cuenta/Meta id, timestamps originales y procesamiento silencioso dentro de `after()`. Migración local `079_whatsapp_coexistence_sync.sql` pendiente de aplicar; modo equipo Golden preservado. Pruebas de mapeo, webhook y PostgreSQL local incluidas. `account_update` queda fuera de este paso implementado.
+- **Paso manual pendiente:** en Meta App Dashboard → WhatsApp > Configuration > Webhook fields, suscribir `history`, `smb_app_state_sync` y `smb_message_echoes`.
 - Suscribir en el App Dashboard los campos `history`, `smb_app_state_sync`, `smb_message_echoes` (ademas de `account_update`, que ya esta).
 - `smb_message_echoes`: lo que el cliente manda desde el celular -> guardarlo como mensaje saliente en la conversacion (sin reenviarlo).
 - `history`: importar hasta 180 dias de chats 1:1 por lotes, sin disparar automatizaciones, IA ni avisos.
