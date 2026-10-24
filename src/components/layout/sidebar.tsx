@@ -224,7 +224,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
             {(isSuperAdmin
-              ? [...navItems, { href: "/saas-owner", label: "Administración SaaS", icon: Shield }]
+              ? [navItems[0], { href: "/saas-owner", label: "Cuentas", icon: Building2 }, ...navItems.slice(1)]
               : navItems
             )
               .filter((item) => !isModuleDisabled(item.href, account?.disabled_modules))

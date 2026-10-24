@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useMemo } from "react";
+import { Fragment, useCallback, useEffect, useState, useMemo } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { createClient } from "@/lib/supabase/client";
 import { switchPlatformAccount } from "@/lib/auth/account-switch";
@@ -36,6 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SaasInviteDialog } from "@/components/saas-owner/saas-invite-dialog";
+import { groupAccountsByBusiness } from "@/lib/saas-account-groups";
 
 interface Account {
   id: string;
@@ -194,19 +195,26 @@ export default function SaasOwnerPage() {
     }
   };
 
-  const filteredAccounts = useMemo(() => {
-    return accounts.filter(acc =>
-      acc.name.toLowerCase().includes(search.toLowerCase()) ||
-      acc.id.toLowerCase().includes(search.toLowerCase())
+  // Cada negocio (Golden Habitat, Broker Home…) es una cuenta; los correos de
+  // su personal cuelgan de él en vez de contarse como cuentas aparte.
+  const groups = useMemo(() => groupAccountsByBusiness(accounts), [accounts]);
+
+  const filteredGroups = useMemo(() => {
+    const q = search.toLowerCase();
+    return groups.filter(group =>
+      group.name.toLowerCase().includes(q) ||
+      [group.primary, ...group.members].some(acc =>
+        acc.name.toLowerCase().includes(q) || acc.id.toLowerCase().includes(q)
+      )
     );
-  }, [accounts, search]);
+  }, [groups, search]);
 
   const stats = useMemo(() => {
-    const total = accounts.length;
-    const active = accounts.filter(a => a.status === "active").length;
+    const total = groups.length;
+    const active = groups.filter(g => g.primary.status === "active").length;
     const inactive = total - active;
     return { total, active, inactive };
-  }, [accounts]);
+  }, [groups]);
 
   if (authLoading || !isSuperAdmin) {
     return (
@@ -231,7 +239,7 @@ export default function SaasOwnerPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
         <div>
           <h1 className="text-3xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-neutral-200 to-neutral-400">
-            ADMINISTRACIÓN SAAS GLOBAL
+            CUENTAS
           </h1>
           <p className="text-muted-foreground text-xs uppercase tracking-widest mt-1 font-bold">
             Panel Maestro de Control de Cuentas y Tenants — Wio CRM
@@ -326,7 +334,7 @@ export default function SaasOwnerPage() {
             />
           </div>
           <div className="text-[10px] text-muted-foreground uppercase font-bold tracking-widest">
-            {filteredAccounts.length} de {accounts.length} cuentas encontradas
+            {filteredGroups.length} de {groups.length} cuentas encontradas
           </div>
         </div>
 
@@ -336,7 +344,7 @@ export default function SaasOwnerPage() {
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
             <p className="text-xs text-muted-foreground uppercase tracking-widest font-bold">Cargando Tenants...</p>
           </div>
-        ) : filteredAccounts.length === 0 ? (
+        ) : filteredGroups.length === 0 ? (
           <div className="text-center py-16 border border-dashed border-white/5 rounded-3xl bg-[#0d0d0f]">
             <Building2 className="h-10 w-10 text-muted-foreground/30 mx-auto" />
             <p className="mt-4 text-sm text-muted-foreground">No se encontraron cuentas registradas</p>
@@ -354,11 +362,36 @@ export default function SaasOwnerPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-xs">
-                {filteredAccounts.map(account => (
+                {filteredGroups.map(group => (
+                  <Fragment key={group.key}>
+                  <tr className="bg-white/[0.03]">
+                    <td colSpan={5} className="py-3 px-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Building2 className="h-4 w-4 text-primary" />
+                        <span className="text-sm font-black uppercase tracking-wider text-white">{group.name}</span>
+                        {group.apps.map(app => (
+                          <span key={app} className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                            {app}
+                          </span>
+                        ))}
+                        {group.members.length > 0 && (
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                            {group.members.length} {group.members.length === 1 ? "acceso de personal" : "accesos de personal"}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {[group.primary, ...group.members].map(account => (
                   <tr key={account.id} className="group hover:bg-white/[0.01] transition-colors">
-                    <td className="py-4 px-4 space-y-1">
+                    <td className={`py-4 px-4 space-y-1 ${account.id === group.primary.id ? "" : "pl-10"}`}>
                       <div className="font-bold text-white group-hover:text-primary transition-colors flex items-center gap-1.5 text-sm">
                         {account.name}
+                        {account.id !== group.primary.id && (
+                          <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                            Pertenece a {group.name}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[10px] font-mono text-muted-foreground/60 select-all">
                         {account.id}
@@ -443,6 +476,8 @@ export default function SaasOwnerPage() {
                       </div>
                     </td>
                   </tr>
+                  ))}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
