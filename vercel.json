@@ -4,6 +4,10 @@
     {
       "path": "/api/calls/cron",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/caja/resumen-whatsapp",
+      "schedule": "0 2 * * *"
     }
   ]
 }

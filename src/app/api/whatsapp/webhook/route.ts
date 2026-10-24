@@ -16,6 +16,7 @@ import {
 } from '@/lib/whatsapp/template-webhook'
 import { actualizarConversacion } from '@/lib/channels'
 import { transcribirAudioDeWhatsApp } from '@/lib/ai/transcribir'
+import { atenderEquipo } from '@/lib/asistentes-whatsapp/equipo'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -356,7 +357,8 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // inserts that need it for NOT NULL FK compliance. Always
           // the admin who saved the WhatsApp config.
           config.user_id,
-          decryptedAccessToken
+          decryptedAccessToken,
+          phoneNumberId
         )
       }
     }
@@ -624,8 +626,20 @@ async function processMessage(
   // (contacts, conversations). Always the admin who saved the
   // WhatsApp config; the choice is arbitrary post-017 but stable.
   configOwnerUserId: string,
-  accessToken: string
+  accessToken: string,
+  phoneNumberId: string
 ) {
+  // El equipo de Golden escribe al mismo número (075). Si quien escribe es
+  // del equipo y tiene un modo (Golden Caja), lo atiende su asistente y el
+  // mensaje no entra como de cliente: ni contacto, ni bandeja, ni IA de
+  // clientes. Para todos los demás, atenderEquipo devuelve false y nada cambia.
+  if (
+    message.type !== 'reaction' &&
+    (await atenderEquipo({ mensaje: message, accountId, phoneNumberId, accessToken }))
+  ) {
+    return
+  }
+
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
 
