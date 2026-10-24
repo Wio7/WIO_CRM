@@ -187,10 +187,10 @@ ${using_software === "Sí" && software_name ? `- Software actual: ${software_nam
         },
       }
     );
-  } catch (error: any) {
+  } catch (error) {
     console.error("[API public/leads] Exception:", error);
     return new NextResponse(
-      JSON.stringify({ error: "Error interno del servidor", details: error.message }),
+      JSON.stringify({ error: "Error interno del servidor", details: error instanceof Error ? error.message : String(error) }),
       {
         status: 500,
         headers: {

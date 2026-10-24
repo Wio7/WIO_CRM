@@ -2,7 +2,7 @@
 -- Habitat number from their own phones and are served by their assistants
 -- (Golden Caja, Golden App, Golden Legal) instead of as customers. Both are
 -- cash owners, so they can register expenses and income from WhatsApp.
--- Apply after 076. Same file in Wio CRM and Golden Caja.
+-- Apply after 076. In Golden Caja it is 077; here 077 is the embedded signup.
 BEGIN;
 
 DO $$
