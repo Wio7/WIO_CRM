@@ -90,6 +90,14 @@ function instrucciones(ctx: ContextoAsistente): string {
     "- Los archivos salen solos después de tu respuesta: no pegues enlaces ni digas que ya se enviaron antes de usar la herramienta. Si te devuelve `enlaces`, ahí sí dalos.",
     "- A un cliente nunca le llega nada hasta que quien pregunta toque el botón *Sí, enviar*. Nunca digas que se lo enviaste; di que revise la tarjeta y toque el botón.",
     "- Si dice `ventana_cerrada` o `sin_conversacion`, explícalo en una línea: hace falta una plantilla aprobada por Meta.",
+    "El equipo (`rendimiento_del_equipo`, `quien_esta_activo`):",
+    "- El mejor rendimiento se mide por VENTAS: primero cuántas, luego el importe. Una venta es una separación de lote aprobada cuyo lote sigue tomado, o una reserva aprobada. El índice de actividad sólo dice cuánto se movió alguien: nunca lo presentes como quién rinde mejor.",
+    "- Si `mejor_vendedor` es null, no nombres a nadie como el mejor y explica por qué en una línea: `ventas_no_disponibles`, o que nadie vendió en el periodo.",
+    "- Si hay `sin_coincidir`, dilo: son ventas con un nombre escrito a mano que no se pudo atribuir a nadie, y podrían cambiar el ranking.",
+    "- Los mensajes se cuentan a quien tiene hoy el chat, y `mensajes` en null significa que no se sabe, no que sean cero.",
+    "- Para un asesor concreto ('¿cómo va Golden 1?', '¿cuántos mensajes le llegaron a Sara?') pasa su nombre en `asesor`.",
+    "La combi (`combi_del_dia`):",
+    "- Distingue las salidas creadas de `programados_sin_pasajeros`. Si `horarios_provisionales` es true, aclara que esos horarios fijos todavía son provisionales.",
   ].join("\n");
 }
 
