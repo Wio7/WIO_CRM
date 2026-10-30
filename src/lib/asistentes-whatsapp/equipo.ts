@@ -9,8 +9,8 @@
 //
 // Si lo es, el mensaje se queda aquí: no se crea contacto ni conversación,
 // no corre la IA de clientes ni las automatizaciones y no se avisa a los
-// asesores. Si no lo es (o escribió /cliente para probar como cliente),
-// devuelve false y el webhook sigue igual que siempre.
+// asesores. Si no lo es (o eligió escribir como cliente: el botón tras tocar
+// Golden App, o /cliente), devuelve false y el webhook sigue igual que siempre.
 //
 // La conversación vuelve a empezar tras una hora sin escribir, o con un
 // "hola": sale el menú con los asistentes y cada uno sólo recuerda lo dicho
@@ -228,9 +228,7 @@ class Turno {
         await this.enviar(`${MODOS.caja.marca}\n${resumenDelDia(this.persona.vista)}`);
         return;
       case "cliente":
-        await this.guardarSesion({ mode: "cliente" });
-        await this.enviar("Listo: desde ahora este número te atiende como a un cliente. Escribe /salir para volver a tus asistentes.");
-        return;
+        return this.pasarACliente();
       case "olvidar": {
         const modo = this.modoActual();
         if (!modo) {
@@ -275,6 +273,30 @@ class Turno {
       footerText: "Cambia cuando quieras con /menu",
       buttons: this.persona.modos.map((m) => ({ id: `modo:${m}`, title: MODOS[m].boton })),
     });
+  }
+
+  /** Al tocar Golden App: entrar al asistente o probar el número como cliente. */
+  private async preguntarComoEscribe() {
+    await sendInteractiveButtons({
+      phoneNumberId: this.e.phoneNumberId,
+      accessToken: this.e.accessToken,
+      to: this.e.mensaje.from,
+      bodyText: `${MODOS.app.marca}
+¿Cómo quieres escribir, ${this.persona.nombre}?`,
+      footerText: "Como cliente, tus mensajes entran a la bandeja",
+      buttons: [
+        { id: "app:cliente", title: "Como cliente" },
+        { id: "app:asistente", title: "Como asistente" },
+      ],
+    });
+  }
+
+  /** Desde aquí lo atiende el flujo de clientes, hasta que escriba /salir. */
+  private async pasarACliente() {
+    await this.guardarSesion({ mode: "cliente", pending_question: null });
+    await this.enviar(
+      "Listo: desde ahora este número te atiende como a un cliente y lo que escribas entra a la bandeja del CRM. Escribe /salir para volver a tus asistentes.",
+    );
   }
 
   private async elegir(modo: Modo) {
@@ -439,7 +461,12 @@ class Turno {
     const modo = id.match(/^modo:(caja|app|legal)$/)?.[1] as Modo | undefined;
     if (modo) {
       if (!this.persona.modos.includes(modo)) return this.abrir();
+      if (modo === "app") return this.preguntarComoEscribe();
       return this.elegir(modo);
+    }
+    if (this.persona.modos.includes("app")) {
+      if (id === "app:asistente") return this.elegir("app");
+      if (id === "app:cliente") return this.pasarACliente();
     }
     const m = id.match(/^caja:(si|corregir|cancelar):([0-9a-f-]{36})$/);
     if (m) return this.decidirBorrador(m[1] as "si" | "corregir" | "cancelar", m[2]);
