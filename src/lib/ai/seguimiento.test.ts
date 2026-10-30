@@ -25,6 +25,7 @@ vi.mock('@/lib/flows/meta-send', () => ({ engineSendText: h.engineSendText }))
 vi.mock('@/lib/push/send', () => ({ notifyConversation: h.notifyConversation }))
 vi.mock('@/lib/golden/catalogo', () => ({
   catalogoDeGolden: h.catalogoDeGolden,
+  esCuentaDeGolden: () => true,
   catalogoEnTexto: () => 'catálogo',
   sinCatalogoPegado: (p: string | null) => p,
 }))
