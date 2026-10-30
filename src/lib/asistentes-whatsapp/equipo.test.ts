@@ -192,6 +192,7 @@ describe("el equipo en el número de WhatsApp", () => {
     responder.mockResolvedValueOnce({ texto: "Tienes **3** clientes calientes.", acciones: [] });
     await escribe({ text: { body: "hola" } });
     await toca("modo:app");
+    await toca("app:asistente");
     await escribe({ text: { body: "¿a quién sigo hoy?" } });
     expect(responder.mock.calls[0][0]).toMatchObject({ userId: BRYCE, accountId: GOLDEN, rol: "owner" });
     expect(textos().at(-1)).toBe("🏠 App\nTienes *3* clientes calientes.");
@@ -264,6 +265,21 @@ describe("el equipo en el número de WhatsApp", () => {
     await escribe({ text: { body: "gasto de 900 en horno para el restaurante" } });
     expect(respuesta).toMatchObject({ falta: "justificacion" });
     expect(sendInteractiveButtons).not.toHaveBeenCalled();
+  });
+
+  it("al tocar Golden App elige escribir como cliente o como asistente", async () => {
+    await escribe({ text: { body: "hola" } });
+    await toca("modo:app");
+    expect(botones()).toEqual(["app:cliente", "app:asistente"]);
+    expect(sesion().mode).toBeNull();
+
+    await toca("app:cliente");
+    expect(sesion().mode).toBe("cliente");
+    expect(await escribe({ text: { body: "hola, quiero un lote" } })).toBe(false);
+    expect(responder).not.toHaveBeenCalled();
+
+    expect(await escribe({ text: { body: "/salir" } })).toBe(true);
+    expect(botones()).toEqual(MENU);
   });
 
   it("con /cliente se le atiende como cliente hasta /salir", async () => {
