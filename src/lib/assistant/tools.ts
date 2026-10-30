@@ -21,6 +21,18 @@ import { catalogoDeGolden } from "@/lib/golden/catalogo";
 import { nombreDeCita } from "@/lib/agenda/tipos";
 import { notifyClient } from "@/lib/push/send";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { canalDe } from "@/lib/channels";
+import {
+  TIPOS_DE_MATERIAL,
+  buscarProyecto,
+  elegirMaterial,
+  materialDisponible,
+  ventanaDelCliente,
+  type AdjuntoMaterial,
+  type ComandoDeEnvio,
+  type EnvioPropuesto,
+  type TipoDeMaterial,
+} from "./material";
 
 export interface ContextoAsistente {
   db: SupabaseClient;
@@ -29,6 +41,8 @@ export interface ContextoAsistente {
   rol: string;
   area: string | null;
   nombre: string;
+  /** Por WhatsApp hay botones y archivos; en la app, sólo texto y enlaces. */
+  canal: "whatsapp" | "app";
 }
 
 export interface Accion {
@@ -39,6 +53,10 @@ export interface Accion {
 interface Resultado {
   datos: unknown;
   accion?: Accion;
+  /** Archivos para quien pregunta: los manda el canal, después del texto. */
+  adjuntos?: AdjuntoMaterial[];
+  /** Un envío a un cliente que espera el botón de quien pregunta. */
+  envio?: EnvioPropuesto;
 }
 
 // ------------------------------------------------------------
@@ -93,6 +111,34 @@ export const HERRAMIENTAS = [
             description: "Nombre de un proyecto, o 'casas' / 'lotes' / 'departamentos' para filtrar. Vacío = todo.",
           },
         },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "enviar_material",
+      description:
+        "Envía el brochure, el video o la foto de un proyecto. Sin `cliente`, los archivos le llegan a quien pregunta. Con `cliente`, NO envía nada: arma un borrador y quien pregunta tiene que tocar el botón 'Sí, enviar'. Úsala cuando pidan 'mándame el brochure de...' o 'envíale el video a...'.",
+      parameters: {
+        type: "object",
+        properties: {
+          proyecto: { type: "string", description: "Nombre del proyecto, p. ej. 'Casa Jade'." },
+          tipos: {
+            type: "array",
+            items: { type: "string", enum: TIPOS_DE_MATERIAL },
+            minItems: 1,
+            description: "Qué enviar. 'foto' es la foto de portada.",
+          },
+          cliente: { type: "string", description: "Nombre, teléfono o DNI del cliente. Vacío = a quien pregunta." },
+          mensaje: {
+            type: "string",
+            maxLength: 1024,
+            description: "Sólo con `cliente`: el texto que acompaña al primer archivo. Escríbelo sólo si te lo pidieron.",
+          },
+        },
+        required: ["proyecto", "tipos"],
         additionalProperties: false,
       },
     },
@@ -1438,6 +1484,129 @@ async function agregarNota(ctx: ContextoAsistente, args: { cliente: string; text
 }
 
 /** Ejecuta una herramienta por nombre. Nunca lanza: devuelve el error como dato. */
+/**
+ * Prepara el material de un proyecto. A un cliente nunca le llega desde aquí:
+ * se guarda un borrador y lo envía el botón (asistentes-whatsapp/equipo.ts),
+ * después de que la persona vea el destinatario, los archivos y el texto.
+ */
+async function enviarMaterial(
+  ctx: ContextoAsistente,
+  args: { proyecto: string; tipos?: TipoDeMaterial[]; cliente?: string; mensaje?: string },
+): Promise<Resultado> {
+  const datos = await catalogoDeGolden();
+  const base = process.env.GOLDEN_APP_URL?.trim();
+  if (!datos || !base) {
+    return { datos: { error: "No se pudo leer el catálogo de la app. Falta GOLDEN_APP_URL en el CRM, o la app no respondió." } };
+  }
+
+  const { uno: proyecto, varios } = buscarProyecto(datos.proyectos, args.proyecto ?? "");
+  if (!proyecto) {
+    return { datos: { ambiguo: true, opciones: (varios ?? []).map((p) => p.nombre) } };
+  }
+
+  const tipos = [...new Set(args.tipos ?? [])];
+  const adjuntos: AdjuntoMaterial[] = [];
+  const faltan: TipoDeMaterial[] = [];
+  for (const tipo of tipos) {
+    const adjunto = elegirMaterial(proyecto, tipo, base);
+    if (adjunto) adjuntos.push(adjunto);
+    else faltan.push(tipo);
+  }
+  if (!adjuntos.length) {
+    return { datos: { sin_material: true, proyecto: proyecto.nombre, faltan, tiene: materialDisponible(proyecto) } };
+  }
+
+  const cliente = args.cliente?.trim();
+  if (!cliente) {
+    if (ctx.canal === "app") {
+      return {
+        datos: {
+          proyecto: proyecto.nombre,
+          enlaces: adjuntos.map((a) => ({ que: a.etiqueta, enlace: a.url })),
+          faltan,
+        },
+      };
+    }
+    return {
+      datos: {
+        ok: true,
+        proyecto: proyecto.nombre,
+        llegan_despues_de_tu_respuesta: adjuntos.map((a) => a.etiqueta),
+        faltan,
+      },
+      adjuntos,
+    };
+  }
+
+  if (ctx.canal !== "whatsapp") {
+    return { datos: { error: "Enviarle algo a un cliente sólo se puede desde WhatsApp, donde está el botón para confirmarlo." } };
+  }
+  const mensaje = args.mensaje?.trim() || null;
+  if (mensaje && mensaje.length > 1024) {
+    return { datos: { error: "El mensaje pasa de 1024 caracteres, el límite de WhatsApp. Acórtalo." } };
+  }
+
+  const { uno: contacto, varios: otros } = await buscarContacto(ctx, cliente);
+  if (!contacto) return { datos: candidatos(otros) };
+
+  const { data: conversacion } = await ctx.db
+    .from("conversations")
+    .select("*")
+    .eq("account_id", ctx.accountId)
+    .eq("contact_id", contacto.id)
+    .order("last_message_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (!conversacion) {
+    return { datos: { sin_conversacion: true, nota: `${contacto.name ?? "Este contacto"} nunca nos escribió: WhatsApp no deja mandarle nada sin una plantilla.` } };
+  }
+
+  const canal = canalDe(conversacion);
+  const ventana = await ventanaDelCliente(ctx.db, conversacion.id as string, canal);
+  if (!ventana.abierta) {
+    return {
+      datos: {
+        ventana_cerrada: true,
+        cliente: contacto.name,
+        ultimo_mensaje_del_cliente: ventana.ultimoMensaje ? cuandoLima(ventana.ultimoMensaje) : "nunca",
+        nota: "Pasaron más de 24 h desde su último mensaje: WhatsApp no deja enviarle esto sin una plantilla. No se envió nada.",
+      },
+    };
+  }
+
+  const dueno = conversacion.assigned_agent_id as string | null;
+  const propuesta: Omit<EnvioPropuesto, "id"> = {
+    cliente: contacto.name ?? contacto.phone ?? "Cliente",
+    telefono: contacto.phone,
+    asesor: dueno ? ((await nombresDelEquipo(ctx)).get(dueno) ?? null) : null,
+    etiquetas: adjuntos.map((a) => a.etiqueta),
+    mensaje,
+  };
+  const comando: ComandoDeEnvio = {
+    tipo: "envio_cliente",
+    conversacionId: conversacion.id as string,
+    canal,
+    adjuntos,
+    mensaje,
+  };
+  // Los borradores no tienen políticas: sólo los toca el servidor (075).
+  const { data: borrador, error } = await supabaseAdmin()
+    .from("whatsapp_team_drafts")
+    .insert({ account_id: ctx.accountId, user_id: ctx.userId, command: comando, summary: JSON.stringify(propuesta) })
+    .select("id")
+    .single();
+  if (error || !borrador) return { datos: { error: "No pude guardar el borrador. Intenta de nuevo." } };
+
+  return {
+    datos: {
+      borrador_listo: true,
+      faltan,
+      instruccion: "Todavía no se envió nada. Dile sólo que revise y toque Sí, enviar: un 'sí' escrito NO envía.",
+    },
+    envio: { id: borrador.id as string, ...propuesta },
+  };
+}
+
 export async function ejecutarHerramienta(
   ctx: ContextoAsistente,
   nombre: string,
@@ -1459,6 +1628,8 @@ export async function ejecutarHerramienta(
         return await resumenCliente(ctx, args as { buscar: string });
       case "catalogo":
         return await catalogo(ctx, args as { buscar?: string });
+      case "enviar_material":
+        return await enviarMaterial(ctx, args as { proyecto: string; tipos?: TipoDeMaterial[]; cliente?: string; mensaje?: string });
       case "equipo":
         return await equipo(ctx);
       case "resumen_de_conversacion":

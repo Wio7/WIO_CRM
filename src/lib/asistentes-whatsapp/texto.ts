@@ -148,6 +148,23 @@ export function textoDelBorrador(b: Borrador): string {
   return lineas.join("\n");
 }
 
+/** La tarjeta que confirma un envío: lo que va a recibir el cliente, tal cual. */
+export function textoDelEnvio(e: {
+  cliente: string;
+  telefono: string | null;
+  asesor: string | null;
+  etiquetas: string[];
+  mensaje: string | null;
+}): string {
+  const lineas = [MODOS.app.marca, `¿Le envío esto a *${e.cliente}*?`, ""];
+  if (e.telefono) lineas.push(`📱 ${e.telefono}`);
+  if (e.asesor) lineas.push(`👤 Asesor: ${e.asesor}`);
+  for (const etiqueta of e.etiquetas) lineas.push(`📎 ${etiqueta}`);
+  if (e.mensaje) lineas.push(`💬 "${e.mensaje}"`);
+  lineas.push("", "Toca *Sí, enviar* para que le llegue.");
+  return lineas.join("\n");
+}
+
 export type Comando = "menu" | "caja" | "app" | "legal" | "cliente" | "salir" | "olvidar" | "resumen";
 
 const COMANDOS: Record<string, Comando> = {

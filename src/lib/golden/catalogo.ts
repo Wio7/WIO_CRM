@@ -58,11 +58,24 @@ export interface ProyectoDeGolden {
   unidades:
     | { id: string; nombre: string; area: number; precio: number | null; terraza: boolean; disponible: boolean }[]
     | null;
+  /** Lo que se puede enviar por WhatsApp. Un catálogo viejo no lo trae. */
+  media?: {
+    brochure: ArchivoDelProyecto | null;
+    video: ArchivoDelProyecto | null;
+    foto: ArchivoDelProyecto | null;
+  };
+}
+
+export interface ArchivoDelProyecto {
+  ruta: string;
+  bytes: number;
 }
 
 export interface CatalogoDeGolden {
   generado: string;
   contacto: { whatsapp: string | null; correo: string | null; oficina: string | null };
+  /** Horarios fijos de la combi por día de la semana (0 = domingo). */
+  combi?: { horarios: Record<string, string[]>; provisional: boolean };
   proyectos: ProyectoDeGolden[];
 }
 
