@@ -21,6 +21,31 @@ import { catalogoDeGolden } from "@/lib/golden/catalogo";
 import { nombreDeCita } from "@/lib/agenda/tipos";
 import { notifyClient } from "@/lib/push/send";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { canalDe } from "@/lib/channels";
+import { emparejarAsesor, leerSeparaciones, ventasDeSeparaciones } from "@/lib/golden/ventas";
+import { armarDiaDeCombi, type AsientoDeCombi, type SalidaDeCombi } from "./combi";
+import {
+  armarActivos,
+  armarRanking,
+  estaEnLinea,
+  indicesDeActividad,
+  rangoDePeriodo,
+  sumarVenta,
+  ventasEnCero,
+  type Periodo,
+  type VentasDeAlguien,
+} from "./rendimiento";
+import {
+  TIPOS_DE_MATERIAL,
+  buscarProyecto,
+  elegirMaterial,
+  materialDisponible,
+  ventanaDelCliente,
+  type AdjuntoMaterial,
+  type ComandoDeEnvio,
+  type EnvioPropuesto,
+  type TipoDeMaterial,
+} from "./material";
 
 export interface ContextoAsistente {
   db: SupabaseClient;
@@ -29,6 +54,8 @@ export interface ContextoAsistente {
   rol: string;
   area: string | null;
   nombre: string;
+  /** Por WhatsApp hay botones y archivos; en la app, sólo texto y enlaces. */
+  canal: "whatsapp" | "app";
 }
 
 export interface Accion {
@@ -39,6 +66,10 @@ export interface Accion {
 interface Resultado {
   datos: unknown;
   accion?: Accion;
+  /** Archivos para quien pregunta: los manda el canal, después del texto. */
+  adjuntos?: AdjuntoMaterial[];
+  /** Un envío a un cliente que espera el botón de quien pregunta. */
+  envio?: EnvioPropuesto;
 }
 
 // ------------------------------------------------------------
@@ -93,6 +124,34 @@ export const HERRAMIENTAS = [
             description: "Nombre de un proyecto, o 'casas' / 'lotes' / 'departamentos' para filtrar. Vacío = todo.",
           },
         },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "enviar_material",
+      description:
+        "Envía el brochure, el video o la foto de un proyecto. Sin `cliente`, los archivos le llegan a quien pregunta. Con `cliente`, NO envía nada: arma un borrador y quien pregunta tiene que tocar el botón 'Sí, enviar'. Úsala cuando pidan 'mándame el brochure de...' o 'envíale el video a...'.",
+      parameters: {
+        type: "object",
+        properties: {
+          proyecto: { type: "string", description: "Nombre del proyecto, p. ej. 'Casa Jade'." },
+          tipos: {
+            type: "array",
+            items: { type: "string", enum: TIPOS_DE_MATERIAL },
+            minItems: 1,
+            description: "Qué enviar. 'foto' es la foto de portada.",
+          },
+          cliente: { type: "string", description: "Nombre, teléfono o DNI del cliente. Vacío = a quien pregunta." },
+          mensaje: {
+            type: "string",
+            maxLength: 1024,
+            description: "Sólo con `cliente`: el texto que acompaña al primer archivo. Escríbelo sólo si te lo pidieron.",
+          },
+        },
+        required: ["proyecto", "tipos"],
         additionalProperties: false,
       },
     },
@@ -186,11 +245,38 @@ export const HERRAMIENTAS = [
     function: {
       name: "rendimiento_del_equipo",
       description:
-        "Cuánto lleva y cómo va cada asesor: conversaciones, sin responder, citas agendadas y clientes con plan de pago. Sólo para dueño o administrador.",
+        "Ranking de asesores por VENTAS (separaciones de lotes aprobadas y reservas), con importe, mensajes recibidos y enviados, chats, sin responder, citas, tiempo en la app e índice de actividad. Úsala para '¿quién vende más?', '¿quién tiene mejor rendimiento?', '¿cuántos mensajes le llegaron a Sara?', '¿cómo va Golden 1?'. Sólo para dueño o administrador.",
       parameters: {
         type: "object",
         properties: {
-          dias: { type: "integer", minimum: 1, maximum: 365, description: "Periodo de las citas, por defecto 30 días." },
+          periodo: { type: "string", enum: ["hoy", "semana", "mes"], description: "Por defecto, el mes actual." },
+          desde: { type: "string", description: "En vez de periodo: primer día, YYYY-MM-DD (hora de Lima)." },
+          hasta: { type: "string", description: "Último día, YYYY-MM-DD, inclusive." },
+          asesor: { type: "string", description: "Nombre de un asesor para ver sólo el suyo, con el detalle de sus ventas." },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "quien_esta_activo",
+      description:
+        "Quién del equipo está conectado ahora mismo, cuándo entró por última vez cada uno, cuántos minutos lleva hoy en la app y cuántos clientes abrieron la app en las últimas 24 h. Sólo para dueño o administrador.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "combi_del_dia",
+      description:
+        "Las salidas de la combi de un día: a qué hora, a qué proyecto, cómo va el viaje, cuántos asientos quedan y quién va en cada asiento, con su asesor. También los horarios programados sin pasajeros. Úsala para '¿a qué hora sale la combi?', '¿con quién va?', '¿hay sitio mañana?'.",
+      parameters: {
+        type: "object",
+        properties: {
+          fecha: { type: "string", description: "YYYY-MM-DD en hora de Lima. Vacío = hoy." },
         },
         additionalProperties: false,
       },
@@ -1111,45 +1197,248 @@ async function embudo(ctx: ContextoAsistente, args: { dias?: number }): Promise<
 }
 
 /** Cuánto lleva y cómo va cada asesor. */
-async function rendimientoDelEquipo(ctx: ContextoAsistente, args: { dias?: number }): Promise<Resultado> {
-  if (!esJefe(ctx.rol)) {
-    return { datos: { error: "Esto sólo lo puede ver un dueño o un administrador." } };
-  }
-  const dias = Math.min(Math.max(Number(args.dias) || 30, 1), 365);
-  const desde = new Date(Date.now() - dias * 864e5).toISOString();
+const SOLO_JEFES = { datos: { error: "Esto sólo lo puede ver un dueño o un administrador." } };
 
-  const [{ data: gente }, { data: convs }, { data: citas }] = await Promise.all([
-    ctx.db.from("profiles").select("user_id, full_name, email, account_role, area").eq("account_id", ctx.accountId),
-    ctx.db.from("conversations").select("id, assigned_agent_id, status").eq("account_id", ctx.accountId),
-    ctx.db
-      .from("appointments")
-      .select("user_id, status")
+/** Las conversaciones de la cuenta, las más recientes primero. PostgREST corta en mil por consulta. */
+async function conversacionesDeLaCuenta(ctx: ContextoAsistente) {
+  const filas: { id: string; assigned_agent_id: string | null; status: string; unread_count: number | null }[] = [];
+  for (let i = 0; ; i += 1000) {
+    const { data } = await ctx.db
+      .from("conversations")
+      .select("id, assigned_agent_id, status, unread_count")
       .eq("account_id", ctx.accountId)
-      .gte("created_at", desde),
-  ]);
+      .order("last_message_at", { ascending: false, nullsFirst: false })
+      .order("id")
+      .range(i, i + 999);
+    filas.push(...((data ?? []) as typeof filas));
+    if ((data ?? []).length < 1000) return filas;
+  }
+}
 
-  const convFilas = (convs ?? []) as { id: string; assigned_agent_id: string | null; status: string }[];
-  const voz = await vozDeLosClientes(ctx, convFilas.map((c) => c.id));
+async function rendimientoDelEquipo(
+  ctx: ContextoAsistente,
+  args: { periodo?: Periodo; desde?: string; hasta?: string; asesor?: string },
+): Promise<Resultado> {
+  if (!esJefe(ctx.rol)) return SOLO_JEFES;
+  const rango = rangoDePeriodo(args);
+
+  const [{ data: gente }, convs, actividad, { data: citas }, { data: presencia }, { data: uso }, { data: reservas }, separaciones] =
+    await Promise.all([
+      ctx.db.from("profiles").select("id, user_id, full_name, email, account_role").eq("account_id", ctx.accountId),
+      conversacionesDeLaCuenta(ctx),
+      ctx.db.rpc("actividad_del_equipo", { p_cuenta: ctx.accountId, p_desde: rango.desde, p_hasta: rango.hasta }),
+      ctx.db
+        .from("appointments")
+        .select("user_id, status, starts_at")
+        .eq("account_id", ctx.accountId)
+        .gte("starts_at", rango.desde)
+        .lt("starts_at", rango.hasta),
+      ctx.db.from("member_presence").select("user_id, last_seen_at").eq("account_id", ctx.accountId),
+      ctx.db.from("uso_app").select("user_id, dia, minutos").eq("account_id", ctx.accountId).gte("dia", rango.diaDesde).lte("dia", rango.diaHasta),
+      ctx.db
+        .from("reservations")
+        .select("advisor_id, total_amount, currency, approved_at")
+        .eq("account_id", ctx.accountId)
+        .in("status", ["aprobada", "cerrada"])
+        .gte("approved_at", rango.desde)
+        .lt("approved_at", rango.hasta),
+      leerSeparaciones(),
+    ]);
+
+  const miembros = ((gente ?? []) as { id: string; user_id: string; full_name: string | null; email: string | null; account_role: string }[]).filter(
+    (p) => p.account_role !== "viewer",
+  );
+
+  // Las ventas: separaciones aprobadas (el asesor está escrito a mano) y reservas.
+  const ventas = new Map(miembros.map((m) => [m.user_id, ventasEnCero()]));
+  const detalle = new Map<string, unknown[]>();
+  const sinCoincidir = new Map<string, VentasDeAlguien>();
+  const apuntar = (userId: string | null, escrito: string, venta: { importe: number | null; moneda: string; que: string; fecha: string | null }) => {
+    if (userId && ventas.has(userId)) {
+      sumarVenta(ventas.get(userId)!, venta);
+      detalle.set(userId, [...(detalle.get(userId) ?? []), { que: venta.que, importe: venta.importe, moneda: venta.moneda, fecha: venta.fecha && cuandoLima(venta.fecha) }]);
+      return;
+    }
+    if (!sinCoincidir.has(escrito)) sinCoincidir.set(escrito, ventasEnCero());
+    sumarVenta(sinCoincidir.get(escrito)!, venta);
+  };
+
+  if (separaciones.estado === "ok") {
+    for (const f of ventasDeSeparaciones(separaciones.filas, separaciones.estados, rango)) {
+      apuntar(emparejarAsesor(f.asesor, miembros), f.asesor, {
+        importe: f.precio_lote === null ? null : Number(f.precio_lote),
+        moneda: f.moneda,
+        que: `Lote ${f.lote} de ${f.proyecto}`,
+        fecha: f.resuelta,
+      });
+    }
+  }
+  const perfilAUsuario = new Map(miembros.map((m) => [m.id, m.user_id]));
+  for (const r of (reservas ?? []) as { advisor_id: string | null; total_amount: number; currency: string; approved_at: string }[]) {
+    apuntar(perfilAUsuario.get(r.advisor_id ?? "") ?? null, "Reserva sin asesor", {
+      importe: Number(r.total_amount) > 0 ? Number(r.total_amount) : null,
+      moneda: r.currency,
+      que: "Reserva del CRM",
+      fecha: r.approved_at,
+    });
+  }
+
+  // La actividad: lo que en la pantalla Control se ve de cada uno.
+  const mensajes = new Map(
+    ((actividad.data ?? []) as { user_id: string; recibidos: number; enviados: number; chats: number; dias: string[] }[]).map((a) => [a.user_id, a]),
+  );
+  const abiertas = convs.filter((c) => c.assigned_agent_id && c.status !== "closed");
+  // Sólo las más recientes: la consulta de los últimos mensajes tiene un tope.
+  const voz = await vozDeLosClientes(ctx, abiertas.slice(0, 200).map((c) => c.id));
+  const visto = new Map(((presencia ?? []) as { user_id: string; last_seen_at: string }[]).map((p) => [p.user_id, p.last_seen_at]));
+  const usoFilas = (uso ?? []) as { user_id: string; dia: string; minutos: number }[];
+  const citaFilas = (citas ?? []) as { user_id: string; status: string; starts_at: string }[];
+  const diaLima = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: LIMA }).format(new Date(iso));
+
+  const personas = miembros.map((m) => {
+    const suyas = convs.filter((c) => c.assigned_agent_id === m.user_id);
+    const susCitas = citaFilas.filter((c) => c.user_id === m.user_id);
+    const suyoUso = usoFilas.filter((u) => u.user_id === m.user_id);
+    const movio = mensajes.get(m.user_id);
+    const canceladas = susCitas.filter((c) => c.status === "cancelada").length;
+    return {
+      userId: m.user_id,
+      nombre: m.full_name || m.email || "?",
+      ventas: ventas.get(m.user_id)!,
+      enviados: Number(movio?.enviados ?? 0),
+      recibidos: Number(movio?.recibidos ?? 0),
+      chats_con_movimiento: Number(movio?.chats ?? 0),
+      chats_asignados: suyas.length,
+      sin_leer: suyas.reduce((n, c) => n + (Number(c.unread_count) || 0), 0),
+      sin_responder: suyas.filter((c) => voz.get(c.id)?.ultimo === "cliente").length,
+      citas: { total: susCitas.length, cumplidas: susCitas.filter((c) => c.status === "cumplida").length, canceladas },
+      minutos_app: suyoUso.reduce((n, u) => n + (Number(u.minutos) || 0), 0),
+      dias_activos: new Set([
+        ...suyoUso.map((u) => u.dia),
+        ...(movio?.dias ?? []),
+        ...susCitas.filter((c) => c.status !== "cancelada").map((c) => diaLima(c.starts_at)),
+      ]).size,
+      ultima_conexion: visto.get(m.user_id) ? cuandoLima(visto.get(m.user_id)!) : null,
+      en_linea: estaEnLinea(visto.get(m.user_id)),
+    };
+  });
+  const indices = indicesDeActividad(personas);
+  const ranking = armarRanking(personas.map((p, i) => ({ ...p, indice_actividad: indices[i] }))).map(({ userId, enviados, recibidos, ...p }) => ({
+    ...p,
+    userId,
+    // Sin la 080 no se sabe: un cero sería decir que no recibió ninguno.
+    mensajes: actividad.error ? null : { recibidos, enviados },
+  }));
+
+  const avisos: Record<string, string> = {};
+  if (actividad.error) {
+    if (actividad.error.code === "42883" || actividad.error.code === "PGRST202") {
+      avisos.falta_migracion = "Falta correr la migración 080 en el CRM: por eso no hay mensajes ni índice completo.";
+    } else {
+      avisos.mensajes_no_disponibles = "No se pudieron contar los mensajes ahora.";
+    }
+  }
+  if (separaciones.estado !== "ok") {
+    avisos.ventas_no_disponibles =
+      separaciones.estado === "sin_clave"
+        ? "No se pudieron leer las separaciones: falta GOLDEN_SUPABASE_SERVICE_KEY en el CRM. Sólo se ven las reservas del CRM."
+        : "No se pudieron leer las separaciones ahora: el Supabase de la app no respondió. Sólo se ven las reservas del CRM.";
+  }
+  const sin_coincidir = [...sinCoincidir].map(([escrito, v]) => ({ escrito_como: escrito, ...v }));
+  const periodo = `${rango.diaDesde} a ${rango.diaHasta}`;
+
+  if (args.asesor?.trim()) {
+    const id = emparejarAsesor(args.asesor, miembros);
+    const uno = ranking.find((p) => p.userId === id);
+    if (!uno) {
+      return {
+        datos: {
+          asesor_no_encontrado: args.asesor,
+          equipo: ranking.map((p) => p.nombre),
+          sin_coincidir,
+          nota: "Nadie del equipo se llama así, o hay más de uno. Pregunta cuál de la lista es. `sin_coincidir` son ventas escritas con un nombre que no se pudo atribuir.",
+        },
+      };
+    }
+    const { userId, ...datos } = uno;
+    return { datos: { periodo, ...datos, de_cuantos: ranking.length, ventas_detalle: (detalle.get(userId) ?? []).slice(0, 20), ...avisos } };
+  }
 
   return {
     datos: {
-      periodo: `últimos ${dias} días`,
-      asesores: (gente ?? [])
-        .filter((p) => p.account_role !== "viewer")
-        .map((p) => {
-          const suyas = convFilas.filter((c) => c.assigned_agent_id === p.user_id);
-          return {
-            nombre: (p.full_name as string) || (p.email as string) || "?",
-            conversaciones: suyas.length,
-            abiertas: suyas.filter((c) => c.status !== "closed").length,
-            // Las que esperan respuesta suya: el último que habló fue el cliente.
-            sin_responder: suyas.filter((c) => voz.get(c.id)?.ultimo === "cliente").length,
-            citas_agendadas: ((citas ?? []) as { user_id: string; status: string }[]).filter(
-              (c) => c.user_id === p.user_id && c.status === "agendada",
-            ).length,
-          };
-        })
-        .sort((a, b) => b.conversaciones - a.conversaciones),
+      periodo,
+      // Sin las separaciones no se sabe quién vendió más: no se nombra a nadie.
+      mejor_vendedor: separaciones.estado === "ok" && ranking[0]?.ventas.cantidad ? ranking[0].nombre : null,
+      ranking: ranking.map((p) => ({ ...p, userId: undefined })),
+      sin_coincidir,
+      ...avisos,
+    },
+  };
+}
+
+async function quienEstaActivo(ctx: ContextoAsistente): Promise<Resultado> {
+  if (!esJefe(ctx.rol)) return SOLO_JEFES;
+  const [{ data: gente }, { data: presencia }, { data: uso }, { data: sesiones }] = await Promise.all([
+    ctx.db.from("profiles").select("user_id, full_name, email, account_role").eq("account_id", ctx.accountId),
+    ctx.db.from("member_presence").select("user_id, last_seen_at").eq("account_id", ctx.accountId),
+    ctx.db.from("uso_app").select("user_id, minutos").eq("account_id", ctx.accountId).eq("dia", hoyLima()),
+    // client_sessions no tiene políticas: sólo la lee el servidor (045).
+    supabaseAdmin()
+      .from("client_sessions")
+      .select("contact_id")
+      .eq("account_id", ctx.accountId)
+      .is("revoked_at", null)
+      .gte("last_seen_at", new Date(Date.now() - 864e5).toISOString())
+      .limit(1000),
+  ]);
+  const equipo = armarActivos(gente ?? [], presencia ?? [], uso ?? []).map((p) => ({
+    ...p,
+    ultima_conexion: p.ultima_conexion ? cuandoLima(p.ultima_conexion) : null,
+  }));
+  return {
+    datos: {
+      conectados_ahora: equipo.filter((p) => p.en_linea).map((p) => p.nombre),
+      equipo,
+      clientes_que_abrieron_la_app_en_24_h: new Set((sesiones ?? []).map((s) => s.contact_id)).size,
+      nota: "Del equipo se sabe quién está ahora. De los clientes sólo cuántos entraron en las últimas 24 h: no se puede saber quién está dentro en este momento.",
+    },
+  };
+}
+
+async function combiDelDia(ctx: ContextoAsistente, args: { fecha?: string }): Promise<Resultado> {
+  const fecha = args.fecha && /^\d{4}-\d{2}-\d{2}$/.test(args.fecha) ? args.fecha : hoyLima();
+  const { data: salidas, error } = await ctx.db
+    .from("combi_salidas")
+    .select("id, hora, proyecto, capacidad, nota, salio_at, llego_at, visito_at, volvio_at")
+    .eq("account_id", ctx.accountId)
+    .eq("fecha", fecha)
+    .order("hora");
+  if (error) return { datos: { error: "No se pudo leer la combi." } };
+
+  const lista = (salidas ?? []) as SalidaDeCombi[];
+  const mapas = new Map<string, AsientoDeCombi[]>();
+  await Promise.all(
+    lista.map(async (s) => {
+      const { data } = await ctx.db.rpc("combi_mapa", { p_salida: s.id });
+      mapas.set(s.id, (data ?? []) as AsientoDeCombi[]);
+    }),
+  );
+
+  const combi = (await catalogoDeGolden())?.combi;
+  const { data: novedades } = esJefe(ctx.rol)
+    ? await ctx.db
+        .from("combi_novedades")
+        .select("tipo, texto, resuelta")
+        .eq("account_id", ctx.accountId)
+        .gte("created_at", new Date(`${fecha}T00:00:00-05:00`).toISOString())
+        .lt("created_at", new Date(new Date(`${fecha}T00:00:00-05:00`).getTime() + 864e5).toISOString())
+    : { data: null };
+
+  return {
+    datos: {
+      ...armarDiaDeCombi(fecha, lista, mapas, combi?.horarios),
+      horarios_provisionales: Boolean(combi?.provisional),
+      novedades_del_conductor: novedades ?? [],
     },
   };
 }
@@ -1438,6 +1727,129 @@ async function agregarNota(ctx: ContextoAsistente, args: { cliente: string; text
 }
 
 /** Ejecuta una herramienta por nombre. Nunca lanza: devuelve el error como dato. */
+/**
+ * Prepara el material de un proyecto. A un cliente nunca le llega desde aquí:
+ * se guarda un borrador y lo envía el botón (asistentes-whatsapp/equipo.ts),
+ * después de que la persona vea el destinatario, los archivos y el texto.
+ */
+async function enviarMaterial(
+  ctx: ContextoAsistente,
+  args: { proyecto: string; tipos?: TipoDeMaterial[]; cliente?: string; mensaje?: string },
+): Promise<Resultado> {
+  const datos = await catalogoDeGolden();
+  const base = process.env.GOLDEN_APP_URL?.trim();
+  if (!datos || !base) {
+    return { datos: { error: "No se pudo leer el catálogo de la app. Falta GOLDEN_APP_URL en el CRM, o la app no respondió." } };
+  }
+
+  const { uno: proyecto, varios } = buscarProyecto(datos.proyectos, args.proyecto ?? "");
+  if (!proyecto) {
+    return { datos: { ambiguo: true, opciones: (varios ?? []).map((p) => p.nombre) } };
+  }
+
+  const tipos = [...new Set(args.tipos ?? [])];
+  const adjuntos: AdjuntoMaterial[] = [];
+  const faltan: TipoDeMaterial[] = [];
+  for (const tipo of tipos) {
+    const adjunto = elegirMaterial(proyecto, tipo, base);
+    if (adjunto) adjuntos.push(adjunto);
+    else faltan.push(tipo);
+  }
+  if (!adjuntos.length) {
+    return { datos: { sin_material: true, proyecto: proyecto.nombre, faltan, tiene: materialDisponible(proyecto) } };
+  }
+
+  const cliente = args.cliente?.trim();
+  if (!cliente) {
+    if (ctx.canal === "app") {
+      return {
+        datos: {
+          proyecto: proyecto.nombre,
+          enlaces: adjuntos.map((a) => ({ que: a.etiqueta, enlace: a.url })),
+          faltan,
+        },
+      };
+    }
+    return {
+      datos: {
+        ok: true,
+        proyecto: proyecto.nombre,
+        llegan_despues_de_tu_respuesta: adjuntos.map((a) => a.etiqueta),
+        faltan,
+      },
+      adjuntos,
+    };
+  }
+
+  if (ctx.canal !== "whatsapp") {
+    return { datos: { error: "Enviarle algo a un cliente sólo se puede desde WhatsApp, donde está el botón para confirmarlo." } };
+  }
+  const mensaje = args.mensaje?.trim() || null;
+  if (mensaje && mensaje.length > 1024) {
+    return { datos: { error: "El mensaje pasa de 1024 caracteres, el límite de WhatsApp. Acórtalo." } };
+  }
+
+  const { uno: contacto, varios: otros } = await buscarContacto(ctx, cliente);
+  if (!contacto) return { datos: candidatos(otros) };
+
+  const { data: conversacion } = await ctx.db
+    .from("conversations")
+    .select("*")
+    .eq("account_id", ctx.accountId)
+    .eq("contact_id", contacto.id)
+    .order("last_message_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (!conversacion) {
+    return { datos: { sin_conversacion: true, nota: `${contacto.name ?? "Este contacto"} nunca nos escribió: WhatsApp no deja mandarle nada sin una plantilla.` } };
+  }
+
+  const canal = canalDe(conversacion);
+  const ventana = await ventanaDelCliente(ctx.db, conversacion.id as string, canal);
+  if (!ventana.abierta) {
+    return {
+      datos: {
+        ventana_cerrada: true,
+        cliente: contacto.name,
+        ultimo_mensaje_del_cliente: ventana.ultimoMensaje ? cuandoLima(ventana.ultimoMensaje) : "nunca",
+        nota: "Pasaron más de 24 h desde su último mensaje: WhatsApp no deja enviarle esto sin una plantilla. No se envió nada.",
+      },
+    };
+  }
+
+  const dueno = conversacion.assigned_agent_id as string | null;
+  const propuesta: Omit<EnvioPropuesto, "id"> = {
+    cliente: contacto.name ?? contacto.phone ?? "Cliente",
+    telefono: contacto.phone,
+    asesor: dueno ? ((await nombresDelEquipo(ctx)).get(dueno) ?? null) : null,
+    etiquetas: adjuntos.map((a) => a.etiqueta),
+    mensaje,
+  };
+  const comando: ComandoDeEnvio = {
+    tipo: "envio_cliente",
+    conversacionId: conversacion.id as string,
+    canal,
+    adjuntos,
+    mensaje,
+  };
+  // Los borradores no tienen políticas: sólo los toca el servidor (075).
+  const { data: borrador, error } = await supabaseAdmin()
+    .from("whatsapp_team_drafts")
+    .insert({ account_id: ctx.accountId, user_id: ctx.userId, command: comando, summary: JSON.stringify(propuesta) })
+    .select("id")
+    .single();
+  if (error || !borrador) return { datos: { error: "No pude guardar el borrador. Intenta de nuevo." } };
+
+  return {
+    datos: {
+      borrador_listo: true,
+      faltan,
+      instruccion: "Todavía no se envió nada. Dile sólo que revise y toque Sí, enviar: un 'sí' escrito NO envía.",
+    },
+    envio: { id: borrador.id as string, ...propuesta },
+  };
+}
+
 export async function ejecutarHerramienta(
   ctx: ContextoAsistente,
   nombre: string,
@@ -1459,6 +1871,8 @@ export async function ejecutarHerramienta(
         return await resumenCliente(ctx, args as { buscar: string });
       case "catalogo":
         return await catalogo(ctx, args as { buscar?: string });
+      case "enviar_material":
+        return await enviarMaterial(ctx, args as { proyecto: string; tipos?: TipoDeMaterial[]; cliente?: string; mensaje?: string });
       case "equipo":
         return await equipo(ctx);
       case "resumen_de_conversacion":
@@ -1470,7 +1884,11 @@ export async function ejecutarHerramienta(
       case "embudo":
         return await embudo(ctx, args as { dias?: number });
       case "rendimiento_del_equipo":
-        return await rendimientoDelEquipo(ctx, args as { dias?: number });
+        return await rendimientoDelEquipo(ctx, args as { periodo?: Periodo; desde?: string; hasta?: string; asesor?: string });
+      case "quien_esta_activo":
+        return await quienEstaActivo(ctx);
+      case "combi_del_dia":
+        return await combiDelDia(ctx, args as { fecha?: string });
       case "poner_quien_responde":
         return await ponerQuienResponde(ctx, args as { cliente: string; quien: string });
       case "mi_agenda":
