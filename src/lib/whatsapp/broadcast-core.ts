@@ -18,7 +18,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
+import { MetaApiError, sendTemplateMessage } from '@/lib/whatsapp/meta-api';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import {
   sanitizePhoneForMeta,
@@ -28,6 +28,7 @@ import {
 } from '@/lib/whatsapp/phone-utils';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import type { MessageTemplate } from '@/types';
+import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder';
 import { findOrCreateContact } from '@/lib/api/v1/contacts';
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
@@ -247,6 +248,68 @@ export async function createBroadcast(
 }
 
 /**
+ * Send one template to one phone, retrying phone variants (trunk-prefix
+ * 0) only when Meta answers "recipient not in allowed list". Shared by
+ * {@link deliverBroadcast} and the scheduled dispatcher so both send
+ * with identical semantics. Never throws: the outcome is returned.
+ */
+export async function sendTemplateWithVariants(args: {
+  phoneNumberId: string;
+  accessToken: string;
+  /** Digits-only phone. */
+  phone: string;
+  templateName: string;
+  language: string;
+  template: MessageTemplate | null;
+  params: string[];
+  /** Structured send-time values (e.g. header media URL). */
+  messageParams?: SendTimeParams;
+  /** Test seam; defaults to the real Meta client. */
+  send?: typeof sendTemplateMessage;
+}): Promise<{
+  messageId: string | null;
+  error: string | null;
+  /** Meta's numeric error code, when it answered with one. */
+  errorCode: number | null;
+  /** `held_for_quality_assessment` when Meta is pacing the template. */
+  messageStatus: string | null;
+}> {
+  const send = args.send ?? sendTemplateMessage;
+  let messageId: string | null = null;
+  let lastError: string | null = null;
+  let errorCode: number | null = null;
+  let messageStatus: string | null = null;
+
+  for (const variant of phoneVariants(args.phone)) {
+    try {
+      const result = await send({
+        phoneNumberId: args.phoneNumberId,
+        accessToken: args.accessToken,
+        to: variant,
+        templateName: args.templateName,
+        language: args.language,
+        template: args.template ?? undefined,
+        params: args.params,
+        ...(args.messageParams ? { messageParams: args.messageParams } : {}),
+      });
+      messageId = result.messageId;
+      messageStatus = result.messageStatus ?? null;
+      lastError = null;
+      errorCode = null;
+      break;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      lastError = message;
+      errorCode = error instanceof MetaApiError ? (error.code ?? null) : null;
+      // Only a "recipient not allowed" error is worth another variant.
+      if (!isRecipientNotAllowedError(message)) break;
+    }
+  }
+
+  return { messageId, error: lastError, errorCode, messageStatus };
+}
+
+/**
  * Fan out a {@link BroadcastPlan}: send each recipient's template
  * (phone-variant retry) and stamp its `broadcast_recipients` row.
  * Best-effort per recipient — one failure never aborts the rest.
@@ -266,31 +329,16 @@ export async function deliverBroadcast(
   let sentCount = 0;
 
   for (const recipient of plan.planned) {
-    const variants = phoneVariants(recipient.phone);
-    let sentMessageId: string | null = null;
-    let lastError: string | null = null;
-
-    for (const variant of variants) {
-      try {
-        const result = await sendTemplateMessage({
-          phoneNumberId: plan.phoneNumberId,
-          accessToken: plan.accessToken,
-          to: variant,
-          templateName: plan.templateName,
-          language: plan.templateLanguage,
-          template: plan.templateRow ?? undefined,
-          params: recipient.params,
-        });
-        sentMessageId = result.messageId;
-        lastError = null;
-        break;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        lastError = message;
-        // Only a "recipient not allowed" error is worth another variant.
-        if (!isRecipientNotAllowedError(message)) break;
-      }
-    }
+    const { messageId: sentMessageId, error: lastError } =
+      await sendTemplateWithVariants({
+        phoneNumberId: plan.phoneNumberId,
+        accessToken: plan.accessToken,
+        phone: recipient.phone,
+        templateName: plan.templateName,
+        language: plan.templateLanguage,
+        template: plan.templateRow,
+        params: recipient.params,
+      });
 
     if (sentMessageId) {
       sentCount++;

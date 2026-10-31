@@ -29,7 +29,7 @@ export const broadcastStatusConfig: Record<BroadcastStatus, StatusDisplay> = {
     classes: "bg-slate-500/10 text-muted-foreground border-slate-500/20",
   },
   scheduled: {
-    label: "Scheduled",
+    label: "Programada",
     classes: "bg-blue-500/10 text-blue-400 border-blue-500/20",
   },
   sending: {

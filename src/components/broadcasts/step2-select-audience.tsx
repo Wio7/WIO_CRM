@@ -2,8 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllPages } from '@/lib/supabase/paginate';
 import { CustomField, Tag } from '@/types';
 import { Button } from '@/components/ui/button';
+import { parseAudienceFile, type AudienceFileResult } from '@/lib/contacts/parse-audience-file';
 import {
   Users,
   Tags,
@@ -47,34 +49,34 @@ const audienceOptions: {
 }[] = [
   {
     type: 'all',
-    label: 'All Contacts',
-    description: 'Send to every contact in your database',
+    label: 'Todos los contactos',
+    description: 'Enviar a todos los contactos de tu base de datos',
     icon: Users,
   },
   {
     type: 'tags',
-    label: 'Filter by Tags',
-    description: 'Target contacts with specific tags',
+    label: 'Filtrar por etiquetas',
+    description: 'Contactos con ciertas etiquetas',
     icon: Tags,
   },
   {
     type: 'custom_field',
-    label: 'Custom Field',
-    description: 'Filter by a custom field value',
+    label: 'Campo personalizado',
+    description: 'Filtrar por el valor de un campo personalizado',
     icon: Filter,
   },
   {
     type: 'csv',
-    label: 'Upload CSV',
-    description: 'Upload a list of phone numbers',
+    label: 'Subir archivo',
+    description: 'Sube un Excel (.xlsx) o CSV con teléfonos',
     icon: Upload,
   },
 ];
 
 const OPERATOR_OPTIONS: { value: CustomFieldOperator; label: string }[] = [
-  { value: 'is', label: 'is' },
-  { value: 'is_not', label: 'is not' },
-  { value: 'contains', label: 'contains' },
+  { value: 'is', label: 'es' },
+  { value: 'is_not', label: 'no es' },
+  { value: 'contains', label: 'contiene' },
 ];
 
 export function Step2SelectAudience({
@@ -89,6 +91,22 @@ export function Step2SelectAudience({
   const [loadingFields, setLoadingFields] = useState(false);
   const [estimatedCount, setEstimatedCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
+  const [fileSummary, setFileSummary] = useState<AudienceFileResult | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [fileError, setFileError] = useState('');
+
+  async function handleFile(file?: File) {
+    if (!file) return;
+    setFileError('');
+    try {
+      const parsed = await parseAudienceFile(file);
+      setFileName(file.name);
+      setFileSummary(parsed);
+      onUpdate({ ...audience, type: 'csv', csvContacts: parsed.valid });
+    } catch (error) {
+      setFileError(error instanceof Error ? error.message : 'No se pudo leer el archivo.');
+    }
+  }
 
   // Tags are used both by the primary "Filter by Tags" audience type
   // AND by the exclude-list below — so always load once on mount.
@@ -140,26 +158,37 @@ export function Step2SelectAudience({
         audience.tagIds &&
         audience.tagIds.length > 0
       ) {
-        const { data } = await supabase
-          .from('contact_tags')
-          .select('contact_id')
-          .in('tag_id', audience.tagIds);
-        baseIds = new Set((data ?? []).map((r) => r.contact_id));
+        const tagIds = audience.tagIds;
+        const data = await fetchAllPages<{ contact_id: string }>((from, to) =>
+          supabase
+            .from('contact_tags')
+            .select('contact_id')
+            .in('tag_id', tagIds)
+            .order('contact_id', { ascending: true })
+            .order('tag_id', { ascending: true })
+            .range(from, to),
+        );
+        baseIds = new Set(data.map((r) => r.contact_id));
       } else if (
         audience.type === 'custom_field' &&
         audience.customField?.fieldId &&
         audience.customField.value
       ) {
         const { fieldId, operator, value } = audience.customField;
-        let q = supabase
-          .from('contact_custom_values')
-          .select('contact_id')
-          .eq('custom_field_id', fieldId);
-        if (operator === 'is') q = q.eq('value', value);
-        else if (operator === 'is_not') q = q.neq('value', value);
-        else q = q.ilike('value', `%${value}%`);
-        const { data } = await q;
-        baseIds = new Set((data ?? []).map((r) => r.contact_id));
+        const data = await fetchAllPages<{ contact_id: string }>((from, to) => {
+          let q = supabase
+            .from('contact_custom_values')
+            .select('contact_id')
+            .eq('custom_field_id', fieldId);
+          if (operator === 'is') q = q.eq('value', value);
+          else if (operator === 'is_not') q = q.neq('value', value);
+          else q = q.ilike('value', `%${value}%`);
+          return q
+            .order('contact_id', { ascending: true })
+            .order('custom_field_id', { ascending: true })
+            .range(from, to);
+        });
+        baseIds = new Set(data.map((r) => r.contact_id));
       } else if (
         audience.type === 'csv' &&
         audience.csvContacts &&
@@ -176,11 +205,17 @@ export function Step2SelectAudience({
       // Apply exclude tags
       let excludeSet: Set<string> | null = null;
       if (audience.excludeTagIds && audience.excludeTagIds.length > 0) {
-        const { data: excludeRows } = await supabase
-          .from('contact_tags')
-          .select('contact_id')
-          .in('tag_id', audience.excludeTagIds);
-        excludeSet = new Set((excludeRows ?? []).map((r) => r.contact_id));
+        const excludeTagIds = audience.excludeTagIds;
+        const excludeRows = await fetchAllPages<{ contact_id: string }>((from, to) =>
+          supabase
+            .from('contact_tags')
+            .select('contact_id')
+            .in('tag_id', excludeTagIds)
+            .order('contact_id', { ascending: true })
+            .order('tag_id', { ascending: true })
+            .range(from, to),
+        );
+        excludeSet = new Set(excludeRows.map((r) => r.contact_id));
       }
 
       if (baseIds) {
@@ -249,9 +284,9 @@ export function Step2SelectAudience({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Select Audience</h2>
+        <h2 className="text-lg font-semibold text-foreground">Elegir audiencia</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Choose who will receive this broadcast.
+          Elige quién recibirá esta difusión.
         </p>
       </div>
 
@@ -305,12 +340,12 @@ export function Step2SelectAudience({
 
       {audience.type === 'tags' && (
         <div className="rounded-xl border border-border bg-card/50 p-4">
-          <p className="mb-3 text-sm font-medium text-foreground">Select Tags</p>
+          <p className="mb-3 text-sm font-medium text-foreground">Elegir etiquetas</p>
           {loadingTags ? (
             <Loader2 className="h-5 w-5 animate-spin text-primary" />
           ) : tags.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              No tags found. Create tags in Settings.
+              No hay etiquetas. Crea etiquetas en Configuración.
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">
@@ -341,12 +376,12 @@ export function Step2SelectAudience({
 
       {audience.type === 'custom_field' && (
         <div className="space-y-3 rounded-xl border border-border bg-card/50 p-4">
-          <p className="text-sm font-medium text-foreground">Custom Field Filter</p>
+          <p className="text-sm font-medium text-foreground">Filtro por campo personalizado</p>
           {loadingFields ? (
             <Loader2 className="h-5 w-5 animate-spin text-primary" />
           ) : customFields.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              No custom fields defined. Create one in Settings → Custom Fields.
+              No hay campos personalizados. Crea uno en Configuración → Campos personalizados.
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_140px_minmax(0,1fr)]">
@@ -355,7 +390,7 @@ export function Step2SelectAudience({
                 onChange={(e) => updateCustomField({ fieldId: e.target.value })}
                 className="h-9 rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
               >
-                <option value="">Select field…</option>
+                <option value="">Elegir campo…</option>
                 {customFields.map((f) => (
                   <option key={f.id} value={f.id}>
                     {f.field_name}
@@ -381,9 +416,62 @@ export function Step2SelectAudience({
                 type="text"
                 value={audience.customField?.value ?? ''}
                 onChange={(e) => updateCustomField({ value: e.target.value })}
-                placeholder="Value"
+                placeholder="Valor"
                 className="h-9 rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-1 focus:ring-primary"
               />
+            </div>
+          )}
+        </div>
+      )}
+
+      {audience.type === 'csv' && (
+        <div className="space-y-3 rounded-xl border border-border bg-card/50 p-4">
+          <p className="text-sm font-medium text-foreground">Subir archivo de audiencia</p>
+          <p className="text-xs text-muted-foreground">
+            Elige un archivo .xlsx o .csv (máximo 5000 filas). Buscamos la columna de teléfono
+            (teléfono, celular, móvil, WhatsApp, número o phone) y, si existe, la de nombre.
+          </p>
+          <input
+            type="file"
+            accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(e) => void handleFile(e.target.files?.[0])}
+            className="block w-full text-sm text-muted-foreground"
+          />
+          {fileError && <p className="text-xs text-red-400">{fileError}</p>}
+          {fileSummary && audience.csvContacts && (
+            <div className="space-y-2 text-sm text-foreground">
+              <p>
+                <span className="font-medium">{fileName}</span>:{' '}
+                {fileSummary.valid.length.toLocaleString()} válidos,{' '}
+                {fileSummary.duplicates.toLocaleString()} duplicados,{' '}
+                {fileSummary.invalid.length.toLocaleString()} inválidos.
+              </p>
+              {fileSummary.preview.length > 0 && (
+                <div className="overflow-hidden rounded-lg border border-border">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted text-muted-foreground">
+                      <tr>
+                        <th className="px-2 py-1 text-left font-medium">Nombre</th>
+                        <th className="px-2 py-1 text-left font-medium">Teléfono</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fileSummary.preview.map((row) => (
+                        <tr key={row.phone} className="border-t border-border">
+                          <td className="px-2 py-1">{row.name ?? 'Sin nombre'}</td>
+                          <td className="px-2 py-1">{row.phone}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {fileSummary.invalid.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Se omiten las filas con teléfono inválido (por ejemplo, fila{' '}
+                  {fileSummary.invalid[0].row}: «{fileSummary.invalid[0].value || 'vacío'}»).
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -394,12 +482,12 @@ export function Step2SelectAudience({
         <div className="mb-3 flex items-center gap-2">
           <X className="h-4 w-4 text-red-400" />
           <p className="text-sm font-medium text-foreground">
-            Exclude contacts with these tags
+            Excluir contactos con estas etiquetas
           </p>
-          <span className="text-xs text-muted-foreground">(optional)</span>
+          <span className="text-xs text-muted-foreground">(opcional)</span>
         </div>
         {tags.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No tags available.</p>
+          <p className="text-xs text-muted-foreground">No hay etiquetas disponibles.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
             {tags.map((tag) => {
@@ -428,11 +516,11 @@ export function Step2SelectAudience({
 
       {/* Audience Summary */}
       <div className="rounded-xl border border-border bg-card/50 p-4">
-        <p className="mb-2 text-sm font-medium text-foreground">Audience Summary</p>
+        <p className="mb-2 text-sm font-medium text-foreground">Resumen de la audiencia</p>
         {loadingCount ? (
           <div className="flex items-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin text-primary" />
-            <span className="text-xs text-muted-foreground">Calculating…</span>
+            <span className="text-xs text-muted-foreground">Calculando…</span>
           </div>
         ) : estimatedCount !== null ? (
           <div className="flex items-center gap-2">
@@ -440,11 +528,11 @@ export function Step2SelectAudience({
             <span className="text-sm text-foreground">
               {estimatedCount.toLocaleString()}
             </span>
-            <span className="text-xs text-muted-foreground">estimated recipients</span>
+            <span className="text-xs text-muted-foreground">destinatarios estimados</span>
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            Select an audience type to see the estimate.
+            Elige una audiencia para ver el estimado.
           </p>
         )}
       </div>
@@ -456,14 +544,14 @@ export function Step2SelectAudience({
           className="border-border text-muted-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back
+          Atrás
         </Button>
         <Button
           onClick={onNext}
           disabled={!isValid}
           className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          Next
+          Siguiente
           <ArrowRight className="h-4 w-4" />
         </Button>
       </div>

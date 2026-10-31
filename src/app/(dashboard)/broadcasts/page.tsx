@@ -88,7 +88,7 @@ export default function BroadcastsPage() {
   }, []);
 
   const anySending = useMemo(
-    () => broadcasts.some((b) => b.status === 'sending'),
+    () => broadcasts.some((b) => b.status === 'sending' || b.status === 'scheduled'),
     [broadcasts],
   );
 
@@ -225,7 +225,7 @@ export default function BroadcastsPage() {
                 <TableHead className="hidden text-muted-foreground lg:table-cell">Delivery</TableHead>
                 <TableHead className="hidden text-muted-foreground lg:table-cell">Read</TableHead>
                 <TableHead className="text-muted-foreground">Status</TableHead>
-                <TableHead className="hidden text-muted-foreground sm:table-cell">Date</TableHead>
+                <TableHead className="hidden text-muted-foreground sm:table-cell">Fecha</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -274,7 +274,9 @@ export default function BroadcastsPage() {
                       </span>
                     </TableCell>
                     <TableCell className="hidden text-muted-foreground sm:table-cell">
-                      {new Date(broadcast.created_at).toLocaleDateString()}
+                      {broadcast.status === 'scheduled' && broadcast.scheduled_at
+                        ? `Envío: ${new Date(broadcast.scheduled_at).toLocaleString()}`
+                        : new Date(broadcast.created_at).toLocaleDateString()}
                     </TableCell>
                   </TableRow>
                 );

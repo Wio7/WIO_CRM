@@ -14,6 +14,18 @@ const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
 export interface MetaSendResult {
   messageId: string
+  /** Template sends only: `accepted` or `held_for_quality_assessment`. */
+  messageStatus?: string
+}
+
+/** An error answered by Meta, keeping its numeric code when there is one. */
+export class MetaApiError extends Error {
+  readonly code?: number
+  constructor(message: string, code?: number) {
+    super(message)
+    this.name = 'MetaApiError'
+    this.code = code
+  }
 }
 
 export interface MetaPhoneInfo {
@@ -29,13 +41,15 @@ interface MetaErrorResponse {
 
 async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
+  let code: number | undefined
   try {
     const data = (await response.json()) as MetaErrorResponse
     if (data.error?.message) message = data.error.message
+    code = data.error?.code
   } catch {
     // response body wasn't JSON — keep the fallback
   }
-  throw new Error(message)
+  throw new MetaApiError(message, code)
 }
 
 // ============================================================
@@ -440,7 +454,10 @@ export async function sendTemplateMessage(
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
   const data = await response.json()
-  return { messageId: data.messages[0].id }
+  return {
+    messageId: data.messages[0].id,
+    messageStatus: data.messages[0].message_status,
+  }
 }
 
 // ============================================================

@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { fetchAllPages } from '@/lib/supabase/paginate';
+import { cancelScheduledBroadcast } from '@/lib/whatsapp/broadcast-audience';
 import { Broadcast, BroadcastRecipient, RecipientStatus } from '@/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -32,6 +34,7 @@ import {
   Download,
   ChevronDown,
   Trash2,
+  CalendarClock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -155,38 +158,53 @@ export default function BroadcastDetailPage() {
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const supabase = createClient();
+  const fetchData = useCallback(async () => {
+    try {
+      const supabase = createClient();
 
-        const { data: bc, error: bcError } = await supabase
-          .from('broadcasts')
-          .select('*')
-          .eq('id', broadcastId)
-          .single();
+      const { data: bc, error: bcError } = await supabase
+        .from('broadcasts')
+        .select('*')
+        .eq('id', broadcastId)
+        .single();
 
-        if (bcError) throw bcError;
-        setBroadcast(bc);
+      if (bcError) throw bcError;
+      setBroadcast(bc);
 
-        const { data: recs, error: recsError } = await supabase
+      // Paginated: a plain select stops at 1000 rows and a 1500-person
+      // broadcast would show an incomplete list.
+      const recs = await fetchAllPages<BroadcastRecipient>((from, to) =>
+        supabase
           .from('broadcast_recipients')
           .select('*, contact:contacts(*)')
           .eq('broadcast_id', broadcastId)
-          .order('created_at', { ascending: false });
-
-        if (recsError) throw recsError;
-        setRecipients(recs ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load broadcast');
-      } finally {
-        setLoading(false);
-      }
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: true })
+          .range(from, to),
+      );
+      setRecipients(recs);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cargar la difusión');
+    } finally {
+      setLoading(false);
     }
-
-    fetchData();
   }, [broadcastId]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // While the server is still working on it (waiting for its date, or
+  // sending), keep the progress fresh.
+  const liveStatus = broadcast?.status;
+  useEffect(() => {
+    if (liveStatus !== 'sending' && liveStatus !== 'scheduled') return;
+    const timer = setInterval(fetchData, 10_000);
+    return () => clearInterval(timer);
+  }, [liveStatus, fetchData]);
 
   const filteredRecipients = useMemo(
     () =>
@@ -243,6 +261,26 @@ export default function BroadcastDetailPage() {
     router.push('/broadcasts');
   }
 
+  async function handleCancelSchedule() {
+    setCancelling(true);
+    const supabase = createClient();
+    // Conditional update: if the server already claimed it (status is
+    // no longer 'scheduled'), nothing changes and we say so.
+    const { cancelled, error: cancelError } = await cancelScheduledBroadcast(supabase, broadcastId);
+    setCancelling(false);
+    setConfirmCancel(false);
+    if (cancelError) {
+      toast.error(`No se pudo cancelar: ${cancelError}`);
+      return;
+    }
+    await fetchData();
+    if (!cancelled) {
+      toast.error('La difusión ya empezó a enviarse y no se puede cancelar.');
+      return;
+    }
+    toast.success('Programación cancelada. La difusión quedó como borrador.');
+  }
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -254,9 +292,9 @@ export default function BroadcastDetailPage() {
   if (error || !broadcast) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2">
-        <p className="text-sm text-red-400">{error ?? 'Broadcast not found'}</p>
+        <p className="text-sm text-red-400">{error ?? 'Difusión no encontrada'}</p>
         <Button variant="outline" onClick={() => router.push('/broadcasts')}>
-          Back to Broadcasts
+          Volver a difusiones
         </Button>
       </div>
     );
@@ -294,14 +332,66 @@ export default function BroadcastDetailPage() {
               </span>
             </div>
             <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
-              <span>Template: {broadcast.template_name}</span>
+              <span>Plantilla: {broadcast.template_name}</span>
               <span>-</span>
               <span>
-                Created {new Date(broadcast.created_at).toLocaleDateString()}
+                Creada {new Date(broadcast.created_at).toLocaleDateString()}
               </span>
+              {broadcast.scheduled_at && broadcast.status !== 'draft' && (
+                <>
+                  <span>-</span>
+                  <span>
+                    {broadcast.status === 'scheduled' ? 'Se envía' : 'Programada para'}{' '}
+                    {new Date(broadcast.scheduled_at).toLocaleString()}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
+
+        {broadcast.status === 'failed' &&
+          typeof broadcast.audience_filter?.stopReason === 'string' && (
+            <p className="w-full rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              Difusión detenida: {broadcast.audience_filter.stopReason}. Los destinatarios en
+              pendiente no recibieron el mensaje.
+            </p>
+          )}
+
+        {broadcast.status === 'scheduled' && (
+          confirmCancel ? (
+            <div className="flex items-center gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-1.5 text-sm">
+              <span className="text-yellow-300">¿Cancelar la programación?</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmCancel(false)}
+                disabled={cancelling}
+                className="h-7 border-border bg-transparent text-muted-foreground hover:bg-muted"
+              >
+                No
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleCancelSchedule}
+                disabled={cancelling}
+                className="h-7 bg-yellow-600 text-white hover:bg-yellow-700 disabled:opacity-50"
+              >
+                {cancelling ? 'Cancelando…' : 'Sí, cancelar'}
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmCancel(true)}
+              className="border-yellow-500/30 bg-transparent text-yellow-400 hover:bg-yellow-500/10"
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+              Cancelar programación
+            </Button>
+          )
+        )}
 
         {/* Delete — inline-confirm pattern matches the pipeline-settings
             "Delete Pipeline" flow. Mid-send broadcasts can't be deleted
@@ -309,7 +399,7 @@ export default function BroadcastDetailPage() {
             funnel inconsistent. */}
         {confirmDelete ? (
           <div className="flex items-center gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-sm">
-            <span className="text-red-300">Delete this broadcast?</span>
+            <span className="text-red-300">¿Eliminar esta difusión?</span>
             <Button
               variant="outline"
               size="sm"
@@ -317,7 +407,7 @@ export default function BroadcastDetailPage() {
               disabled={deleting}
               className="h-7 border-border bg-transparent text-muted-foreground hover:bg-muted"
             >
-              Cancel
+              Cancelar
             </Button>
             <Button
               size="sm"
@@ -325,7 +415,7 @@ export default function BroadcastDetailPage() {
               disabled={deleting}
               className="h-7 bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
             >
-              {deleting ? 'Deleting…' : 'Confirm'}
+              {deleting ? 'Eliminando…' : 'Confirmar'}
             </Button>
           </div>
         ) : (
@@ -336,13 +426,13 @@ export default function BroadcastDetailPage() {
             onClick={() => setConfirmDelete(true)}
             title={
               broadcast.status === 'sending'
-                ? 'Cannot delete while a broadcast is actively sending'
-                : 'Delete this broadcast'
+                ? 'No se puede eliminar mientras se está enviando'
+                : 'Eliminar esta difusión'
             }
             className="border-red-500/30 bg-transparent text-red-400 hover:bg-red-500/10 disabled:opacity-40"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            Delete
+            Eliminar
           </Button>
         )}
       </div>
