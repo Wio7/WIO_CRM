@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   reservarCita: vi.fn(),
   diasLibres: vi.fn(),
   equipoQuePuedeAgendar: vi.fn(),
+  catalogoDeGolden: vi.fn(),
   state: {
     conv: null as Record<string, unknown> | null,
     autoResponders: [] as { id: string }[],
@@ -37,6 +38,10 @@ vi.mock('@/lib/agenda/reservar', () => ({
   reservarCita: h.reservarCita,
   esTipoDeCita: (v: unknown) => ['videollamada', 'visita', 'llamada'].includes(v as string),
   agendaEnTexto: (dias: { etiqueta: string }[]) => dias.map((d) => d.etiqueta).join('\n'),
+}))
+vi.mock('@/lib/golden/catalogo', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/golden/catalogo')>()),
+  catalogoDeGolden: h.catalogoDeGolden,
 }))
 vi.mock('./admin-client', () => ({
   supabaseAdmin: () => ({
@@ -352,6 +357,66 @@ describe('dispatchInboundToAiReply — sólo el botón la calla (058)', () => {
     await dispatchInboundToAiReply(ARGS)
     expect(h.state.updatePayload).toBeNull()
     expect(h.engineSendText).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('dispatchInboundToAiReply — lo de Golden no sale de Golden', () => {
+  const ARGS_GOLDEN = { ...ARGS, accountId: 'd74b5dfd-2999-4e2c-9a0e-10b3d540898b' }
+  const OTRA_CUENTA = { name: 'Julio Palli', brand_name: 'Broker Home' }
+
+  beforeEach(() => {
+    h.catalogoDeGolden.mockReset()
+    h.catalogoDeGolden.mockResolvedValue(null)
+    h.state.contact = { name: 'Ana', dni: '12345678' }
+    h.state.balance = { currency: 'PEN', pending_amount: 100, overdue_count: 0, next_due_date: null }
+  })
+
+  it('otra cuenta no lee el catálogo ni ve Golden en su prompt', async () => {
+    h.state.account = OTRA_CUENTA
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.catalogoDeGolden).not.toHaveBeenCalled()
+    const { systemPrompt } = h.generateReply.mock.calls[0][0] as { systemPrompt: string }
+    expect(systemPrompt).not.toMatch(/golden/i)
+    expect(systemPrompt).toContain('YA ES CLIENTE de Broker Home')
+  })
+
+  it('a un interesado de otra cuenta no le supone lotes ni casas', async () => {
+    h.state.account = OTRA_CUENTA
+    h.state.balance = null
+    await dispatchInboundToAiReply(ARGS)
+    const { systemPrompt } = h.generateReply.mock.calls[0][0] as { systemPrompt: string }
+    expect(systemPrompt).toContain('TODAVÍA NO ES CLIENTE')
+    expect(systemPrompt).not.toMatch(/\blote\b|departamento/i)
+  })
+
+  it('el traspaso de otra cuenta dice su propia marca', async () => {
+    h.state.account = OTRA_CUENTA
+    h.generateReply.mockResolvedValue({ text: 'x', handoff: true })
+    await dispatchInboundToAiReply(ARGS)
+    const enviado = h.engineSendText.mock.calls[0][0].text as string
+    expect(enviado).toContain('un asesor de Broker Home.')
+    expect(enviado).not.toMatch(/golden/i)
+  })
+
+  it('sin marca ni nombre, el traspaso dice sólo "un asesor"', async () => {
+    h.state.account = { name: null, brand_name: null }
+    h.generateReply.mockResolvedValue({ text: 'x', handoff: true })
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.engineSendText.mock.calls[0][0].text).toContain('te ayuda un asesor. Le aviso')
+  })
+
+  it('Golden conserva su catálogo y sus textos', async () => {
+    h.state.account = { name: 'Golden Habitat', brand_name: null }
+    h.generateReply.mockResolvedValue({ text: 'x', handoff: true })
+    await dispatchInboundToAiReply(ARGS_GOLDEN)
+    expect(h.catalogoDeGolden).toHaveBeenCalledTimes(1)
+    const { systemPrompt } = h.generateReply.mock.calls[0][0] as { systemPrompt: string }
+    expect(systemPrompt).toContain('YA ES CLIENTE de Golden:')
+    expect(systemPrompt).toContain('pásalo a cobranzas')
+    expect(systemPrompt).toContain('Puede entrar a la Golden App')
+    expect(h.engineSendText.mock.calls[0][0].text).toBe(
+      'Con esto mejor te ayuda un asesor de Golden Habitat. Le aviso ahora mismo y te escribe en un momento. 🙌',
+    )
   })
 })
 
