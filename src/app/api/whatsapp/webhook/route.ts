@@ -19,6 +19,7 @@ import {
 import { actualizarConversacion } from '@/lib/channels'
 import { transcribirAudioDeWhatsApp } from '@/lib/ai/transcribir'
 import { atenderEquipo } from '@/lib/asistentes-whatsapp/equipo'
+import { isOptOutMessage } from '@/lib/whatsapp/opt-out'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -95,6 +96,7 @@ interface WhatsAppWebhookEntry {
         status: string
         timestamp: string
         recipient_id: string
+        errors?: StatusError[]
       }>
     }
     field: string
@@ -228,6 +230,20 @@ export async function POST(request: Request) {
   })
 
   return NextResponse.json({ status: 'received' }, { status: 200 })
+}
+
+interface StatusError {
+  code?: number
+  title?: string
+  message?: string
+  error_data?: { details?: string }
+}
+
+function statusErrorText(errors: StatusError[] | undefined): string {
+  const first = errors?.[0]
+  if (!first) return 'Meta no entregó el mensaje'
+  const text = first.error_data?.details || first.message || first.title || 'Meta no entregó el mensaje'
+  return first.code ? `${text} (${first.code})` : text
 }
 
 async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
@@ -382,6 +398,7 @@ async function handleStatusUpdate(status: {
   status: string
   timestamp: string
   recipient_id: string
+  errors?: StatusError[]
 }) {
   // 1) Mirror onto messages (legacy behavior) — Meta's status values
   //    already match the CHECK constraint on messages.status. No
@@ -425,6 +442,10 @@ async function handleStatusUpdate(status: {
     if (status.status === 'sent' && !('sent_at' in update)) update.sent_at = tsIso
     if (status.status === 'delivered') update.delivered_at = tsIso
     if (status.status === 'read') update.read_at = tsIso
+    // Why Meta dropped it (e.g. 131049, 132015), or clear the "held" note
+    // the dispatcher leaves on a message Meta later delivered.
+    if (status.status === 'failed') update.error_message = statusErrorText(status.errors)
+    if (status.status === 'delivered' || status.status === 'read') update.error_message = null
 
     const { error: recUpdateErr } = await supabaseAdmin()
       .from('broadcast_recipients')
@@ -655,6 +676,18 @@ async function processMessage(
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
     await parseMessageContent(message, accessToken)
+
+  // "BAJA": this person leaves every future broadcast of this account.
+  // Side-channel: a failure here is logged, never blocks the inbound flow.
+  if (isOptOutMessage(contentText)) {
+    const { error: optOutError } = await supabaseAdmin()
+      .from('do_not_call')
+      .upsert(
+        { account_id: accountId, phone_normalized: senderPhone, source: 'whatsapp_baja' },
+        { onConflict: 'account_id,phone_normalized', ignoreDuplicates: true }
+      )
+    if (optOutError) console.error('Error saving WhatsApp opt-out:', optOutError)
+  }
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
