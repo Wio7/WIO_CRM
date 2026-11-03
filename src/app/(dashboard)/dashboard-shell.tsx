@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
+import { InstallAppHint } from "@/components/layout/install-app-hint";
 import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -84,6 +85,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
         {/* Thinner horizontal padding on mobile so cards have room to breathe. */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <InstallAppHint />
           {moduleOff ? (
             <div className="mx-auto mt-16 max-w-sm text-center space-y-2">
               <Lock className="mx-auto h-8 w-8 text-muted-foreground" />
