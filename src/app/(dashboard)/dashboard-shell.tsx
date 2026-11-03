@@ -9,6 +9,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 import { InstallAppHint } from "@/components/layout/install-app-hint";
+import { BrandedHomeScreen } from "@/components/layout/branded-home-screen";
 import { Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -74,18 +75,20 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   }
 
   const moduleOff = isModuleDisabled(pathname, account?.disabled_modules);
+  const brand = resolveAccountBrand(account);
 
   return (
     <div className="platform-dashboard flex h-screen overflow-hidden bg-background">
       {/* Reports this tab's online/away presence once we know a user is
           signed in. Headless — renders nothing. */}
       <PresenceHeartbeat />
+      {brand.custom && <BrandedHomeScreen name={brand.name} logo={brand.logo} />}
       <Sidebar open={sidebarOpen} onClose={closeSidebar} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
         {/* Thinner horizontal padding on mobile so cards have room to breathe. */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <InstallAppHint />
+          <InstallAppHint appName={brand.name} />
           {moduleOff ? (
             <div className="mx-auto mt-16 max-w-sm text-center space-y-2">
               <Lock className="mx-auto h-8 w-8 text-muted-foreground" />
