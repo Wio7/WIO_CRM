@@ -14,7 +14,7 @@ const STEPS = [
   "Toca el botón ••• (o el ícono Compartir, el cuadrado con la flecha hacia arriba).",
   "Toca Compartir y después Agregar a pantalla de inicio (puede decir Agregar a inicio).",
   "Deja activado Abrir como app web y toca Agregar.",
-  "Abre el CRM desde el nuevo ícono de tu pantalla de inicio.",
+  "Entra siempre desde el nuevo ícono de tu pantalla de inicio.",
 ];
 
 function readShouldShow(): boolean {
@@ -41,7 +41,7 @@ function readShouldShow(): boolean {
 const noSubscription = () => () => {};
 
 /** Banner with the iPhone install steps; renders nothing elsewhere. */
-export function InstallAppHint() {
+export function InstallAppHint({ appName }: { appName: string }) {
   // false on the server, so the server HTML and hydration always agree.
   const eligible = useSyncExternalStore(noSubscription, readShouldShow, () => false);
   const [dismissed, setDismissed] = useState(false);
@@ -63,7 +63,7 @@ export function InstallAppHint() {
       <div className="flex items-start gap-3">
         <Smartphone className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-foreground">Instala el CRM en tu iPhone</p>
+          <p className="font-medium text-foreground">Instala {appName} en tu iPhone</p>
           <p className="text-xs text-muted-foreground">
             Queda como una app en tu pantalla de inicio y se abre a pantalla completa.
           </p>
