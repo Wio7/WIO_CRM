@@ -27,7 +27,7 @@ import { generateReply } from './generate'
 import { buildSystemPrompt } from './defaults'
 import { diasLibres, equipoQuePuedeAgendar } from '@/lib/agenda/slots'
 import { agendaEnTexto } from '@/lib/agenda/reservar'
-import { catalogoDeGolden, catalogoEnTexto, sinCatalogoPegado } from '@/lib/golden/catalogo'
+import { catalogoDeGolden, catalogoEnTexto, esCuentaDeGolden, sinCatalogoPegado } from '@/lib/golden/catalogo'
 import { engineSendText } from '@/lib/flows/meta-send'
 import { notifyConversation } from '@/lib/push/send'
 
@@ -247,7 +247,7 @@ async function redactarToque(
     }
   }
 
-  const catalogo = await catalogoDeGolden()
+  const catalogo = esCuentaDeGolden(args.accountId) ? await catalogoDeGolden() : null
   const instrucciones = catalogo ? sinCatalogoPegado(args.config.systemPrompt) : args.config.systemPrompt
 
   const { text } = await generateReply({

@@ -9,7 +9,7 @@ import { engineSendText } from '@/lib/flows/meta-send'
 import { notifyConversation } from '@/lib/push/send'
 import { diasLibres, equipoQuePuedeAgendar } from '@/lib/agenda/slots'
 import { agendaEnTexto, esTipoDeCita, reservarCita } from '@/lib/agenda/reservar'
-import { catalogoDeGolden, catalogoEnTexto, sinCatalogoPegado } from '@/lib/golden/catalogo'
+import { catalogoDeGolden, catalogoEnTexto, esCuentaDeGolden, sinCatalogoPegado } from '@/lib/golden/catalogo'
 
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
@@ -98,7 +98,11 @@ export async function dispatchInboundToAiReply(
     if (messages.length === 0) return
 
     // Con quién está hablando: si ya compró, la conversación es otra.
-    const ficha = await fichaDelContacto(db, contactId)
+    const ficha = await fichaDelContacto(db, contactId, {
+      esGolden: esCuentaDeGolden(accountId),
+      marca: modo.marca,
+      portalDeClientes: modo.portalDeClientes,
+    })
 
     // Ground the reply in the account's knowledge base (best-effort).
     const knowledge = await retrieveKnowledge(
@@ -114,7 +118,7 @@ export async function dispatchInboundToAiReply(
 
     // Y el catálogo de verdad, leído de la app donde el equipo sube las
     // casas, los lotes y los departamentos.
-    const catalogo = await catalogoDeGolden()
+    const catalogo = esCuentaDeGolden(accountId) ? await catalogoDeGolden() : null
     const instrucciones = catalogo ? sinCatalogoPegado(config.systemPrompt) : config.systemPrompt
 
     const systemPrompt = buildSystemPrompt({
@@ -175,6 +179,7 @@ export async function dispatchInboundToAiReply(
         conversationId,
         contactId,
         configOwnerUserId,
+        marca: modo.marca,
       })
       return
     }
@@ -200,6 +205,7 @@ export async function dispatchInboundToAiReply(
           conversationId,
           contactId,
           configOwnerUserId,
+          marca: modo.marca,
         })
         return
       }
@@ -240,6 +246,7 @@ export async function dispatchInboundToAiReply(
 async function fichaDelContacto(
   db: ReturnType<typeof supabaseAdmin>,
   contactId: string,
+  cuenta: { esGolden: boolean; marca: string | null; portalDeClientes: boolean },
 ): Promise<string> {
   const { data: contacto } = await db
     .from('contacts')
@@ -261,19 +268,25 @@ async function fichaDelContacto(
   if (saldo) {
     const moneda = saldo.currency === 'PEN' ? 'S/' : String(saldo.currency ?? '')
     partes.push(
-      `- YA ES CLIENTE de Golden: tiene un plan de cuotas. Le quedan ${moneda} ${Number(saldo.pending_amount ?? 0).toFixed(2)} por pagar` +
+      `- YA ES CLIENTE${cuenta.esGolden ? ' de Golden' : cuenta.marca ? ` de ${cuenta.marca}` : ''}: tiene un plan de cuotas. Le quedan ${moneda} ${Number(saldo.pending_amount ?? 0).toFixed(2)} por pagar` +
         `${Number(saldo.overdue_count ?? 0) > 0 ? `, con ${saldo.overdue_count} cuota(s) atrasada(s)` : ''}` +
         `${saldo.next_due_date ? `, y su próxima cuota vence el ${saldo.next_due_date}` : ''}.`,
-      '- No le ofrezcas comprar: ayúdalo con su cuota, su voucher o su documento, y si pide detalles de su caso pásalo a cobranzas.',
+      cuenta.esGolden
+        ? '- No le ofrezcas comprar: ayúdalo con su cuota, su voucher o su documento, y si pide detalles de su caso pásalo a cobranzas.'
+        : '- No le ofrezcas comprar: ayúdalo con su cuota o su documento, y si pide detalles de su caso pásalo a un asesor.',
     )
   } else {
     partes.push(
-      '- TODAVÍA NO ES CLIENTE: es alguien interesado. Averigua qué busca (lote, casa o departamento, zona y presupuesto) y llévalo a agendar una cita con un asesor, por videollamada o presencial.',
+      cuenta.esGolden
+        ? '- TODAVÍA NO ES CLIENTE: es alguien interesado. Averigua qué busca (lote, casa o departamento, zona y presupuesto) y llévalo a agendar una cita con un asesor, por videollamada o presencial.'
+        : '- TODAVÍA NO ES CLIENTE: es alguien interesado. Averigua qué busca y llévalo a dejar su nombre y su mejor horario para que un asesor lo contacte.',
       '- Si te pide una hora concreta, no la confirmes tú: pídele su nombre y en qué horario le queda bien, dile que un asesor se lo confirma, y pasa la conversación.',
     )
   }
-  if (contacto.dni) {
+  if (contacto.dni && cuenta.esGolden) {
     partes.push('- Puede entrar a la Golden App con su celular y su DNI, sin contraseña.');
+  } else if (contacto.dni && cuenta.portalDeClientes) {
+    partes.push('- Puede entrar a la app de clientes con su celular y su DNI, sin contraseña.');
   }
   return partes.join('\n')
 }
@@ -287,16 +300,18 @@ async function fichaDelContacto(
 async function modoDeLaCuenta(
   db: ReturnType<typeof supabaseAdmin>,
   accountId: string,
-): Promise<{ agenda: boolean; soloElBoton: boolean }> {
+): Promise<{ agenda: boolean; soloElBoton: boolean; marca: string | null; portalDeClientes: boolean }> {
   const { data, error } = await db
     .from('accounts')
-    .select('ai_books_appointments, ai_stops_only_on_button')
+    .select('name, brand_name, client_portal_enabled, ai_books_appointments, ai_stops_only_on_button')
     .eq('id', accountId)
     .maybeSingle()
-  if (error || !data) return { agenda: false, soloElBoton: false }
+  if (error || !data) return { agenda: false, soloElBoton: false, marca: null, portalDeClientes: false }
   return {
     agenda: Boolean(data.ai_books_appointments),
     soloElBoton: Boolean(data.ai_stops_only_on_button),
+    marca: ((data.brand_name as string | null) ?? '').trim() || ((data.name as string | null) ?? '').trim() || null,
+    portalDeClientes: Boolean(data.client_portal_enabled),
   }
 }
 
@@ -355,7 +370,7 @@ async function avisarAlAsesor(
  */
 async function avisarQueSigueUnHumano(
   db: ReturnType<typeof supabaseAdmin>,
-  args: { accountId: string; conversationId: string; contactId: string; configOwnerUserId: string },
+  args: { accountId: string; conversationId: string; contactId: string; configOwnerUserId: string; marca: string | null },
 ): Promise<void> {
   const { data: conv } = await db
     .from('conversations')
@@ -369,7 +384,7 @@ async function avisarQueSigueUnHumano(
       userId: args.configOwnerUserId,
       conversationId: args.conversationId,
       contactId: args.contactId,
-      text: 'Con esto mejor te ayuda un asesor de Golden Habitat. Le aviso ahora mismo y te escribe en un momento. 🙌',
+      text: `Con esto mejor te ayuda un asesor${args.marca ? ` de ${args.marca}` : ''}. Le aviso ahora mismo y te escribe en un momento. 🙌`,
     })
   } catch (err) {
     console.error('[ai auto-reply] no se pudo avisar al cliente del traspaso:', err)

@@ -22,6 +22,13 @@
 // puede significar quedarse sin contestar.
 // ============================================================
 
+/** La única cuenta que vende este catálogo. A las demás no debe llegarles. */
+const CUENTA_DE_GOLDEN = 'd74b5dfd-2999-4e2c-9a0e-10b3d540898b';
+
+export function esCuentaDeGolden(accountId: string): boolean {
+  return accountId === CUENTA_DE_GOLDEN;
+}
+
 /** Cuánto se reutiliza lo leído. Un chat no necesita el dato al segundo. */
 const VIGENCIA_MS = 10 * 60_000;
 
