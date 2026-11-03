@@ -22,7 +22,8 @@ import {
   Lock,
   Loader2,
   X,
-  UserPlus
+  UserPlus,
+  LayoutList
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SaasInviteDialog } from "@/components/saas-owner/saas-invite-dialog";
+import { AccountModulesDialog } from "@/components/saas-owner/account-modules-dialog";
 import { groupAccountsByBusiness } from "@/lib/saas-account-groups";
 
 interface Account {
@@ -44,6 +46,7 @@ interface Account {
   status: string;
   created_at: string;
   default_currency: string;
+  disabled_modules?: string[] | null;
 }
 
 export default function SaasOwnerPage() {
@@ -57,6 +60,7 @@ export default function SaasOwnerPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [enteringId, setEnteringId] = useState<string | null>(null);
   const [inviteTarget, setInviteTarget] = useState<Account | null>(null);
+  const [modulesTarget, setModulesTarget] = useState<Account | null>(null);
 
   // Invitation / Account Creation modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -91,7 +95,7 @@ export default function SaasOwnerPage() {
       setLoading(true);
       const { data, error } = await supabase
         .from("accounts")
-        .select("id, name, status, created_at, default_currency")
+        .select("id, name, status, created_at, default_currency, disabled_modules")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -442,6 +446,16 @@ export default function SaasOwnerPage() {
                           <UserPlus className="h-4 w-4" />
                         </Button>
 
+                        {/* Sections this account sees */}
+                        <Button
+                          onClick={() => setModulesTarget(account)}
+                          variant="ghost"
+                          className="h-9 w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+                          title="Secciones que ve esta cuenta"
+                        >
+                          <LayoutList className="h-4 w-4" />
+                        </Button>
+
                         {/* Toggle Status Button */}
                         <Button
                           onClick={() => handleToggleStatus(account)}
@@ -600,6 +614,22 @@ export default function SaasOwnerPage() {
       </Dialog>
 
       {/* Invite Modal */}
+      {modulesTarget && (
+        <AccountModulesDialog
+          key={modulesTarget.id}
+          open={!!modulesTarget}
+          onOpenChange={(open) => !open && setModulesTarget(null)}
+          accountId={modulesTarget.id}
+          accountName={modulesTarget.name}
+          disabledModules={modulesTarget.disabled_modules ?? []}
+          onSaved={(next) =>
+            setAccounts((prev) =>
+              prev.map((acc) => (acc.id === modulesTarget.id ? { ...acc, disabled_modules: next } : acc)),
+            )
+          }
+        />
+      )}
+
       {inviteTarget && (
         <SaasInviteDialog
           open={!!inviteTarget}
