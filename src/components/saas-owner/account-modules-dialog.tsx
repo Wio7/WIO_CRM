@@ -85,7 +85,7 @@ export function AccountModulesDialog({
             variant="outline"
             onClick={() => setOff(new Set(SIMPLE_VIEW_MODULES))}
           >
-            Vista simple: campañas
+            Vista simple: campañas y proyectos
           </Button>
           <Button size="sm" variant="outline" onClick={() => setOff(new Set())}>
             Mostrar todo

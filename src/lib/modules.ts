@@ -36,10 +36,10 @@ export const MODULE_OPTIONS: ReadonlyArray<{ href: string; label: string }> = [
 ];
 
 /**
- * "Vista simple": solo bandeja, contactos y difusiones, para quien usa el
+ * "Vista simple": solo bandeja, contactos, proyectos y difusiones, para quien usa el
  * CRM para mandar campañas (Broker Home). Todo lo demás queda apagado.
  */
-const SIMPLE_KEEP = new Set(["/inbox", "/contacts", "/broadcasts"]);
+const SIMPLE_KEEP = new Set(["/inbox", "/contacts", "/projects", "/broadcasts"]);
 export const SIMPLE_VIEW_MODULES: readonly string[] = MODULE_OPTIONS.map((m) => m.href).filter(
   (href) => !SIMPLE_KEEP.has(href),
 );

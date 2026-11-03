@@ -129,7 +129,7 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { profile, profileLoading, account, accountRole, signOut, isSuperAdmin } = useAuth();
+  const { profile, profileLoading, account, accountRole, signOut, isSuperAdmin, isVisiting } = useAuth();
   const totalUnread = useTotalUnread();
   const brand = resolveAccountBrand(account);
   const unreadNotifications = useUnreadNotifications();
@@ -223,7 +223,9 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {(isSuperAdmin
+            {/* Inside a client account the admin sees exactly what the client
+                sees; the yellow banner's Salir is the way back to Cuentas. */}
+            {(isSuperAdmin && !isVisiting
               ? [navItems[0], { href: "/saas-owner", label: "Cuentas", icon: Building2 }, ...navItems.slice(1)]
               : navItems
             )
