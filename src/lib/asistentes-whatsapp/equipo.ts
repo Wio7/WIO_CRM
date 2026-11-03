@@ -27,7 +27,14 @@ import { conversar, responder, ErrorAsistente } from "@/lib/assistant/run";
 import { transcribirAudioDeWhatsApp } from "@/lib/ai/transcribir";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { normalizePhone } from "@/lib/whatsapp/phone-utils";
-import { sendInteractiveButtons, sendTextMessage } from "@/lib/whatsapp/meta-api";
+import { sendInteractiveButtons, sendMediaMessage, sendTextMessage } from "@/lib/whatsapp/meta-api";
+import { sendMessageToConversation } from "@/lib/whatsapp/send-message";
+import {
+  ventanaDelCliente,
+  type AdjuntoMaterial,
+  type ComandoDeEnvio,
+  type EnvioPropuesto,
+} from "@/lib/assistant/material";
 
 import { comoLaPersona, ejecutorCaja, herramientasCaja, instruccionesCaja, type ContextoCaja } from "./caja";
 import { HERRAMIENTAS_LEGAL, ejecutorLegal, fotoLegal, instruccionesLegal, saludoLegal } from "./legal";
@@ -41,6 +48,7 @@ import {
   recortar,
   resumenDelDia,
   textoDelBorrador,
+  textoDelEnvio,
   type Borrador,
   type Modo,
   type VistaDelDia,
@@ -326,7 +334,7 @@ class Turno {
     }
     if (modo === "app") {
       await this.enviar(
-        `${MODOS.app.marca}\nHola, ${nombre}. Soy el Asistente Golden: tus clientes, la agenda, el catálogo y el equipo. ¿Qué necesitas?`,
+        `${MODOS.app.marca}\nHola, ${nombre}. Soy el Asistente Golden: tus clientes, la agenda, el catálogo, las ventas y el rendimiento del equipo, quién está conectado y la combi. También te mando brochures y videos, o se los envío a un cliente si me confirmas. ¿Qué necesitas?`,
       );
       return;
     }
@@ -342,9 +350,11 @@ class Turno {
   private async preguntar(modo: Modo, pregunta: string) {
     let respuesta: string;
     let propuesta: ReturnType<ReturnType<typeof ejecutorCaja>["propuesta"]> = null;
+    let adjuntos: AdjuntoMaterial[] = [];
+    let envios: EnvioPropuesto[] = [];
     try {
       if (modo === "app") {
-        respuesta = await this.preguntarApp(pregunta);
+        ({ texto: respuesta, adjuntos, envios } = await this.preguntarApp(pregunta));
       } else {
         const historial = await this.hilo(modo);
         if (modo === "caja") {
@@ -384,6 +394,9 @@ class Turno {
 
     await this.enviar(`${MODOS[modo].marca}\n${aWhatsApp(respuesta)}`);
 
+    for (const adjunto of adjuntos) await this.enviarAdjunto(adjunto);
+    for (const envio of envios) await this.pedirConfirmacionDeEnvio(envio);
+
     if (propuesta) {
       await sendInteractiveButtons({
         phoneNumberId: this.e.phoneNumberId,
@@ -404,7 +417,7 @@ class Turno {
    * El Asistente Golden de siempre, con la sesión de la persona. Su hilo es
    * el mismo de la app (assistant_messages): lo que hable aquí lo ve allá.
    */
-  private async preguntarApp(pregunta: string): Promise<string> {
+  private async preguntarApp(pregunta: string) {
     const db = await clienteDeLaPersona(this.persona.userId);
     const { data: perfil } = await db
       .from("profiles")
@@ -419,6 +432,7 @@ class Turno {
       rol: perfil.account_role as string,
       area: (perfil.area as string | null) ?? null,
       nombre: this.persona.nombre,
+      canal: "whatsapp" as const,
     };
 
     let consulta = db
@@ -430,7 +444,7 @@ class Turno {
     if (this.sesion.session_started_at) consulta = consulta.gte("created_at", this.sesion.session_started_at);
     const { data: previos } = await consulta;
 
-    const { texto, acciones } = await responder(
+    const { texto, acciones, adjuntos = [], envios = [] } = await responder(
       ctx,
       ((previos ?? []) as { role: "user" | "assistant"; content: string }[]).reverse(),
       pregunta,
@@ -439,7 +453,156 @@ class Turno {
       { account_id: ctx.accountId, user_id: ctx.userId, role: "user", content: pregunta },
       { account_id: ctx.accountId, user_id: ctx.userId, role: "assistant", content: texto, actions: acciones.length ? acciones : null },
     ]);
-    return texto;
+    return { texto, adjuntos, envios };
+  }
+
+  /** El material que pidió para sí mismo. Lo que pesa de más va como enlace. */
+  private async enviarAdjunto(a: AdjuntoMaterial) {
+    if (a.comoEnlace) {
+      await this.enviar(`${a.etiqueta}: ${a.url}`);
+      return;
+    }
+    try {
+      await sendMediaMessage({
+        phoneNumberId: this.e.phoneNumberId,
+        accessToken: this.e.accessToken,
+        to: this.e.mensaje.from,
+        kind: a.kind,
+        link: a.url,
+        caption: a.etiqueta,
+        filename: a.kind === "document" ? a.nombre : undefined,
+      });
+    } catch (err) {
+      console.error("[equipo] no se pudo enviar el archivo:", err);
+      await this.enviar(`No pude enviar ${a.etiqueta}. Aquí está el enlace: ${a.url}`);
+    }
+  }
+
+  /** La tarjeta del envío a un cliente: nada sale hasta que toque el botón. */
+  private async pedirConfirmacionDeEnvio(envio: EnvioPropuesto) {
+    await sendInteractiveButtons({
+      phoneNumberId: this.e.phoneNumberId,
+      accessToken: this.e.accessToken,
+      to: this.e.mensaje.from,
+      bodyText: recortar(textoDelEnvio(envio), 1024),
+      footerText: "El borrador vence en 10 minutos",
+      buttons: [
+        { id: `envio:si:${envio.id}`, title: "✅ Sí, enviar" },
+        { id: `envio:cancelar:${envio.id}`, title: "❌ Cancelar" },
+      ],
+    });
+  }
+
+  /**
+   * Sólo un toque en "Sí, enviar" le manda algo a un cliente. El borrador se
+   * reserva ANTES de enviar: un doble toque o un reintento de Meta llegan a
+   * un borrador que ya no está pendiente y no mandan nada otra vez.
+   */
+  private async decidirEnvio(accion: "si" | "cancelar", borradorId: string) {
+    const marca = MODOS.app.marca;
+    const { data: d } = await this.db
+      .from("whatsapp_team_drafts")
+      .select("id, account_id, command, summary, status, expires_at")
+      .eq("id", borradorId)
+      .eq("user_id", this.persona.userId)
+      .maybeSingle();
+    const comando = d?.command as ComandoDeEnvio | undefined;
+    if (!d || comando?.tipo !== "envio_cliente") {
+      await this.enviar(`${marca}\nNo encontré ese envío.`);
+      return;
+    }
+    if (d.status === "saved") {
+      await this.enviar(`${marca}\nEse envío ya salió.`);
+      return;
+    }
+    if (d.status !== "pending") {
+      await this.enviar(`${marca}\nEse envío ya no está activo. Si quieres mandarlo, dímelo de nuevo.`);
+      return;
+    }
+
+    const propuesta = JSON.parse(d.summary as string) as Omit<EnvioPropuesto, "id">;
+    const cerrar = (status: "saved" | "cancelled" | "failed", antes: "pending" | "saved" = "pending", resultId?: string) =>
+      this.db
+        .from("whatsapp_team_drafts")
+        .update({ status, result_id: resultId ?? null, decided_at: new Date().toISOString() })
+        .eq("id", d.id)
+        .eq("status", antes)
+        .select("id");
+
+    if (accion === "cancelar") {
+      await cerrar("cancelled");
+      await this.enviar(`${marca}\nCancelado. No le envié nada a ${propuesta.cliente}.`);
+      return;
+    }
+    if (new Date(d.expires_at as string).getTime() < Date.now()) {
+      await cerrar("cancelled");
+      await this.enviar(`${marca}\nEse envío venció (duran 10 minutos). Dímelo de nuevo y lo vuelvo a armar.`);
+      return;
+    }
+
+    const db = await clienteDeLaPersona(this.persona.userId);
+    const { abierta } = await ventanaDelCliente(db, comando.conversacionId, comando.canal);
+    if (!abierta) {
+      await cerrar("cancelled");
+      await this.enviar(`${marca}\nNo se envió: pasaron más de 24 h desde el último mensaje de ${propuesta.cliente} y WhatsApp ya no deja escribirle sin una plantilla.`);
+      return;
+    }
+
+    const { data: reservado } = await cerrar("saved");
+    if (!reservado?.length) {
+      await this.enviar(`${marca}\nEse envío ya salió.`);
+      return;
+    }
+
+    const salieron: string[] = [];
+    let primerMensaje: string | undefined;
+    let textoPendiente = comando.mensaje;
+    for (const a of comando.adjuntos) {
+      try {
+        const { messageId } = await sendMessageToConversation(
+          db,
+          d.account_id as string,
+          a.comoEnlace
+            ? {
+                conversationId: comando.conversacionId,
+                messageType: "text",
+                contentText: `${textoPendiente ? `${textoPendiente}\n\n` : ""}${a.etiqueta}: ${a.url}`,
+              }
+            : {
+                conversationId: comando.conversacionId,
+                messageType: a.kind,
+                mediaUrl: a.url,
+                filename: a.kind === "document" ? a.nombre : null,
+                contentText: textoPendiente,
+              },
+        );
+        primerMensaje ??= messageId;
+        textoPendiente = null;
+        salieron.push(a.etiqueta);
+      } catch (err) {
+        const motivo = err instanceof Error ? err.message : "Error desconocido";
+        console.error("[equipo] no se pudo enviar al cliente:", err);
+        await cerrar("failed", "saved");
+        const faltan = propuesta.etiquetas.filter((e) => !salieron.includes(e));
+        const resumen = salieron.length ? `Salió: ${salieron.join(", ")}. ` : "";
+        await this.recordarEnApp(d.account_id as string, `(Envío a ${propuesta.cliente} incompleto. ${resumen}No salió: ${faltan.join(", ")}.)`);
+        await this.enviar(`${marca}\n${resumen}No salió: ${faltan.join(", ")}. ${motivo}`);
+        return;
+      }
+    }
+
+    await cerrar("saved", "saved", primerMensaje);
+    await this.recordarEnApp(d.account_id as string, `(Enviado a ${propuesta.cliente}: ${salieron.join(", ")}.)`);
+    await this.enviar(`${marca}\nListo, se lo envié a ${propuesta.cliente}: ${salieron.join(", ")}.`);
+  }
+
+  /** Que el asistente recuerde lo que salió por un botón, fuera de su vuelta. */
+  private async recordarEnApp(accountId: string, content: string) {
+    const db = await clienteDeLaPersona(this.persona.userId);
+    const { error } = await db
+      .from("assistant_messages")
+      .insert({ account_id: accountId, user_id: this.persona.userId, role: "assistant", content });
+    if (error) console.error("[equipo] no se guardó en el hilo:", error.message);
   }
 
   /** El hilo del modo desde que empezó esta conversación. */
@@ -468,6 +631,8 @@ class Turno {
       if (id === "app:asistente") return this.elegir("app");
       if (id === "app:cliente") return this.pasarACliente();
     }
+    const envio = id.match(/^envio:(si|cancelar):([0-9a-f-]{36})$/);
+    if (envio && this.persona.modos.includes("app")) return this.decidirEnvio(envio[1] as "si" | "cancelar", envio[2]);
     const m = id.match(/^caja:(si|corregir|cancelar):([0-9a-f-]{36})$/);
     if (m) return this.decidirBorrador(m[1] as "si" | "corregir" | "cancelar", m[2]);
     return this.abrir();
@@ -483,7 +648,8 @@ class Turno {
       .eq("user_id", this.persona.userId)
       .eq("account_id", this.persona.accountId)
       .maybeSingle();
-    if (!d) {
+    // La misma tabla guarda los envíos a clientes (decidirEnvio): esos no son plata.
+    if (!d || (d.command as { tipo?: string }).tipo === "envio_cliente") {
       await this.enviar(`${marca}\nNo encontré ese borrador.`);
       return;
     }

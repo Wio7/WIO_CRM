@@ -12,6 +12,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadAiConfig } from "@/lib/ai/config";
 import { AI_PROVIDER_DEFAULT_MODEL } from "@/lib/ai/defaults";
+import type { AdjuntoMaterial, EnvioPropuesto } from "./material";
 import { HERRAMIENTAS, ejecutarHerramienta, type Accion, type ContextoAsistente } from "./tools";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
@@ -84,6 +85,19 @@ function instrucciones(ctx: ContextoAsistente): string {
     "- Si quedan menos de un par de horas de ventana de 24 h, dilo en una línea al final: pasado ese plazo hará falta una plantilla.",
     "- Responde corto y fácil de leer en un celular: frases breves, listas con '- ' cuando haya varias cosas, montos con su moneda (S/ para soles). Usa **negrita** sólo para lo importante.",
     "- Si una herramienta dice que falta una migración, explícalo en una línea y sigue con lo que sí se pueda.",
+    "Enviar material (`enviar_material`):",
+    "- Si piden un brochure, un video o una foto de un proyecto, usa la herramienta; no digas que sólo puedes mandar texto.",
+    "- Los archivos salen solos después de tu respuesta: no pegues enlaces ni digas que ya se enviaron antes de usar la herramienta. Si te devuelve `enlaces`, ahí sí dalos.",
+    "- A un cliente nunca le llega nada hasta que quien pregunta toque el botón *Sí, enviar*. Nunca digas que se lo enviaste; di que revise la tarjeta y toque el botón.",
+    "- Si dice `ventana_cerrada` o `sin_conversacion`, explícalo en una línea: hace falta una plantilla aprobada por Meta.",
+    "El equipo (`rendimiento_del_equipo`, `quien_esta_activo`):",
+    "- El mejor rendimiento se mide por VENTAS: primero cuántas, luego el importe. Una venta es una separación de lote aprobada cuyo lote sigue tomado, o una reserva aprobada. El índice de actividad sólo dice cuánto se movió alguien: nunca lo presentes como quién rinde mejor.",
+    "- Si `mejor_vendedor` es null, no nombres a nadie como el mejor y explica por qué en una línea: `ventas_no_disponibles`, o que nadie vendió en el periodo.",
+    "- Si hay `sin_coincidir`, dilo: son ventas con un nombre escrito a mano que no se pudo atribuir a nadie, y podrían cambiar el ranking.",
+    "- Los mensajes se cuentan a quien tiene hoy el chat, y `mensajes` en null significa que no se sabe, no que sean cero.",
+    "- Para un asesor concreto ('¿cómo va Golden 1?', '¿cuántos mensajes le llegaron a Sara?') pasa su nombre en `asesor`.",
+    "La combi (`combi_del_dia`):",
+    "- Distingue las salidas creadas de `programados_sin_pasajeros`. Si `horarios_provisionales` es true, aclara que esos horarios fijos todavía son provisionales.",
   ].join("\n");
 }
 
@@ -125,8 +139,10 @@ export async function responder(
   ctx: ContextoAsistente,
   historial: { role: "user" | "assistant"; content: string }[],
   pregunta: string,
-): Promise<{ texto: string; acciones: Accion[] }> {
+): Promise<{ texto: string; acciones: Accion[]; adjuntos: AdjuntoMaterial[]; envios: EnvioPropuesto[] }> {
   const acciones: Accion[] = [];
+  const adjuntos: AdjuntoMaterial[] = [];
+  const envios: EnvioPropuesto[] = [];
   const texto = await conversar({
     db: ctx.db,
     accountId: ctx.accountId,
@@ -135,12 +151,14 @@ export async function responder(
     ejecutar: async (nombre, argumentos) => {
       const r = await ejecutarHerramienta(ctx, nombre, argumentos);
       if (r.accion) acciones.push(r.accion);
+      if (r.adjuntos) adjuntos.push(...r.adjuntos);
+      if (r.envio) envios.push(r.envio);
       return r.datos;
     },
     historial,
     pregunta,
   });
-  return { texto, acciones };
+  return { texto, acciones, adjuntos, envios };
 }
 
 /**

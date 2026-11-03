@@ -51,9 +51,11 @@ function consulta(tabla: string) {
     },
     maybeSingle: async () => ({ data: filas()[0] ?? null, error: null }),
     then: (resolver: (v: unknown) => void) => {
-      if (operacion === "update") filas().forEach((f) => Object.assign(f, cambios));
-      if (operacion === "delete") tablas[tabla] = (tablas[tabla] ?? []).filter((f) => !filas().includes(f));
-      resolver({ data: filas().slice(0, limite), error: null });
+      // Como en PostgreSQL: un update devuelve las filas que cumplían el filtro antes de cambiar.
+      const tocadas = filas();
+      if (operacion === "update") tocadas.forEach((f) => Object.assign(f, cambios));
+      if (operacion === "delete") tablas[tabla] = (tablas[tabla] ?? []).filter((f) => !tocadas.includes(f));
+      resolver({ data: tocadas.slice(0, limite), error: null });
     },
   };
   return q;
@@ -64,7 +66,12 @@ const sendTextMessage = vi.fn<(a: { text: string }) => Promise<{ messageId: stri
 const sendInteractiveButtons = vi.fn<(a: { buttons: { id: string }[] }) => Promise<{ messageId: string }>>(async () => ({
   messageId: "out",
 }));
-vi.mock("@/lib/whatsapp/meta-api", () => ({ sendTextMessage, sendInteractiveButtons }));
+const sendMediaMessage = vi.fn<(a: Record<string, unknown>) => Promise<{ messageId: string }>>(async () => ({ messageId: "out" }));
+vi.mock("@/lib/whatsapp/meta-api", () => ({ sendTextMessage, sendInteractiveButtons, sendMediaMessage }));
+const sendMessageToConversation = vi.fn<
+  (db: unknown, cuenta: string, p: Record<string, unknown>) => Promise<{ messageId: string; whatsappMessageId: string }>
+>(async () => ({ messageId: "00000000-0000-0000-0000-0000000000aa", whatsappMessageId: "wamid.x" }));
+vi.mock("@/lib/whatsapp/send-message", () => ({ sendMessageToConversation }));
 const transcribirAudioDeWhatsApp = vi.fn(async () => "gasto de 120 soles en gas para el restaurante por yape");
 vi.mock("@/lib/ai/transcribir", () => ({ transcribirAudioDeWhatsApp }));
 const conversar = vi.fn();
@@ -300,6 +307,168 @@ describe("el equipo en el número de WhatsApp", () => {
     await escribe({ text: { body: "hola" } });
     expect(sendInteractiveButtons).not.toHaveBeenCalled();
     expect(textos()[0]).toContain("Hola, Lucero. Esto es lo que pasó hoy");
+  });
+
+  describe("el material de los proyectos", () => {
+    const DRAFT = "00000000-0000-0000-0000-0000000000d1";
+    const CONV = "00000000-0000-0000-0000-0000000000c1";
+    const brochure = {
+      tipo: "brochure", kind: "document", url: "https://golden.test/b.pdf",
+      nombre: "Brochure Casa Jade.pdf", etiqueta: "Brochure de Casa Jade", comoEnlace: false,
+    };
+    const video = {
+      tipo: "video", kind: "video", url: "https://golden.test/v.mp4",
+      nombre: "Video Casa Jade.mp4", etiqueta: "Video de Casa Jade", comoEnlace: false,
+    };
+    const enlace = { ...video, url: "https://golden.test/r.mp4", etiqueta: "Video de Rinconada", comoEnlace: true };
+    const propuesta = { cliente: "Juan", telefono: "+51999", asesor: "Sara", etiquetas: ["Brochure de Casa Jade", "Video de Casa Jade"], mensaje: "Mira esto" };
+
+    const entrarAlAsistente = async () => {
+      tablas.profiles = [{ user_id: BRYCE, account_id: GOLDEN, account_role: "owner", full_name: "Bryce Bueno", area: null }];
+      await escribe({ text: { body: "hola" } });
+      await toca("app:asistente");
+      sendInteractiveButtons.mockClear();
+      sendTextMessage.mockClear();
+    };
+    const dejarBorrador = (cambios: Fila = {}) => {
+      tablas.whatsapp_team_drafts = [{
+        id: DRAFT, account_id: GOLDEN, user_id: BRYCE, status: "pending",
+        expires_at: new Date(Date.now() + 600_000).toISOString(),
+        summary: JSON.stringify(propuesta),
+        command: { tipo: "envio_cliente", conversacionId: CONV, canal: "whatsapp", adjuntos: [brochure, video], mensaje: "Mira esto" },
+        ...cambios,
+      }];
+      tablas.messages = [{ conversation_id: CONV, sender_type: "customer", created_at: new Date(Date.now() - 3_600_000).toISOString() }];
+    };
+
+    it("pedir un brochure manda primero el texto y después el archivo", async () => {
+      await entrarAlAsistente();
+      responder.mockResolvedValueOnce({ texto: "Ahí va.", acciones: [], adjuntos: [brochure], envios: [] });
+      await escribe({ text: { body: "mándame el brochure de casa jade" } });
+      expect(textos().at(-1)).toBe("🏠 App\nAhí va.");
+      expect(sendMediaMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ to: "51940421629", kind: "document", link: brochure.url, filename: brochure.nombre }),
+      );
+      expect(sendTextMessage.mock.invocationCallOrder[0]).toBeLessThan(sendMediaMessage.mock.invocationCallOrder[0]);
+    });
+
+    it("un video que WhatsApp no acepta por su peso va como enlace", async () => {
+      await entrarAlAsistente();
+      responder.mockResolvedValueOnce({ texto: "Ahí va.", acciones: [], adjuntos: [enlace], envios: [] });
+      await escribe({ text: { body: "mándame el video de rinconada" } });
+      expect(sendMediaMessage).not.toHaveBeenCalled();
+      expect(textos().at(-1)).toContain("https://golden.test/r.mp4");
+    });
+
+    it("si el archivo falla, lo dice en vez de quedarse callado", async () => {
+      await entrarAlAsistente();
+      sendMediaMessage.mockRejectedValueOnce(new Error("Meta dijo que no"));
+      responder.mockResolvedValueOnce({ texto: "Ahí va.", acciones: [], adjuntos: [brochure], envios: [] });
+      await escribe({ text: { body: "mándame el brochure" } });
+      expect(textos().at(-1)).toContain("No pude enviar Brochure de Casa Jade");
+    });
+
+    it("un envío a un cliente sólo muestra la tarjeta: no sale nada", async () => {
+      await entrarAlAsistente();
+      responder.mockResolvedValueOnce({ texto: "Revisa la tarjeta.", acciones: [], adjuntos: [], envios: [{ id: DRAFT, ...propuesta }] });
+      await escribe({ text: { body: "envíale el brochure a juan" } });
+      expect(sendMessageToConversation).not.toHaveBeenCalled();
+      expect(botones()).toEqual([`envio:si:${DRAFT}`, `envio:cancelar:${DRAFT}`]);
+      const tarjeta = sendInteractiveButtons.mock.calls.at(-1)?.[0] as unknown as { bodyText: string };
+      for (const dato of ["Juan", "+51999", "Sara", "Brochure de Casa Jade", "Video de Casa Jade", "Mira esto"]) {
+        expect(tarjeta.bodyText).toContain(dato);
+      }
+    });
+
+    it("el botón envía cada archivo, con el texto sólo en el primero", async () => {
+      await entrarAlAsistente();
+      dejarBorrador();
+      await toca(`envio:si:${DRAFT}`);
+      expect(sendMessageToConversation).toHaveBeenCalledTimes(2);
+      expect(sendMessageToConversation.mock.calls[0][1]).toBe(GOLDEN);
+      expect(sendMessageToConversation.mock.calls[0][2]).toMatchObject({
+        conversationId: CONV, messageType: "document", mediaUrl: brochure.url, filename: brochure.nombre, contentText: "Mira esto",
+      });
+      expect(sendMessageToConversation.mock.calls[1][2]).toMatchObject({ messageType: "video", mediaUrl: video.url, contentText: null });
+      expect(tablas.whatsapp_team_drafts[0].status).toBe("saved");
+      expect(textos().at(-1)).toContain("Listo");
+      expect(tablas.assistant_messages.at(-1)?.content).toContain("Juan");
+    });
+
+    it("tocar dos veces envía una sola vez", async () => {
+      await entrarAlAsistente();
+      dejarBorrador();
+      await toca(`envio:si:${DRAFT}`);
+      await toca(`envio:si:${DRAFT}`);
+      expect(sendMessageToConversation).toHaveBeenCalledTimes(2);
+      expect(textos().at(-1)).toContain("ya salió");
+    });
+
+    it("el borrador se reserva antes de enviar", async () => {
+      await entrarAlAsistente();
+      dejarBorrador();
+      sendMessageToConversation.mockImplementationOnce(async () => {
+        expect(tablas.whatsapp_team_drafts[0].status).toBe("saved");
+        return { messageId: "00000000-0000-0000-0000-0000000000aa", whatsappMessageId: "w" };
+      });
+      await toca(`envio:si:${DRAFT}`);
+      expect(sendMessageToConversation).toHaveBeenCalled();
+    });
+
+    it("vencido no envía", async () => {
+      await entrarAlAsistente();
+      dejarBorrador({ expires_at: new Date(Date.now() - 1000).toISOString() });
+      await toca(`envio:si:${DRAFT}`);
+      expect(sendMessageToConversation).not.toHaveBeenCalled();
+      expect(textos().at(-1)).toContain("venció");
+      expect(tablas.whatsapp_team_drafts[0].status).toBe("cancelled");
+    });
+
+    it("si la ventana se cerró entre la tarjeta y el toque, no envía y lo avisa", async () => {
+      await entrarAlAsistente();
+      dejarBorrador();
+      tablas.messages[0].created_at = new Date(Date.now() - 25 * 3_600_000).toISOString();
+      await toca(`envio:si:${DRAFT}`);
+      expect(sendMessageToConversation).not.toHaveBeenCalled();
+      expect(textos().at(-1)).toContain("24 h");
+      expect(tablas.whatsapp_team_drafts[0].status).toBe("cancelled");
+    });
+
+    it("cancelar no envía", async () => {
+      await entrarAlAsistente();
+      dejarBorrador();
+      await toca(`envio:cancelar:${DRAFT}`);
+      expect(sendMessageToConversation).not.toHaveBeenCalled();
+      expect(tablas.whatsapp_team_drafts[0].status).toBe("cancelled");
+    });
+
+    it("el borrador de otra persona no se puede tocar", async () => {
+      await entrarAlAsistente();
+      dejarBorrador({ user_id: "00000000-0000-0000-0000-000000000002" });
+      await toca(`envio:si:${DRAFT}`);
+      expect(sendMessageToConversation).not.toHaveBeenCalled();
+      expect(tablas.whatsapp_team_drafts[0].status).toBe("pending");
+    });
+
+    it("un botón de caja sobre un envío no registra plata", async () => {
+      await entrarAlAsistente();
+      dejarBorrador();
+      await toca(`caja:si:${DRAFT}`);
+      expect(rpc.mock.calls.some(([, a]) => a.p_call === "entry")).toBe(false);
+      expect(tablas.whatsapp_team_drafts[0].status).toBe("pending");
+    });
+
+    it("si falla a medias, dice qué salió y qué no", async () => {
+      await entrarAlAsistente();
+      dejarBorrador();
+      sendMessageToConversation
+        .mockResolvedValueOnce({ messageId: "00000000-0000-0000-0000-0000000000aa", whatsappMessageId: "w" })
+        .mockRejectedValueOnce(new Error("Meta dijo que no"));
+      await toca(`envio:si:${DRAFT}`);
+      expect(textos().at(-1)).toContain("Salió: Brochure de Casa Jade");
+      expect(textos().at(-1)).toContain("No salió: Video de Casa Jade");
+      expect(tablas.whatsapp_team_drafts[0].status).toBe("failed");
+    });
   });
 
   it("alguien del equipo sin ningún asistente sigue como cliente", async () => {

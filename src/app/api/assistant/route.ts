@@ -48,6 +48,7 @@ async function quien(request: Request) {
       rol: perfil.account_role as string,
       area: (perfil.area as string | null) ?? null,
       nombre: ((perfil.full_name as string) || (perfil.email as string) || "").split(" ")[0] || "equipo",
+      canal: "app" as const,
     },
   };
 }
