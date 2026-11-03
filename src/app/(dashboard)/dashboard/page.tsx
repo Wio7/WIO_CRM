@@ -37,10 +37,19 @@ import { ConversationsChart } from '@/components/dashboard/conversations-chart'
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
+import { SimpleHome } from '@/components/dashboard/simple-home'
+import { isSimpleAccount } from '@/lib/modules'
 
 type RangeDays = 7 | 30 | 90
 
+// Campaign-only accounts (no sales pipeline) get a simpler home.
 export default function DashboardPage() {
+  const { account } = useAuth()
+  if (isSimpleAccount(account?.disabled_modules)) return <SimpleHome />
+  return <FullDashboard />
+}
+
+function FullDashboard() {
   const { defaultCurrency } = useAuth()
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
   const [metricsLoading, setMetricsLoading] = useState(true)

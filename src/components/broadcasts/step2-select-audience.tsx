@@ -95,6 +95,17 @@ export function Step2SelectAudience({
   const [fileName, setFileName] = useState('');
   const [fileError, setFileError] = useState('');
 
+  /** A 2-column CSV that opens in Excel, so people see the expected shape. */
+  function downloadExample() {
+    const csv = "﻿Nombre,Teléfono\r\nAna Pérez,944585122\r\nLuis Rojas,51987654321\r\n";
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "ejemplo-campana.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleFile(file?: File) {
     if (!file) return;
     setFileError('');
@@ -429,7 +440,10 @@ export function Step2SelectAudience({
           <p className="text-sm font-medium text-foreground">Subir archivo de audiencia</p>
           <p className="text-xs text-muted-foreground">
             Elige un archivo .xlsx o .csv (máximo 5000 filas). Buscamos la columna de teléfono
-            (teléfono, celular, móvil, WhatsApp, número o phone) y, si existe, la de nombre.
+            (teléfono, celular, móvil, WhatsApp, número o phone) y, si existe, la de nombre.{" "}
+            <button type="button" onClick={downloadExample} className="text-primary underline">
+              Descargar archivo de ejemplo
+            </button>
           </p>
           <input
             type="file"
