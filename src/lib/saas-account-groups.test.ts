@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupAccountsByBusiness, type SaasAccount } from "./saas-account-groups";
+import { groupAccountsByBusiness, knownApps, type SaasAccount } from "./saas-account-groups";
 
 const acc = (id: string, name: string): SaasAccount => ({
   id,
@@ -54,5 +54,60 @@ describe("agrupar cuentas por negocio", () => {
     const [g] = groupAccountsByBusiness([acc("a", "legal.goldenhabitat@gmail.com")]);
     expect(g.name).toBe("Golden Habitat");
     expect(g.primary.id).toBe("a");
+  });
+
+  it("sin la migración, José Chipana cae dentro de Juris Pro detrás de Christian", () => {
+    const list = [
+      { ...acc("jose", "José Chipana"), created_at: "2026-10-25T00:00:00Z" },
+      { ...acc("christian", "Christian Linares"), created_at: "2026-10-12T00:00:00Z" },
+    ];
+    const [juris] = groupAccountsByBusiness(list);
+    expect(juris.name).toBe("Juris Pro");
+    expect(juris.primary.id).toBe("christian");
+    expect(juris.members.map((m) => m.id)).toEqual(["jose"]);
+    expect(juris.apps).toEqual(["Juris Pro App"]);
+  });
+});
+
+describe("agrupar con la migración 081 (negocio guardado en la base)", () => {
+  const withCols = (id: string, name: string, parent: string | null, apps: string[] = []): SaasAccount => ({
+    ...acc(id, name),
+    parent_account_id: parent,
+    apps,
+  });
+
+  const list = [
+    withCols("xdel", "XDEL Barbershop", null, ["Barberia"]),
+    withCols("jose", "José Chipana", "christian", ["Juris Pro App"]),
+    withCols("legal", "legal.goldenhabitat@gmail.com", "golden", ["Golden Legal"]),
+    withCols("christian", "Christian Linares", null, ["Juris Pro App"]),
+    withCols("golden", "Golden Habitat", null, ["Golden App (ventas)", "Golden Legal"]),
+    withCols("huerfana", "Cuenta suelta", "no-existe"),
+  ];
+  const groups = groupAccountsByBusiness(list);
+
+  it("solo los negocios quedan arriba, primero los conocidos", () => {
+    expect(groups.map((g) => g.primary.id)).toEqual(["golden", "christian", "xdel", "huerfana"]);
+  });
+
+  it("cada cuenta cuelga del negocio guardado, con sus apps", () => {
+    expect(groups[0].members.map((m) => m.id)).toEqual(["legal"]);
+    expect(groups[0].apps).toEqual(["Golden App (ventas)", "Golden Legal"]);
+    expect(groups[1].name).toBe("Juris Pro");
+    expect(groups[1].members.map((m) => m.id)).toEqual(["jose"]);
+    expect(groups[2]).toMatchObject({ name: "XDEL Barbershop", apps: ["Barberia"], members: [] });
+  });
+
+  it("lo guardado manda sobre el nombre", () => {
+    const moved = groupAccountsByBusiness([
+      withCols("golden", "Golden Habitat", null),
+      withCols("x", "golden.algo@gmail.com", null),
+    ]);
+    expect(moved).toHaveLength(2);
+  });
+
+  it("knownApps junta las apps sin repetir", () => {
+    expect(knownApps(list)).toContain("Barberia");
+    expect(knownApps(list).filter((a) => a === "Juris Pro App")).toHaveLength(1);
   });
 });
