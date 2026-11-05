@@ -23,7 +23,9 @@ import {
   Loader2,
   X,
   UserPlus,
-  LayoutList
+  LayoutList,
+  ChevronRight,
+  Network
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,7 +40,9 @@ import {
 } from "@/components/ui/dialog";
 import { SaasInviteDialog } from "@/components/saas-owner/saas-invite-dialog";
 import { AccountModulesDialog } from "@/components/saas-owner/account-modules-dialog";
-import { groupAccountsByBusiness } from "@/lib/saas-account-groups";
+import { AccountBusinessDialog } from "@/components/saas-owner/account-business-dialog";
+import { AccountTeam } from "@/components/saas-owner/account-team";
+import { groupAccountsByBusiness, hasBusinessColumns, knownApps } from "@/lib/saas-account-groups";
 
 interface Account {
   id: string;
@@ -47,7 +51,11 @@ interface Account {
   created_at: string;
   default_currency: string;
   disabled_modules?: string[] | null;
+  parent_account_id?: string | null;
+  apps?: string[] | null;
 }
+
+const BASE_COLUMNS = "id, name, status, created_at, default_currency, disabled_modules";
 
 export default function SaasOwnerPage() {
   const { isSuperAdmin, loading: sessionLoading, profileLoading, isVisiting, accountId, homeAccountId } = useAuth();
@@ -61,6 +69,16 @@ export default function SaasOwnerPage() {
   const [enteringId, setEnteringId] = useState<string | null>(null);
   const [inviteTarget, setInviteTarget] = useState<Account | null>(null);
   const [modulesTarget, setModulesTarget] = useState<Account | null>(null);
+  const [businessTarget, setBusinessTarget] = useState<Account | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+
+  const toggleExpanded = (key: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // Invitation / Account Creation modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -93,9 +111,21 @@ export default function SaasOwnerPage() {
   const fetchAccounts = useCallback(async () => {
     try {
       setLoading(true);
+      // Negocio y apps (migración 081). Si la base aún no la tiene, se lee
+      // como antes y el panel agrupa por nombre.
+      const withBusiness = await supabase
+        .from("accounts")
+        .select(`${BASE_COLUMNS}, parent_account_id, apps`)
+        .order("created_at", { ascending: false });
+
+      if (!withBusiness.error) {
+        setAccounts((withBusiness.data as Account[]) || []);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("accounts")
-        .select("id, name, status, created_at, default_currency, disabled_modules")
+        .select(BASE_COLUMNS)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -212,6 +242,20 @@ export default function SaasOwnerPage() {
       )
     );
   }, [groups, search]);
+
+  // Al buscar, se abren solos los negocios donde coincide alguien de dentro.
+  const searchOpened = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return new Set<string>();
+    return new Set(
+      filteredGroups
+        .filter(g => g.members.some(acc => acc.name.toLowerCase().includes(q) || acc.id.toLowerCase().includes(q)))
+        .map(g => g.key)
+    );
+  }, [filteredGroups, search]);
+
+  const canEditBusiness = useMemo(() => hasBusinessColumns(accounts), [accounts]);
+  const suggestedApps = useMemo(() => knownApps(accounts), [accounts]);
 
   const stats = useMemo(() => {
     const total = groups.length;
@@ -366,11 +410,19 @@ export default function SaasOwnerPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 text-xs">
-                {filteredGroups.map(group => (
+                {filteredGroups.map(group => {
+                  const isOpen = expanded.has(group.key) || searchOpened.has(group.key);
+                  return (
                   <Fragment key={group.key}>
                   <tr className="bg-white/[0.03]">
-                    <td colSpan={5} className="py-3 px-4">
-                      <div className="flex flex-wrap items-center gap-2">
+                    <td colSpan={5} className="p-0">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpanded(group.key)}
+                        aria-expanded={isOpen}
+                        className="flex w-full flex-wrap items-center gap-2 py-3 px-4 text-left hover:bg-white/[0.03] transition-colors"
+                      >
+                        <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`} />
                         <Building2 className="h-4 w-4 text-primary" />
                         <span className="text-sm font-black uppercase tracking-wider text-white">{group.name}</span>
                         {group.apps.map(app => (
@@ -380,21 +432,36 @@ export default function SaasOwnerPage() {
                         ))}
                         {group.members.length > 0 && (
                           <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                            {group.members.length} {group.members.length === 1 ? "acceso de personal" : "accesos de personal"}
+                            {group.members.length} {group.members.length === 1 ? "cuenta dentro" : "cuentas dentro"}
                           </span>
                         )}
-                      </div>
+                        <span
+                          className={`ml-auto h-2 w-2 rounded-full ${group.primary.status === "active" ? "bg-emerald-500" : "bg-rose-500"}`}
+                          title={group.primary.status === "active" ? "Activo" : "Inactivo"}
+                        />
+                      </button>
                     </td>
                   </tr>
-                  {[group.primary, ...group.members].map(account => (
+                  {isOpen && [group.primary, ...group.members].map(account => (
                   <tr key={account.id} className="group hover:bg-white/[0.01] transition-colors">
-                    <td className={`py-4 px-4 space-y-1 ${account.id === group.primary.id ? "" : "pl-10"}`}>
-                      <div className="font-bold text-white group-hover:text-primary transition-colors flex items-center gap-1.5 text-sm">
+                    <td className={`py-4 px-4 space-y-1 ${account.id === group.primary.id ? "pl-10" : "pl-16"}`}>
+                      <div className="font-bold text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-1.5 text-sm">
                         {account.name}
-                        {account.id !== group.primary.id && (
-                          <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
-                            Pertenece a {group.name}
+                        {account.id === group.primary.id ? (
+                          <span className="rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">
+                            Cuenta principal
                           </span>
+                        ) : (
+                          <>
+                            <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                              Pertenece a {group.name}
+                            </span>
+                            {(account.apps ?? []).map(app => (
+                              <span key={app} className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
+                                {app}
+                              </span>
+                            ))}
+                          </>
                         )}
                       </div>
                       <div className="text-[10px] font-mono text-muted-foreground/60 select-all">
@@ -456,6 +523,17 @@ export default function SaasOwnerPage() {
                           <LayoutList className="h-4 w-4" />
                         </Button>
 
+                        {/* Business and apps (migration 081) */}
+                        <Button
+                          onClick={() => setBusinessTarget(account)}
+                          disabled={!canEditBusiness}
+                          variant="ghost"
+                          className="h-9 w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+                          title={canEditBusiness ? "Negocio y apps de esta cuenta" : "Falta correr la migración 081 en Supabase"}
+                        >
+                          <Network className="h-4 w-4" />
+                        </Button>
+
                         {/* Toggle Status Button */}
                         <Button
                           onClick={() => handleToggleStatus(account)}
@@ -491,8 +569,19 @@ export default function SaasOwnerPage() {
                     </td>
                   </tr>
                   ))}
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={5} className="pb-5 pl-10 pr-4 pt-1">
+                        <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          Equipo dentro de {group.primary.name}
+                        </p>
+                        <AccountTeam accountId={group.primary.id} apps={group.apps} />
+                      </td>
+                    </tr>
+                  )}
                   </Fragment>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -625,6 +714,28 @@ export default function SaasOwnerPage() {
           onSaved={(next) =>
             setAccounts((prev) =>
               prev.map((acc) => (acc.id === modulesTarget.id ? { ...acc, disabled_modules: next } : acc)),
+            )
+          }
+        />
+      )}
+
+      {businessTarget && (
+        <AccountBusinessDialog
+          key={businessTarget.id}
+          open={!!businessTarget}
+          onOpenChange={(open) => !open && setBusinessTarget(null)}
+          accountId={businessTarget.id}
+          accountName={businessTarget.name}
+          parentAccountId={businessTarget.parent_account_id ?? null}
+          apps={businessTarget.apps ?? []}
+          businesses={groups
+            .filter((g) => g.primary.id !== businessTarget.id)
+            .map((g) => ({ id: g.primary.id, name: g.name === g.primary.name ? g.name : `${g.name} (${g.primary.name})` }))}
+          hasMembers={accounts.some((acc) => acc.parent_account_id === businessTarget.id)}
+          suggestedApps={suggestedApps}
+          onSaved={(next) =>
+            setAccounts((prev) =>
+              prev.map((acc) => (acc.id === businessTarget.id ? { ...acc, ...next } : acc)),
             )
           }
         />
