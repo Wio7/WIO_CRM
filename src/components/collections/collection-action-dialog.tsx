@@ -15,6 +15,7 @@ import {
   RESULTS,
   channelLabel,
   resultLabel,
+  actionPayload,
   validateAction,
   type ActionChannel,
   type ActionResult,
@@ -115,11 +116,7 @@ export function CollectionActionDialog({ open, onOpenChange, contactId, contactN
       .insert({
         account_id: accountId,
         contact_id: contactId,
-        channel,
-        result,
-        promise_date: result === "promesa" ? promiseDate : null,
-        promise_amount: promiseAmount ? Number(promiseAmount) : null,
-        note: note.trim() || null,
+        ...actionPayload({ channel, result, promiseDate, promiseAmount, note }),
       })
       .select("*")
       .single();

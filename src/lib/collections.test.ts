@@ -4,6 +4,8 @@ import {
   buildDebtors,
   daysBetween,
   debtorsCsv,
+  fechaLima,
+  hiddenOverdue,
   groupByManzana,
   hoyLima,
   tramoDe,
@@ -96,5 +98,38 @@ describe('whatsapp y csv', () => {
     const csv = debtorsCsv([{ ...d, name: 'Ana "La" Ruiz' }]);
     expect(csv.split('\n')[0]).toContain('Cliente;DNI;Teléfono');
     expect(csv).toContain('"Ana ""La"" Ruiz"');
+  });
+});
+
+describe('correcciones de la revisión', () => {
+  it('no cuenta dos veces una cuota repetida por la paginación', () => {
+    const a = cuota({ id: 'dup', amount: 500 });
+    const [d] = buildDebtors([a, { ...a }], HOY);
+    expect(d.overdueCount).toBe(1);
+    expect(d.overdueAmount).toBe(500);
+    const [g] = groupByManzana([a, { ...a }], HOY);
+    expect(g.overdueAmount).toBe(500);
+  });
+
+  it('cuenta las cuotas vencidas cuyo cliente no se ve', () => {
+    const oculto: OverdueInstallment = { ...cuota({ id: 'h1', amount: 300 }), plan: { ...cuota({}).plan!, contact: null } };
+    expect(hiddenOverdue([oculto, cuota({ id: 'v' })], HOY)).toEqual({ count: 1, amount: 300 });
+  });
+
+  it('solo pone +51 a celulares (9 dígitos que empiezan con 9)', () => {
+    const [d] = buildDebtors([cuota({})], HOY);
+    expect(whatsappLink({ ...d, phone: '056123456' }, 'x')).toBeNull();
+    expect(whatsappLink({ ...d, phone: '+51 987 654 321' }, 'x')!.startsWith('https://wa.me/51987654321')).toBe(true);
+  });
+
+  it('muestra las fechas con hora en día de Lima', () => {
+    expect(fechaLima('2026-11-08T02:00:00Z')).toBe('07/11/2026');
+    expect(fechaLima('2026-11-05')).toBe('05/11/2026');
+    expect(fechaLima(null)).toBe('—');
+  });
+
+  it('el CSV usa el día de Lima para el último aviso', () => {
+    const [d] = buildDebtors([cuota({})], HOY);
+    expect(debtorsCsv([{ ...d, lastReminder: '2026-11-08T02:00:00Z' }])).toContain(';07/11/2026');
   });
 });

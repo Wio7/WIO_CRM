@@ -74,7 +74,9 @@ export function isModuleDisabled(
   }
   // Un módulo cuyo requerido está apagado también queda apagado, aunque
   // la cuenta se haya configurado antes de que ese módulo existiera.
-  const off = withDependencies(disabled);
+  // Se suman a lo que ya estaba en la lista (incluso rutas que no están en
+  // el registro, que siguen bloqueadas como antes).
+  const off = [...disabled, ...withDependencies(disabled)];
   return off.some((m) => pathname === m || pathname.startsWith(`${m}/`));
 }
 

@@ -79,7 +79,32 @@ export function validateAction(input: NewActionInput, today: string): string | n
     if (!input.promiseDate) return "Pon la fecha en que prometió pagar.";
     if (input.promiseDate < today) return "La fecha de la promesa no puede ser pasada.";
   }
-  if (input.promiseAmount && !(Number(input.promiseAmount) > 0)) return "El monto prometido debe ser mayor a cero.";
+  if (input.promiseAmount) {
+    const n = Number(input.promiseAmount);
+    // numeric(12,2) en la base: hasta 9.999.999.999,99.
+    if (!Number.isFinite(n) || n <= 0 || n >= MAX_AMOUNT) return "El monto prometido no es válido.";
+  }
   if (input.note.length > 1000) return "La nota es muy larga (máximo 1000 caracteres).";
   return null;
+}
+
+const MAX_AMOUNT = 1e10;
+
+/** Fila a insertar: fecha y monto prometidos solo si el resultado es promesa. */
+export function actionPayload(input: NewActionInput) {
+  const promesa = input.result === "promesa";
+  return {
+    channel: input.channel,
+    result: input.result,
+    promise_date: promesa && input.promiseDate ? input.promiseDate : null,
+    promise_amount: promesa && input.promiseAmount ? Number(input.promiseAmount) : null,
+    note: input.note.trim() || null,
+  };
+}
+
+/** ¿El error de Supabase es "la tabla no existe" (migración sin aplicar)? */
+export function isMissingTable(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  if (error.code === "42P01" || error.code === "PGRST205") return true;
+  return /does not exist|could not find the table/i.test(error.message ?? "");
 }

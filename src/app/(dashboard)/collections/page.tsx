@@ -20,6 +20,8 @@ import {
   buildDebtors,
   debtorsCsv,
   groupByManzana,
+  fechaLima,
+  hiddenOverdue,
   hoyLima,
   whatsappLink,
   type Debtor,
@@ -30,7 +32,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ContactDetailView } from "@/components/contacts/contact-detail-view";
 import { CollectionActionDialog } from "@/components/collections/collection-action-dialog";
+import { useAuth } from "@/hooks/use-auth";
 import {
+  isMissingTable,
   latestByContact,
   promiseState,
   resultLabel,
@@ -39,6 +43,8 @@ import {
 } from "@/lib/collection-actions";
 
 const PAGE = 1000;
+// Ids por consulta .in(): 100 UUID mantienen la URL corta.
+const CHUNK = 100;
 
 const TRAMO_STYLE: Record<Tramo, string> = {
   "1-30": "bg-amber-500/10 text-amber-400",
@@ -47,11 +53,8 @@ const TRAMO_STYLE: Record<Tramo, string> = {
   "90+": "bg-red-600/15 text-red-400",
 };
 
-const fecha = (iso: string | null) => {
-  if (!iso) return "—";
-  const [y, m, d] = iso.slice(0, 10).split("-");
-  return `${d}/${m}/${y}`;
-};
+// Fechas en día de Lima (las que traen hora vienen en UTC desde la base).
+const fecha = fechaLima;
 
 export default function CollectionsPage() {
   const [loading, setLoading] = useState(true);
@@ -67,6 +70,10 @@ export default function CollectionsPage() {
   const [gestionesOk, setGestionesOk] = useState<boolean | null>(null);
   const [gestion, setGestion] = useState<{ id: string; name: string } | null>(null);
   const [soloPromesasVencidas, setSoloPromesasVencidas] = useState(false);
+  const [gestionesError, setGestionesError] = useState<string | null>(null);
+  const { accountRole } = useAuth();
+  // Un agente solo ve sus propios clientes (contacts RLS): la pantalla lo dice.
+  const soloMisClientes = accountRole === "agent";
   const today = useMemo(() => hoyLima(), []);
 
   useEffect(() => {
@@ -84,6 +91,8 @@ export default function CollectionsPage() {
           .eq("status", "pendiente")
           .lt("due_date", today)
           .order("due_date", { ascending: true })
+          // Desempate estable: sin él, páginas distintas pueden repetir o saltar cuotas.
+          .order("id", { ascending: true })
           .range(from, from + PAGE - 1);
         if (err) {
           if (!cancelled) setError(err.message);
@@ -96,11 +105,14 @@ export default function CollectionsPage() {
       // Último aviso automático de cada cuota vencida (migración 052).
       const last = new Map<string, string>();
       const ids = all.map((r) => r.id);
-      for (let i = 0; i < ids.length; i += 200) {
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        // Solo avisos que de verdad salieron (con canal y sin error).
         const { data } = await supabase
           .from("installment_reminders")
           .select("installment_id, sent_at")
-          .in("installment_id", ids.slice(i, i + 200));
+          .in("installment_id", ids.slice(i, i + CHUNK))
+          .neq("channels", "ninguno")
+          .is("error", null);
         for (const r of (data ?? []) as { installment_id: string; sent_at: string }[]) {
           const prev = last.get(r.installment_id);
           if (!prev || r.sent_at > prev) last.set(r.installment_id, r.sent_at);
@@ -110,21 +122,24 @@ export default function CollectionsPage() {
       const contactIds = [...new Set(all.map((r) => r.plan?.contact?.id).filter((x): x is string => Boolean(x)))];
       const acts: CollectionAction[] = [];
       let tablaOk = true;
-      for (let i = 0; i < contactIds.length; i += 200) {
+      let otroError: string | null = null;
+      for (let i = 0; i < contactIds.length; i += CHUNK) {
         const { data, error: e } = await supabase
           .from("collection_actions")
-          .select("*")
-          .in("contact_id", contactIds.slice(i, i + 200))
+          .select("id, contact_id, plan_id, channel, result, promise_date, promise_amount, note, created_by, created_at")
+          .in("contact_id", contactIds.slice(i, i + CHUNK))
           .order("created_at", { ascending: false });
         if (e) {
-          tablaOk = false;
+          if (isMissingTable(e)) tablaOk = false;
+          else otroError = e.message;
           break;
         }
         acts.push(...((data ?? []) as CollectionAction[]));
       }
       if (cancelled) return;
       setAcciones(acts);
-      setGestionesOk(tablaOk);
+      setGestionesOk(tablaOk && !otroError);
+      setGestionesError(otroError);
       setRows(all);
       setReminders(last);
       setLoading(false);
@@ -141,6 +156,8 @@ export default function CollectionsPage() {
     () => debtors.filter((d) => promiseState(ultimas.get(d.contactId), today) === "vencida").length,
     [debtors, ultimas, today],
   );
+
+  const ocultas = useMemo(() => hiddenOverdue(rows, today), [rows, today]);
 
   const proyectos = useMemo(
     () => [...new Set(debtors.flatMap((d) => d.projects))].sort(),
@@ -214,8 +231,10 @@ export default function CollectionsPage() {
         <div className="flex justify-center py-16">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
-      ) : debtors.length === 0 ? (
-        <p className="py-16 text-center text-sm text-muted-foreground">No hay cuotas vencidas. Todos al día.</p>
+      ) : error ? null : debtors.length === 0 && ocultas.count === 0 ? (
+        <p className="py-16 text-center text-sm text-muted-foreground">
+          {soloMisClientes ? "Ninguno de tus clientes tiene cuotas vencidas." : "No hay cuotas vencidas. Todos al día."}
+        </p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -265,7 +284,19 @@ export default function CollectionsPage() {
             )}
           </div>
 
-          {gestionesOk === false && (
+          {(soloMisClientes || ocultas.count > 0) && (
+            <p className="rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
+              {soloMisClientes ? "Estás viendo solo tus clientes. " : ""}
+              {ocultas.count > 0 &&
+                `Hay ${ocultas.count} cuota${ocultas.count === 1 ? "" : "s"} vencida${ocultas.count === 1 ? "" : "s"} más de clientes que no puedes ver o que ya no están en contactos.`}
+            </p>
+          )}
+          {gestionesError && (
+            <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm">
+              No se pudieron leer las gestiones: {gestionesError}
+            </p>
+          )}
+          {gestionesOk === false && !gestionesError && (
             <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               Para registrar gestiones falta aplicar la migración 082 (gestiones de cobranza) en Supabase.
             </p>

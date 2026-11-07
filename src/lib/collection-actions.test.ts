@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  actionPayload,
+  isMissingTable,
   latestByContact,
   promiseState,
   resultLabel,
@@ -60,5 +62,27 @@ describe('validateAction', () => {
   });
   it('tiene etiquetas en español', () => {
     expect(resultLabel('promesa')).toBe('Prometió pagar');
+  });
+});
+
+describe('correcciones de la revisión (gestiones)', () => {
+  const base = { channel: 'llamada' as const, result: 'contactado' as const, promiseDate: '', promiseAmount: '', note: '' };
+  it('rechaza montos no numéricos o enormes', () => {
+    expect(validateAction({ ...base, promiseAmount: 'abc' }, HOY)).toMatch(/monto/);
+    expect(validateAction({ ...base, promiseAmount: '1e20' }, HOY)).toMatch(/monto/);
+  });
+  it('solo guarda fecha y monto prometidos si el resultado es promesa', () => {
+    expect(actionPayload({ ...base, promiseAmount: '200', promiseDate: '2026-11-10', note: '  hola ' })).toEqual({
+      channel: 'llamada', result: 'contactado', promise_date: null, promise_amount: null, note: 'hola',
+    });
+    expect(actionPayload({ ...base, result: 'promesa', promiseAmount: '200', promiseDate: '2026-11-10' })).toMatchObject({
+      promise_date: '2026-11-10', promise_amount: 200, note: null,
+    });
+  });
+  it('reconoce cuando falta la tabla (migración no aplicada)', () => {
+    expect(isMissingTable({ code: '42P01', message: 'relation does not exist' })).toBe(true);
+    expect(isMissingTable({ code: 'PGRST205', message: "Could not find the table 'public.collection_actions'" })).toBe(true);
+    expect(isMissingTable({ code: '08006', message: 'network' })).toBe(false);
+    expect(isMissingTable(null)).toBe(false);
   });
 });
