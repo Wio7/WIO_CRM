@@ -6,7 +6,7 @@ vi.mock('@/lib/whatsapp/encryption', () => ({
   decrypt: (v: string) => `plain:${v}`,
 }))
 
-import { loadAiConfig } from './config'
+import { llaveDeUso, loadAiConfig } from './config'
 
 function dbReturning(row: Record<string, unknown> | null): SupabaseClient {
   const chain = {
@@ -47,5 +47,23 @@ describe('loadAiConfig requireActive', () => {
     expect(
       await loadAiConfig(dbReturning(null), 'acct', { requireActive: false }),
     ).toBeNull()
+  })
+})
+
+describe('llaveDeUso con variable propia de la cuenta', () => {
+  it('lee la variable OPENAI_API_KEY_<CUENTA> del servidor', () => {
+    vi.stubEnv('OPENAI_API_KEY_BROKER_HOME', ' sk-broker ')
+    expect(llaveDeUso('env:OPENAI_API_KEY_BROKER_HOME', 'openai')).toBe('sk-broker')
+    vi.unstubAllEnvs()
+  })
+
+  it('sin la variable puesta queda vacía (la IA no se enciende)', () => {
+    expect(llaveDeUso('env:OPENAI_API_KEY_NO_EXISTE', 'openai')).toBe('')
+  })
+
+  it('no deja leer otros secretos del servidor', () => {
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'secreto')
+    expect(llaveDeUso('env:SUPABASE_SERVICE_ROLE_KEY', 'openai')).toBe('plain:env:SUPABASE_SERVICE_ROLE_KEY')
+    vi.unstubAllEnvs()
   })
 })
