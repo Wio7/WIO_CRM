@@ -10,7 +10,7 @@
 // ============================================================
 
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardList, Download, HandCoins, Loader2, MessageCircle } from "lucide-react";
+import { ClipboardList, Download, Percent, HandCoins, Loader2, MessageCircle } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
@@ -33,6 +33,8 @@ import { Input } from "@/components/ui/input";
 import { ContactDetailView } from "@/components/contacts/contact-detail-view";
 import { CollectionActionDialog } from "@/components/collections/collection-action-dialog";
 import { useAuth } from "@/hooks/use-auth";
+import { LateFeeSettingsDialog } from "@/components/collections/late-fee-settings-dialog";
+import { NO_LATE_FEE, lateFeesByDebtor, settingsFromAccount, type LateFeeSettings } from "@/lib/late-fees";
 import {
   isMissingTable,
   latestByContact,
@@ -71,7 +73,10 @@ export default function CollectionsPage() {
   const [gestion, setGestion] = useState<{ id: string; name: string } | null>(null);
   const [soloPromesasVencidas, setSoloPromesasVencidas] = useState(false);
   const [gestionesError, setGestionesError] = useState<string | null>(null);
-  const { accountRole } = useAuth();
+  const { accountRole, accountId } = useAuth();
+  const esAdmin = accountRole === "admin" || accountRole === "owner";
+  const [mora, setMora] = useState<LateFeeSettings>(NO_LATE_FEE);
+  const [moraOpen, setMoraOpen] = useState(false);
   // Un agente solo ve sus propios clientes (contacts RLS): la pantalla lo dice.
   const soloMisClientes = accountRole === "agent";
   const today = useMemo(() => hoyLima(), []);
@@ -136,7 +141,17 @@ export default function CollectionsPage() {
         }
         acts.push(...((data ?? []) as CollectionAction[]));
       }
+      let moraCuenta: LateFeeSettings = NO_LATE_FEE;
+      if (accountId) {
+        const { data: acc } = await supabase
+          .from("accounts")
+          .select("late_fee_type, late_fee_value, late_fee_grace_days")
+          .eq("id", accountId)
+          .maybeSingle();
+        moraCuenta = settingsFromAccount(acc);
+      }
       if (cancelled) return;
+      setMora(moraCuenta);
       setAcciones(acts);
       setGestionesOk(tablaOk && !otroError);
       setGestionesError(otroError);
@@ -147,7 +162,7 @@ export default function CollectionsPage() {
     return () => {
       cancelled = true;
     };
-  }, [today]);
+  }, [today, accountId]);
 
   const debtors = useMemo(() => buildDebtors(rows, today, reminders), [rows, today, reminders]);
   const ultimas = useMemo(() => latestByContact(acciones), [acciones]);
@@ -156,6 +171,10 @@ export default function CollectionsPage() {
     () => debtors.filter((d) => promiseState(ultimas.get(d.contactId), today) === "vencida").length,
     [debtors, ultimas, today],
   );
+
+  const moraPorCliente = useMemo(() => lateFeesByDebtor(rows, today, mora), [rows, today, mora]);
+  const moraDe = (d: Debtor) => moraPorCliente.get(`${d.contactId}|${d.currency}`) ?? 0;
+  const conMora = mora.type !== "ninguna";
 
   const ocultas = useMemo(() => hiddenOverdue(rows, today), [rows, today]);
 
@@ -183,15 +202,16 @@ export default function CollectionsPage() {
 
   // Totales por moneda (no se mezclan soles y dólares).
   const totales = useMemo(() => {
-    const m = new Map<string, { amount: number; debtors: number }>();
+    const m = new Map<string, { amount: number; debtors: number; mora: number }>();
     for (const d of debtors) {
-      const t = m.get(d.currency) ?? { amount: 0, debtors: 0 };
+      const t = m.get(d.currency) ?? { amount: 0, debtors: 0, mora: 0 };
       t.amount += d.overdueAmount;
       t.debtors += 1;
+      t.mora += moraPorCliente.get(`${d.contactId}|${d.currency}`) ?? 0;
       m.set(d.currency, t);
     }
     return [...m.entries()];
-  }, [debtors]);
+  }, [debtors, moraPorCliente]);
 
   const porTramo = useMemo(() => {
     const c: Record<Tramo, number> = { "1-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
@@ -220,9 +240,16 @@ export default function CollectionsPage() {
             Clientes con cuotas vencidas al {fecha(today)}, del atraso más antiguo al más reciente.
           </p>
         </div>
+        <div className="flex gap-2">
+        {esAdmin && accountId && (
+          <Button variant="outline" size="sm" onClick={() => setMoraOpen(true)}>
+            <Percent className="h-4 w-4" /> {conMora ? "Mora" : "Configurar mora"}
+          </Button>
+        )}
         <Button variant="outline" size="sm" onClick={exportar} disabled={loading || visibles.length === 0}>
           <Download className="h-4 w-4" /> Exportar CSV
         </Button>
+        </div>
       </div>
 
       {error && <p className="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm">No se pudo cargar: {error}</p>}
@@ -242,7 +269,10 @@ export default function CollectionsPage() {
               <div key={cur} className="rounded-xl border border-border bg-card p-4">
                 <p className="text-xs text-muted-foreground">Vencido ({cur})</p>
                 <p className="text-xl font-semibold text-rose-400">{formatCurrency(t.amount, cur)}</p>
-                <p className="text-xs text-muted-foreground">{t.debtors} cliente{t.debtors === 1 ? "" : "s"}</p>
+                <p className="text-xs text-muted-foreground">
+                  {t.debtors} cliente{t.debtors === 1 ? "" : "s"}
+                  {conMora && t.mora > 0 ? ` · mora ${formatCurrency(t.mora, cur)}` : ""}
+                </p>
               </div>
             ))}
             {TRAMOS.map((t) => (
@@ -347,6 +377,9 @@ export default function CollectionsPage() {
                         <td className="px-3 py-2 text-right">
                           <span className="font-semibold">{formatCurrency(d.overdueAmount, d.currency)}</span>
                           <span className="block text-xs text-muted-foreground">{d.overdueCount} cuota{d.overdueCount === 1 ? "" : "s"}</span>
+                          {conMora && moraDe(d) > 0 && (
+                            <span className="block text-xs text-amber-400">+ mora {formatCurrency(moraDe(d), d.currency)}</span>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           <span className={cn("rounded-full px-2 py-0.5 text-xs", TRAMO_STYLE[d.tramo])}>{d.daysLate} días</span>
@@ -386,6 +419,9 @@ export default function CollectionsPage() {
                     <p className="mt-2 text-sm">
                       <span className="font-semibold">{formatCurrency(d.overdueAmount, d.currency)}</span>
                       <span className="text-xs text-muted-foreground"> · {d.overdueCount} cuota{d.overdueCount === 1 ? "" : "s"}</span>
+                      {conMora && moraDe(d) > 0 && (
+                        <span className="text-xs text-amber-400"> · + mora {formatCurrency(moraDe(d), d.currency)}</span>
+                      )}
                     </p>
                     <div className="mt-1 text-xs">
                       <Seguimiento accion={ultimas.get(d.contactId)} estado={promesa(d.contactId)} />
@@ -430,6 +466,16 @@ export default function CollectionsPage() {
         contactId={abierto}
         onUpdated={() => {}}
       />
+
+      {moraOpen && accountId && (
+        <LateFeeSettingsDialog
+          open
+          onOpenChange={setMoraOpen}
+          accountId={accountId}
+          current={mora}
+          onSaved={setMora}
+        />
+      )}
 
       {gestion && (
         <CollectionActionDialog

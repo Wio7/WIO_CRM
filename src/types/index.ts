@@ -725,7 +725,7 @@ export interface Reservation {
 // ============================================================
 
 export type PaymentPlanStatus = "activo" | "pagado" | "suspendido" | "cancelado";
-export type InstallmentStatus = "pendiente" | "pagada" | "condonada";
+export type InstallmentStatus = "pendiente" | "pagada" | "condonada" | "adelantada";
 
 export interface PaymentPlan {
   id: string;
@@ -792,6 +792,8 @@ export interface PaymentPlanBalance {
   overdue_count: number;
   overdue_amount: number;
   next_due_date: string | null;
+  /** Abonos a capital (083); ya incluidos en paid_amount. */
+  prepaid_amount?: number;
 }
 
 export interface ReservationPayment {

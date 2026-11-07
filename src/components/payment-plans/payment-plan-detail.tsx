@@ -26,6 +26,7 @@ import {
   uploadAccountDoc,
 } from "@/lib/storage/upload-media";
 import { falta047 } from "@/lib/payment-plans/migration-047";
+import { PrepaymentDialog } from "./prepayment-dialog";
 import { cn } from "@/lib/utils";
 import type {
   Installment,
@@ -48,6 +49,7 @@ import {
   FileText,
   Loader2,
   Paperclip,
+  PiggyBank,
   RotateCcw,
   Undo2,
 } from "lucide-react";
@@ -106,6 +108,7 @@ export function PaymentPlanDetail({
   const [operacion, setOperacion] = useState("");
   const [voucher, setVoucher] = useState<string | null>(null);
   const [subiendo, setSubiendo] = useState(false);
+  const [abonoOpen, setAbonoOpen] = useState(false);
   // Se enciende la primera vez que la base rechaza las columnas de 047.
   const sinDetalle = useRef(false);
 
@@ -415,6 +418,26 @@ export function PaymentPlanDetail({
               </select>
             </div>
 
+            {plan.status === "activo" && (balance?.pending_count ?? 0) > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {(balance?.prepaid_amount ?? 0) > 0
+                    ? `Abonos a capital: ${formatCurrency(balance?.prepaid_amount ?? 0, plan.currency)}`
+                    : "¿El cliente adelanta plata? Registra un abono a capital."}
+                </p>
+                <GatedButton
+                  canAct={canAct}
+                  gateReason="registrar abonos"
+                  onClick={() => setAbonoOpen(true)}
+                  disabled={guardando}
+                  className="h-8 bg-muted px-2.5 text-xs text-foreground hover:bg-muted/70"
+                >
+                  <PiggyBank className="mr-1.5 h-3.5 w-3.5" />
+                  Abono a capital
+                </GatedButton>
+              </div>
+            )}
+
             <p className="text-xs text-muted-foreground">
               {plan.unit?.code ? `${plan.unit.code} · ` : ""}
               {formatCurrency(plan.total_amount, plan.currency)} en total, inicial{" "}
@@ -509,6 +532,8 @@ export function PaymentPlanDetail({
                               }`
                             : c.status === "condonada"
                               ? "Condonada"
+                              : c.status === "adelantada"
+                                ? "Cubierta por abono a capital"
                               : `Vence el ${fecha(c.due_date)}${vencida ? " · atrasada" : ""}${
                                   enRevision ? " · voucher en revisión" : ""
                                 }`}
@@ -666,6 +691,19 @@ export function PaymentPlanDetail({
               })}
             </ul>
           </div>
+        )}
+        {plan && abonoOpen && (
+          <PrepaymentDialog
+            open
+            onOpenChange={setAbonoOpen}
+            planId={plan.id}
+            currency={plan.currency}
+            cuotas={cuotas}
+            onDone={async () => {
+              await cargar();
+              onChanged();
+            }}
+          />
         )}
       </SheetContent>
     </Sheet>
