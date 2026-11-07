@@ -10,7 +10,7 @@
 // ============================================================
 
 import { useEffect, useMemo, useState } from "react";
-import { Download, HandCoins, Loader2, MessageCircle } from "lucide-react";
+import { ClipboardList, Download, HandCoins, Loader2, MessageCircle } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
@@ -29,6 +29,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ContactDetailView } from "@/components/contacts/contact-detail-view";
+import { CollectionActionDialog } from "@/components/collections/collection-action-dialog";
+import {
+  latestByContact,
+  promiseState,
+  resultLabel,
+  type CollectionAction,
+  type PromiseState,
+} from "@/lib/collection-actions";
 
 const PAGE = 1000;
 
@@ -54,6 +62,11 @@ export default function CollectionsPage() {
   const [proyecto, setProyecto] = useState<string>("todos");
   const [busqueda, setBusqueda] = useState("");
   const [abierto, setAbierto] = useState<string | null>(null);
+  // Gestiones (migración 082). null = todavía no se sabe si la tabla existe.
+  const [acciones, setAcciones] = useState<CollectionAction[]>([]);
+  const [gestionesOk, setGestionesOk] = useState<boolean | null>(null);
+  const [gestion, setGestion] = useState<{ id: string; name: string } | null>(null);
+  const [soloPromesasVencidas, setSoloPromesasVencidas] = useState(false);
   const today = useMemo(() => hoyLima(), []);
 
   useEffect(() => {
@@ -93,7 +106,25 @@ export default function CollectionsPage() {
           if (!prev || r.sent_at > prev) last.set(r.installment_id, r.sent_at);
         }
       }
+      // Gestiones de cobranza de estos clientes.
+      const contactIds = [...new Set(all.map((r) => r.plan?.contact?.id).filter((x): x is string => Boolean(x)))];
+      const acts: CollectionAction[] = [];
+      let tablaOk = true;
+      for (let i = 0; i < contactIds.length; i += 200) {
+        const { data, error: e } = await supabase
+          .from("collection_actions")
+          .select("*")
+          .in("contact_id", contactIds.slice(i, i + 200))
+          .order("created_at", { ascending: false });
+        if (e) {
+          tablaOk = false;
+          break;
+        }
+        acts.push(...((data ?? []) as CollectionAction[]));
+      }
       if (cancelled) return;
+      setAcciones(acts);
+      setGestionesOk(tablaOk);
       setRows(all);
       setReminders(last);
       setLoading(false);
@@ -104,6 +135,13 @@ export default function CollectionsPage() {
   }, [today]);
 
   const debtors = useMemo(() => buildDebtors(rows, today, reminders), [rows, today, reminders]);
+  const ultimas = useMemo(() => latestByContact(acciones), [acciones]);
+  const promesa = (contactId: string): PromiseState => promiseState(ultimas.get(contactId), today);
+  const promesasVencidas = useMemo(
+    () => debtors.filter((d) => promiseState(ultimas.get(d.contactId), today) === "vencida").length,
+    [debtors, ultimas, today],
+  );
+
   const proyectos = useMemo(
     () => [...new Set(debtors.flatMap((d) => d.projects))].sort(),
     [debtors],
@@ -114,10 +152,11 @@ export default function CollectionsPage() {
     return debtors.filter((d) => {
       if (tramo !== "todos" && d.tramo !== tramo) return false;
       if (proyecto !== "todos" && !d.projects.includes(proyecto)) return false;
+      if (soloPromesasVencidas && promiseState(ultimas.get(d.contactId), today) !== "vencida") return false;
       if (!q) return true;
       return [d.name, d.phone, d.dni, ...d.units].filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
     });
-  }, [debtors, tramo, proyecto, busqueda]);
+  }, [debtors, tramo, proyecto, busqueda, soloPromesasVencidas, ultimas, today]);
 
   const filasProyecto = useMemo(
     () => (proyecto === "todos" ? rows : rows.filter((r) => r.plan?.unit?.project?.name === proyecto)),
@@ -226,6 +265,26 @@ export default function CollectionsPage() {
             )}
           </div>
 
+          {gestionesOk === false && (
+            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              Para registrar gestiones falta aplicar la migración 082 (gestiones de cobranza) en Supabase.
+            </p>
+          )}
+          {gestionesOk && promesasVencidas > 0 && (
+            <button
+              type="button"
+              onClick={() => setSoloPromesasVencidas((v) => !v)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs",
+                soloPromesasVencidas
+                  ? "border-rose-500 bg-rose-500/15 text-rose-300"
+                  : "border-rose-500/40 text-rose-400 hover:bg-rose-500/10",
+              )}
+            >
+              {promesasVencidas} promesa{promesasVencidas === 1 ? "" : "s"} de pago vencida{promesasVencidas === 1 ? "" : "s"}
+            </button>
+          )}
+
           <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
             <section>
               {/* Laptop: tabla */}
@@ -237,7 +296,7 @@ export default function CollectionsPage() {
                       <th className="px-3 py-2 font-medium">Lotes</th>
                       <th className="px-3 py-2 text-right font-medium">Vencido</th>
                       <th className="px-3 py-2 font-medium">Atraso</th>
-                      <th className="px-3 py-2 font-medium">Último aviso</th>
+                      <th className="px-3 py-2 font-medium">Seguimiento</th>
                       <th className="px-3 py-2" />
                     </tr>
                   </thead>
@@ -262,9 +321,19 @@ export default function CollectionsPage() {
                           <span className={cn("rounded-full px-2 py-0.5 text-xs", TRAMO_STYLE[d.tramo])}>{d.daysLate} días</span>
                           <span className="block text-xs text-muted-foreground">desde {fecha(d.oldestDue)}</span>
                         </td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{fecha(d.lastReminder)}</td>
+                        <td className="px-3 py-2 text-xs">
+                          <Seguimiento accion={ultimas.get(d.contactId)} estado={promesa(d.contactId)} />
+                          <span className="block text-muted-foreground">Aviso: {fecha(d.lastReminder)}</span>
+                        </td>
                         <td className="px-3 py-2 text-right">
-                          <CobrarButton d={d} />
+                          <div className="flex justify-end gap-1.5">
+                            {gestionesOk && (
+                              <Button size="sm" variant="outline" onClick={() => setGestion({ id: d.contactId, name: d.name })}>
+                                <ClipboardList className="h-3.5 w-3.5" /> Gestión
+                              </Button>
+                            )}
+                            <CobrarButton d={d} />
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -283,11 +352,19 @@ export default function CollectionsPage() {
                       </button>
                       <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs", TRAMO_STYLE[d.tramo])}>{d.daysLate} días</span>
                     </div>
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <p className="text-sm">
-                        <span className="font-semibold">{formatCurrency(d.overdueAmount, d.currency)}</span>
-                        <span className="text-xs text-muted-foreground"> · {d.overdueCount} cuota{d.overdueCount === 1 ? "" : "s"}</span>
-                      </p>
+                    <p className="mt-2 text-sm">
+                      <span className="font-semibold">{formatCurrency(d.overdueAmount, d.currency)}</span>
+                      <span className="text-xs text-muted-foreground"> · {d.overdueCount} cuota{d.overdueCount === 1 ? "" : "s"}</span>
+                    </p>
+                    <div className="mt-1 text-xs">
+                      <Seguimiento accion={ultimas.get(d.contactId)} estado={promesa(d.contactId)} />
+                    </div>
+                    <div className="mt-2 flex justify-end gap-1.5">
+                      {gestionesOk && (
+                        <Button size="sm" variant="outline" onClick={() => setGestion({ id: d.contactId, name: d.name })}>
+                          <ClipboardList className="h-3.5 w-3.5" /> Gestión
+                        </Button>
+                      )}
                       <CobrarButton d={d} />
                     </div>
                   </li>
@@ -322,7 +399,38 @@ export default function CollectionsPage() {
         contactId={abierto}
         onUpdated={() => {}}
       />
+
+      {gestion && (
+        <CollectionActionDialog
+          key={gestion.id}
+          open
+          onOpenChange={(o) => !o && setGestion(null)}
+          contactId={gestion.id}
+          contactName={gestion.name}
+          today={today}
+          onSaved={(a) => setAcciones((prev) => [a, ...prev])}
+        />
+      )}
     </div>
+  );
+}
+
+function Seguimiento({ accion, estado }: { accion?: CollectionAction; estado: PromiseState }) {
+  if (!accion) return <span className="text-muted-foreground">Sin gestiones</span>;
+  return (
+    <span>
+      {resultLabel(accion.result)} · {fecha(accion.created_at)}
+      {estado && accion.promise_date && (
+        <span
+          className={cn(
+            "ml-1 rounded-full px-1.5 py-0.5",
+            estado === "vencida" ? "bg-rose-500/15 text-rose-400" : "bg-emerald-500/10 text-emerald-400",
+          )}
+        >
+          {estado === "vencida" ? "promesa vencida" : "promete"} {fecha(accion.promise_date)}
+        </span>
+      )}
+    </span>
   );
 }
 
