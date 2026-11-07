@@ -82,3 +82,11 @@ describe('registro de módulos del ERP', () => {
     expect(matchingTemplate([])).toBe('todo');
   });
 });
+
+describe('Cobranzas depende de Cuotas', () => {
+  it('se apaga si Cuotas está apagado, aunque no esté en la lista', () => {
+    expect(isModuleDisabled('/collections', ['/payment-plans'])).toBe(true);
+    expect(isModuleDisabled('/collections', ['/coupons'])).toBe(false);
+    expect(isModuleDisabled('/collections', [])).toBe(false);
+  });
+});

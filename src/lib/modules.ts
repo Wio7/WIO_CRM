@@ -49,6 +49,7 @@ export const MODULES: readonly ModuleDef[] = [
   { href: "/reservations", label: "Separaciones", area: "ventas", requires: ["/projects"] },
   { href: "/coupons", label: "Cupones y referidos", area: "ventas" },
   { href: "/payment-plans", label: "Cuotas", area: "finanzas" },
+  { href: "/collections", label: "Cobranzas", area: "finanzas", requires: ["/payment-plans"] },
   { href: "/caja", label: "Golden Caja", area: "finanzas" },
   { href: "/calendar", label: "Calendario", area: "agenda" },
   { href: "/automations", label: "Automatizaciones", area: "automatizacion" },
@@ -71,7 +72,10 @@ export function isModuleDisabled(
   if (ALWAYS_ON.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
     return false;
   }
-  return disabled.some((m) => pathname === m || pathname.startsWith(`${m}/`));
+  // Un módulo cuyo requerido está apagado también queda apagado, aunque
+  // la cuenta se haya configurado antes de que ese módulo existiera.
+  const off = withDependencies(disabled);
+  return off.some((m) => pathname === m || pathname.startsWith(`${m}/`));
 }
 
 /** Área de una ruta del menú (null si no es un módulo, ej. /dashboard). */
@@ -135,7 +139,7 @@ export const RUBRO_TEMPLATES: ReadonlyArray<{
     disabled: offExcept([
       "/inbox", "/notifications", "/broadcasts", "/calls", "/dialer",
       "/contacts", "/pipelines", "/projects", "/reservations",
-      "/payment-plans", "/caja", "/calendar", "/automations", "/agents",
+      "/payment-plans", "/collections", "/caja", "/calendar", "/automations", "/agents",
     ]),
   },
   {
@@ -144,7 +148,7 @@ export const RUBRO_TEMPLATES: ReadonlyArray<{
     label: "Servicios profesionales (legal, salud)",
     disabled: offExcept([
       "/inbox", "/notifications", "/broadcasts", "/contacts", "/pipelines",
-      "/payment-plans", "/calendar", "/automations", "/agents",
+      "/payment-plans", "/collections", "/calendar", "/automations", "/agents",
     ]),
   },
   {
@@ -160,7 +164,7 @@ export const RUBRO_TEMPLATES: ReadonlyArray<{
     label: "Club y restaurante",
     disabled: offExcept([
       "/inbox", "/notifications", "/broadcasts", "/contacts", "/pipelines",
-      "/coupons", "/payment-plans", "/caja", "/calendar", "/automations", "/agents",
+      "/coupons", "/payment-plans", "/collections", "/caja", "/calendar", "/automations", "/agents",
     ]),
   },
   {
