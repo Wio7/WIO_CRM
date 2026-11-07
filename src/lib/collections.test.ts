@@ -182,11 +182,28 @@ describe('saldo por cuota (remaining)', () => {
   });
 });
 
-describe('inResolution (causal de resolución)', () => {
-  const d = (overdueCount: number, daysLate: number) => ({ overdueCount, daysLate }) as Parameters<typeof inResolution>[0];
+describe('inResolution (causal de resolución, por contrato)', () => {
   const s = { installments: 2, days: 60 };
-  it('por cuotas', () => expect(inResolution(d(2, 5), s)).toBe(true));
-  it('por días', () => expect(inResolution(d(1, 61), s)).toBe(true));
-  it('no alcanza', () => expect(inResolution(d(1, 30), s)).toBe(false));
-  it('sin configurar nunca', () => expect(inResolution(d(9, 999), { installments: 0, days: 0 })).toBe(false));
+  const en = (id: string, plan: string, due: string, extra: Partial<OverdueInstallment> = {}): OverdueInstallment => {
+    const base = cuota({ id, due_date: due });
+    return { ...base, plan_id: plan, plan: { ...base.plan!, id: plan }, ...extra };
+  };
+  const debtor = (rows: OverdueInstallment[]) => buildDebtors(rows, HOY)[0];
+  it('dos contratos con una cuota vencida cada uno (30 días) no es causal', () => {
+    expect(inResolution(debtor([en('a', 'p1', '2026-10-08'), en('b', 'p2', '2026-10-08')]), s)).toBe(false);
+  });
+  it('un contrato con 2 cuotas vencidas es causal', () => {
+    expect(inResolution(debtor([en('a', 'p1', '2026-10-08'), en('b', 'p1', '2026-11-01')]), s)).toBe(true);
+  });
+  it('por días en un solo contrato', () => {
+    expect(inResolution(debtor([en('a', 'p1', '2026-09-06')]), s)).toBe(true);
+  });
+  it('solo vouchers en revisión no es causal', () => {
+    const d = debtor([en('a', 'p1', '2026-08-01', { voucher_path: 'x.jpg' })]);
+    expect(d.worstPlan).toBeNull();
+    expect(inResolution(d, s)).toBe(false);
+  });
+  it('sin configurar nunca', () => {
+    expect(inResolution(debtor([en('a', 'p1', '2026-01-01'), en('b', 'p1', '2026-02-01')]), { installments: 0, days: 0 })).toBe(false);
+  });
 });

@@ -4,7 +4,7 @@
 // tope de días), con días de gracia. Es informativa: se muestra en
 // Cobranzas, no se suma sola a la deuda.
 
-import { daysBetween, type OverdueInstallment } from "./collections";
+import { daysBetween, saldoDe, type OverdueInstallment } from "./collections";
 
 export type LateFeeType = "ninguna" | "fija" | "porcentaje_mensual" | "diaria";
 
@@ -19,9 +19,6 @@ export interface LateFeeSettings {
 export const NO_LATE_FEE: LateFeeSettings = { type: "ninguna", value: 0, graceDays: 0, capDays: 0 };
 
 const cents = (n: number) => Math.round(n * 100) / 100;
-
-/** Saldo por cobrar de una cuota: `remaining` si viene, si no `amount`. */
-const saldo = (r: OverdueInstallment) => Number(r.remaining ?? r.amount) || 0;
 
 /** Mora de una cuota con `daysLate` días de atraso desde su vencimiento. */
 export function lateFee(amount: number, daysLate: number, s: LateFeeSettings): number {
@@ -73,7 +70,7 @@ export function lateFeesByDebtor(
       if (!cur || r.due_date < cur.due) oldestByPlan.set(r.plan_id, { due: r.due_date, key });
       continue;
     }
-    add(key, lateFee(saldo(r), daysBetween(r.due_date, today), s));
+    add(key, lateFee(saldoDe(r), daysBetween(r.due_date, today), s));
   }
   for (const { due, key } of oldestByPlan.values()) add(key, contractLateFee(due, today, s));
   return out;
