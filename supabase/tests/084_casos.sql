@@ -243,6 +243,27 @@ BEGIN
     RAISE EXCEPTION 'FALLO trigger: INSERT de cuota ya pagada como authenticated no falló';
   END IF;
 
+  v_msg := NULL;
+  BEGIN
+    UPDATE public.installments SET declared_amount = 1 WHERE id = '0840c000-0000-4000-8000-000000000202';
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL THEN
+    RAISE EXCEPTION 'FALLO trigger: UPDATE installments.declared_amount como authenticated no falló';
+  END IF;
+
+  v_msg := NULL;
+  BEGIN
+    INSERT INTO public.payment_plans (account_id, contact_id, total_amount, installments_count,
+                                      monthly_amount, first_due_date, collection_terms)
+    VALUES (current_setting('t084.acc')::uuid, '0840c000-0000-4000-8000-000000000301', 100, 1, 100,
+            current_date, '{"max_payment_parts": 99}'::jsonb);
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL OR v_msg NOT ILIKE '%términos%' THEN
+    RAISE EXCEPTION 'FALLO trigger: INSERT de plan con collection_terms como authenticated no falló (mensaje: %)', v_msg;
+  END IF;
+
   -- Una columna que no es dinero sí se puede editar.
   UPDATE public.installments SET notes = 'llamar el lunes' WHERE id = '0840c000-0000-4000-8000-000000000202';
 END $$;
@@ -319,6 +340,10 @@ BEGIN
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'FALLO ventas: ve % cuotas (esperado 0)', v_n;
   END IF;
+  SELECT count(*) INTO v_n FROM public.installment_schedule WHERE account_id = v_acc;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FALLO ventas: ve % cuotas del cronograma (esperado 0)', v_n;
+  END IF;
   IF public.can_access_module(v_acc, 'cobranzas') OR NOT public.can_access_module(v_acc, 'ventas') THEN
     RAISE EXCEPTION 'FALLO ventas: can_access_module incorrecto';
   END IF;
@@ -376,13 +401,28 @@ DECLARE
   v_plan uuid;
   v_t    jsonb;
 BEGIN
-  SELECT count(*) INTO v_n FROM public.installments WHERE plan_id = '0840c000-0000-4000-8000-000000000101';
+  SELECT count(*) INTO v_n FROM public.installment_schedule WHERE plan_id = '0840c000-0000-4000-8000-000000000101';
   IF v_n <> 3 THEN
     RAISE EXCEPTION 'FALLO legal: ve % cuotas del cronograma (esperado 3)', v_n;
+  END IF;
+  SELECT count(*) INTO v_n FROM public.installments;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FALLO legal: ve % filas de installments (esperado 0: tienen datos de pago)', v_n;
   END IF;
   SELECT count(*) INTO v_n FROM public.installment_payments;
   IF v_n <> 0 THEN
     RAISE EXCEPTION 'FALLO legal: ve % pagos (esperado 0)', v_n;
+  END IF;
+  SELECT count(*) INTO v_n FROM public.payment_plan_balances;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FALLO legal: ve % saldos de planes (esperado 0)', v_n;
+  END IF;
+  SELECT count(*) INTO v_n FROM public.installment_balances;
+  IF v_n <> 0 THEN
+    RAISE EXCEPTION 'FALLO legal: ve % saldos de cuotas (esperado 0)', v_n;
+  END IF;
+  IF (SELECT count(*) FROM public.payment_plans WHERE id = '0840c000-0000-4000-8000-000000000101') <> 1 THEN
+    RAISE EXCEPTION 'FALLO legal: no ve el plan';
   END IF;
 
   v_plan := public.create_payment_plan(jsonb_build_object(
@@ -394,7 +434,7 @@ BEGIN
       jsonb_build_object('number', 1, 'amount', 300, 'due_date', current_date + 10),
       jsonb_build_object('number', 2, 'amount', 300, 'due_date', current_date + 40))));
 
-  SELECT count(*) INTO v_n FROM public.installments WHERE plan_id = v_plan AND status = 'pendiente';
+  SELECT count(*) INTO v_n FROM public.installment_schedule WHERE plan_id = v_plan AND state = 'pendiente';
   SELECT collection_terms INTO v_t FROM public.payment_plans WHERE id = v_plan;
   IF v_n <> 2 OR v_t IS NULL OR (v_t->>'max_payment_parts')::int <> 3 OR v_t->>'late_fee_type' <> 'diaria' THEN
     RAISE EXCEPTION 'FALLO crear plan: cuotas=% términos=%', v_n, v_t;
@@ -520,6 +560,68 @@ END $$;
 
 RESET ROLE;
 
-DO $$ BEGIN RAISE NOTICE '084: todos los casos OK'; END $$;
+-- ------------------------------------------------------------
+-- Borrar un usuario de Auth que registró y anuló pagos: sus referencias
+-- quedan en NULL (el trigger de inmutabilidad lo permite).
+-- ------------------------------------------------------------
+DO $$
+DECLARE
+  v_u  uuid := '0840c000-0000-4000-8000-000000000007';
+  v_id uuid;
+  v_p  record;
+BEGIN
+  INSERT INTO auth.users (id, instance_id, aud, role, email, raw_user_meta_data, created_at, updated_at)
+  VALUES (v_u, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+          't084-borrar@example.test', '{}'::jsonb, now(), now());
+  -- Su cuenta personal (la crea handle_new_user) sale primero.
+  DELETE FROM public.accounts WHERE owner_user_id = v_u;
+
+  INSERT INTO public.installment_payments
+    (account_id, plan_id, installment_id, amount, paid_on, registered_by, voided_at, voided_by, void_reason)
+  VALUES (current_setting('t084.acc')::uuid, '0840c000-0000-4000-8000-000000000101',
+          '0840c000-0000-4000-8000-000000000202', 1, current_date, v_u, now(), v_u, 'Prueba de borrado')
+  RETURNING id INTO v_id;
+
+  DELETE FROM auth.users WHERE id = v_u;
+
+  SELECT * INTO v_p FROM public.installment_payments WHERE id = v_id;
+  IF NOT FOUND OR v_p.registered_by IS NOT NULL OR v_p.voided_by IS NOT NULL OR v_p.amount <> 1 THEN
+    RAISE EXCEPTION 'FALLO borrar usuario: el pago no quedó con registered_by/voided_by en NULL';
+  END IF;
+END $$;
+
+-- ------------------------------------------------------------
+-- Borrados: un plan con pagos en una cuenta viva no se borra (ni sus
+-- pagos, ni siquiera como postgres); la cuenta entera sí, con su libro.
+-- ------------------------------------------------------------
+DO $$
+DECLARE
+  v_acc uuid := current_setting('t084.acc')::uuid;
+  v_msg text;
+BEGIN
+  BEGIN
+    DELETE FROM public.payment_plans WHERE id = '0840c000-0000-4000-8000-000000000101';
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL THEN
+    RAISE EXCEPTION 'FALLO borrar plan: un plan con pagos se borró';
+  END IF;
+
+  v_msg := NULL;
+  BEGIN
+    DELETE FROM public.installment_payments WHERE plan_id = '0840c000-0000-4000-8000-000000000101';
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL OR v_msg NOT ILIKE '%no se borra%' THEN
+    RAISE EXCEPTION 'FALLO libro: postgres borró pagos de una cuenta viva (mensaje: %)', v_msg;
+  END IF;
+
+  DELETE FROM public.accounts WHERE id = v_acc;
+  IF EXISTS (SELECT 1 FROM public.installment_payments WHERE account_id = v_acc) THEN
+    RAISE EXCEPTION 'FALLO borrar cuenta: quedaron pagos';
+  END IF;
+END $$;
+
+SELECT '084: todos los casos OK' AS resultado;
 
 ROLLBACK;

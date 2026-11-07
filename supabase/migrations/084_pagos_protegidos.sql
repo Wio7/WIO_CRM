@@ -19,8 +19,9 @@
 --   6. Trigger que impide a un usuario (authenticated/anon) tocar montos,
 --      fechas y estados de cuotas y planes: solo los RPC de aquí (dueño
 --      postgres) y el service role.
---   7. RLS: cronograma (planes y cuotas) para cobranzas, contabilidad,
---      gerencia y legal; cobranza (pagos, gestiones, avisos, abonos) para
+--   7. RLS: cronograma (planes + vista installment_schedule, sin pagos)
+--      para cobranzas, contabilidad, gerencia y legal; cobranza (tabla
+--      installments, pagos, saldos, gestiones, avisos, abonos) para
 --      cobranzas, contabilidad y gerencia.
 --   8. RPCs: register_installment_payment, register_advance_payment,
 --      void_installment_payment, create_payment_plan, reject_client_voucher
@@ -354,11 +355,10 @@ CREATE POLICY account_module_members_delete ON public.account_module_members FOR
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.installment_payments (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  -- RESTRICT: un pago no desaparece en cascada. Una cuenta, plan o cuota
-  -- con pagos no se puede borrar; los pagos se anulan.
-  account_id          uuid NOT NULL REFERENCES public.accounts(id) ON DELETE RESTRICT,
-  plan_id             uuid NOT NULL REFERENCES public.payment_plans(id) ON DELETE RESTRICT,
-  installment_id      uuid NOT NULL REFERENCES public.installments(id) ON DELETE RESTRICT,
+  -- Las FKs se fijan más abajo (bloque DO), también si la tabla ya existía.
+  account_id          uuid NOT NULL,
+  plan_id             uuid NOT NULL,
+  installment_id      uuid NOT NULL,
   amount              numeric(12,2) NOT NULL CHECK (amount > 0),
   method              text,
   reference           text,
@@ -378,6 +378,26 @@ CREATE TABLE IF NOT EXISTS public.installment_payments (
   void_reason         text,
   CONSTRAINT installment_payments_void_has_reason CHECK ((voided_at IS NULL) = (void_reason IS NULL))
 );
+
+-- Borrados:
+--   · cuenta: CASCADE (el super admin borra cuentas enteras, con su libro);
+--   · plan o cuota con pagos en una cuenta viva: NO ACTION = se rechaza.
+--     NO ACTION (no RESTRICT) porque se revisa al final de la sentencia:
+--     al borrar la cuenta, el libro ya se fue por su propia cascada.
+-- Se recrean siempre: idempotente y corrige una 084 aplicada antes.
+DO $$
+BEGIN
+  ALTER TABLE public.installment_payments DROP CONSTRAINT IF EXISTS installment_payments_account_id_fkey;
+  ALTER TABLE public.installment_payments DROP CONSTRAINT IF EXISTS installment_payments_plan_id_fkey;
+  ALTER TABLE public.installment_payments DROP CONSTRAINT IF EXISTS installment_payments_installment_id_fkey;
+  ALTER TABLE public.installment_payments
+    ADD CONSTRAINT installment_payments_account_id_fkey
+      FOREIGN KEY (account_id) REFERENCES public.accounts(id) ON DELETE CASCADE,
+    ADD CONSTRAINT installment_payments_plan_id_fkey
+      FOREIGN KEY (plan_id) REFERENCES public.payment_plans(id) ON DELETE NO ACTION,
+    ADD CONSTRAINT installment_payments_installment_id_fkey
+      FOREIGN KEY (installment_id) REFERENCES public.installments(id) ON DELETE NO ACTION;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_installment_payments_installment
   ON public.installment_payments(installment_id) WHERE voided_at IS NULL;
@@ -400,33 +420,39 @@ DROP POLICY IF EXISTS installment_payments_select ON public.installment_payments
 CREATE POLICY installment_payments_select ON public.installment_payments FOR SELECT
   USING (public.can_access_module(account_id, 'cobranzas'));
 
--- Un pago no se borra ni se reescribe (ni siquiera con service role): lo
--- único que cambia es la anulación, una vez.
+-- Un pago no se borra ni se reescribe (ni siquiera con service role).
+-- Solo se permite:
+--   · anularlo una vez (voided_at, voided_by, void_reason);
+--   · que registered_by / voided_by pasen a NULL (ON DELETE SET NULL al
+--     borrar el usuario de Auth);
+--   · borrarlo cuando se está borrando su cuenta entera (cascada).
 CREATE OR REPLACE FUNCTION public.guard_installment_payment_immutable()
-RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
+    IF NOT EXISTS (SELECT 1 FROM public.accounts WHERE id = OLD.account_id) THEN
+      RETURN OLD;
+    END IF;
     RAISE EXCEPTION 'Un pago no se borra: se anula con void_installment_payment' USING ERRCODE = '42501';
   END IF;
-  IF OLD.voided_at IS NOT NULL
-     OR NEW.voided_at IS NULL
-     OR NEW.id IS DISTINCT FROM OLD.id
-     OR NEW.account_id IS DISTINCT FROM OLD.account_id
-     OR NEW.plan_id IS DISTINCT FROM OLD.plan_id
-     OR NEW.installment_id IS DISTINCT FROM OLD.installment_id
-     OR NEW.amount IS DISTINCT FROM OLD.amount
-     OR NEW.method IS DISTINCT FROM OLD.method
-     OR NEW.reference IS DISTINCT FROM OLD.reference
-     OR NEW.voucher_path IS DISTINCT FROM OLD.voucher_path
-     OR NEW.paid_on IS DISTINCT FROM OLD.paid_on
-     OR NEW.late_fee_at_payment IS DISTINCT FROM OLD.late_fee_at_payment
-     OR NEW.registered_by IS DISTINCT FROM OLD.registered_by
-     OR NEW.legacy IS DISTINCT FROM OLD.legacy
-     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
-    RAISE EXCEPTION 'Un pago registrado no se modifica; solo se anula una vez' USING ERRCODE = '42501';
+
+  -- Usuario de Auth borrado: sus referencias quedan en NULL.
+  IF (NEW.registered_by IS NULL OR NEW.registered_by IS NOT DISTINCT FROM OLD.registered_by)
+     AND (NEW.voided_by IS NULL OR NEW.voided_by IS NOT DISTINCT FROM OLD.voided_by)
+     AND (to_jsonb(NEW) - 'registered_by' - 'voided_by') = (to_jsonb(OLD) - 'registered_by' - 'voided_by') THEN
+    RETURN NEW;
   END IF;
-  RETURN NEW;
+
+  -- Anulación: una vez, y nada más cambia.
+  IF OLD.voided_at IS NULL
+     AND NEW.voided_at IS NOT NULL
+     AND (to_jsonb(NEW) - 'voided_at' - 'voided_by' - 'void_reason')
+         = (to_jsonb(OLD) - 'voided_at' - 'voided_by' - 'void_reason') THEN
+    RETURN NEW;
+  END IF;
+
+  RAISE EXCEPTION 'Un pago registrado no se modifica; solo se anula una vez' USING ERRCODE = '42501';
 END;
 $$;
 ALTER FUNCTION public.guard_installment_payment_immutable() OWNER TO postgres;
@@ -539,7 +565,32 @@ LEFT JOIN LATERAL (
 ) led ON true
 LEFT JOIN LATERAL (
   SELECT SUM(y.amount) AS prepaid FROM public.plan_prepayments y WHERE y.plan_id = p.id
-) pp ON true;
+) pp ON true
+-- Saldos = datos de cobranza: legal (que sí lee payment_plans) no los ve.
+-- El servidor (service_role / postgres) sigue leyendo todo.
+WHERE current_user NOT IN ('authenticated', 'anon')
+   OR public.can_access_module(p.account_id, 'cobranzas');
+
+-- Cronograma sin pagos, para quien entra a cronograma (legal incluido):
+-- número, monto, fecha y un estado grueso. Vista de dueño (postgres,
+-- security_invoker = false) porque la tabla installments ahora solo la
+-- leen cobranzas, contabilidad, gerencia y el dueño; el filtro va adentro.
+CREATE OR REPLACE VIEW public.installment_schedule
+WITH (security_invoker = false) AS
+SELECT
+  i.id,
+  i.plan_id,
+  i.account_id,
+  i.number,
+  i.amount,
+  i.due_date,
+  (CASE WHEN i.status = 'pendiente' THEN 'pendiente' ELSE 'cerrada' END)::text AS state
+FROM public.installments i
+WHERE public.can_access_module(i.account_id, 'cronograma');
+
+ALTER VIEW public.installment_schedule OWNER TO postgres;
+REVOKE ALL ON public.installment_schedule FROM PUBLIC, anon;
+GRANT SELECT ON public.installment_schedule TO authenticated, service_role;
 
 -- ============================================================
 -- 6. Montos, fechas y estados solo por función autorizada
@@ -562,7 +613,9 @@ BEGIN
          OR NEW.paid_amount IS NOT NULL
          OR NEW.paid_at IS NOT NULL
          OR NEW.payment_id IS NOT NULL
-         OR NEW.registered_by IS NOT NULL THEN
+         OR NEW.registered_by IS NOT NULL
+         OR NEW.declared_amount IS NOT NULL
+         OR NEW.voucher_rejection IS NOT NULL THEN
         RAISE EXCEPTION 'Una cuota nueva nace pendiente y sin pago; los pagos se registran mediante una función autorizada'
           USING ERRCODE = '42501';
       END IF;
@@ -575,7 +628,10 @@ BEGIN
        OR NEW.payment_id IS DISTINCT FROM OLD.payment_id
        OR NEW.plan_id IS DISTINCT FROM OLD.plan_id
        OR NEW.account_id IS DISTINCT FROM OLD.account_id
-       OR NEW.number IS DISTINCT FROM OLD.number THEN
+       OR NEW.number IS DISTINCT FROM OLD.number
+       -- Lo declara el cliente (portal, service role) y lo resuelven los RPC.
+       OR NEW.declared_amount IS DISTINCT FROM OLD.declared_amount
+       OR NEW.voucher_rejection IS DISTINCT FROM OLD.voucher_rejection THEN
       RAISE EXCEPTION 'Montos, fechas y estado de una cuota se cambian mediante una función autorizada'
         USING ERRCODE = '42501';
     END IF;
@@ -583,6 +639,11 @@ BEGIN
     IF TG_OP = 'INSERT' THEN
       IF NEW.status IS DISTINCT FROM 'activo' THEN
         RAISE EXCEPTION 'Un plan nuevo nace activo; su estado lo cambia una función autorizada'
+          USING ERRCODE = '42501';
+      END IF;
+      -- Los términos los copia create_payment_plan desde la cuenta.
+      IF NEW.collection_terms IS NOT NULL THEN
+        RAISE EXCEPTION 'Los términos de cobranza del plan los fija una función autorizada'
           USING ERRCODE = '42501';
       END IF;
     ELSIF NEW.total_amount IS DISTINCT FROM OLD.total_amount
@@ -629,16 +690,18 @@ DROP POLICY IF EXISTS payment_plans_delete ON public.payment_plans;
 CREATE POLICY payment_plans_delete ON public.payment_plans FOR DELETE
   USING (public.has_full_access(account_id));
 
+-- La tabla installments tiene datos de pago (paid_*, voucher): solo el
+-- grupo de cobranza. Legal lee el cronograma por installment_schedule.
 DROP POLICY IF EXISTS installments_select ON public.installments;
 CREATE POLICY installments_select ON public.installments FOR SELECT
-  USING (public.can_access_module(account_id, 'cronograma'));
+  USING (public.can_access_module(account_id, 'cobranzas'));
 DROP POLICY IF EXISTS installments_insert ON public.installments;
 CREATE POLICY installments_insert ON public.installments FOR INSERT
   WITH CHECK (public.can_manage_schedule(account_id));
 DROP POLICY IF EXISTS installments_update ON public.installments;
 CREATE POLICY installments_update ON public.installments FOR UPDATE
-  USING (public.can_access_module(account_id, 'cronograma'))
-  WITH CHECK (public.can_access_module(account_id, 'cronograma'));
+  USING (public.can_access_module(account_id, 'cobranzas'))
+  WITH CHECK (public.can_access_module(account_id, 'cobranzas'));
 DROP POLICY IF EXISTS installments_delete ON public.installments;
 CREATE POLICY installments_delete ON public.installments FOR DELETE
   USING (public.has_full_access(account_id));
