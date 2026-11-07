@@ -325,6 +325,20 @@ describe('dispatchInboundToAiReply — sólo el botón la calla (058)', () => {
     )
   })
 
+  it('no se calla al llegar al tope de respuestas de la cuenta', async () => {
+    h.state.conv = {
+      assigned_agent_id: null,
+      ai_autoreply_disabled: false,
+      ai_reply_count: 6,
+    }
+    h.state.account = GOLDEN
+    await dispatchInboundToAiReply(ARGS)
+    expect(h.state.rpcCalls[0]).toEqual(
+      expect.objectContaining({ args: { conversation_id: 'conv-1', max_replies: 200 } }),
+    )
+    expect(h.engineSendText).toHaveBeenCalledTimes(1)
+  })
+
   it('el botón "Yo" sí la calla', async () => {
     h.state.conv = {
       assigned_agent_id: 'agent-9',

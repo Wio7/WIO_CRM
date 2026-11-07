@@ -20,12 +20,22 @@ interface AiConfigRow {
  */
 export const LLAVE_DEL_ENTORNO = 'env'
 
+/**
+ * `api_key = 'env:OPENAI_API_KEY_BROKER_HOME'`: la llave propia de una
+ * cuenta, también en Vercel, para que cada cliente pague su consumo.
+ * Solo se aceptan variables que empiecen con el nombre del proveedor,
+ * así una fila de la base no puede leer otro secreto del servidor.
+ */
+const VARIABLE_PROPIA = /^env:((?:OPENAI|ANTHROPIC)_API_KEY_[A-Z0-9_]+)$/
+
 /** La llave en claro: la del entorno o la guardada (cifrada). */
 export function llaveDeUso(stored: string, provider: 'openai' | 'anthropic'): string {
   if (stored === LLAVE_DEL_ENTORNO) {
     const env = provider === 'openai' ? process.env.OPENAI_API_KEY : process.env.ANTHROPIC_API_KEY
     return (env ?? '').trim()
   }
+  const propia = VARIABLE_PROPIA.exec(stored)
+  if (propia) return (process.env[propia[1]] ?? '').trim()
   return decrypt(stored)
 }
 

@@ -11,6 +11,9 @@ import { diasLibres, equipoQuePuedeAgendar } from '@/lib/agenda/slots'
 import { agendaEnTexto, esTipoDeCita, reservarCita } from '@/lib/agenda/reservar'
 import { catalogoDeGolden, catalogoEnTexto, esCuentaDeGolden, sinCatalogoPegado } from '@/lib/golden/catalogo'
 
+/** Respuestas por chat cuando la cuenta pide que la IA nunca se calle. */
+const TOPE_SI_NUNCA_SE_CALLA = 200
+
 interface DispatchArgs {
   /** Tenancy key — drives config, contact, and whatsapp_config lookups. */
   accountId: string
@@ -92,7 +95,10 @@ export async function dispatchInboundToAiReply(
     if (conv.ai_autoreply_disabled) return // el asesor tomó la conversación
     // Cheap early-out; the authoritative cap check is the atomic claim
     // below (this read can race a concurrent inbound).
-    if (conv.ai_reply_count >= config.autoReplyMaxPerConversation) return
+    // Con "solo el botón la para" la IA no se calla a las N respuestas:
+    // el tope queda alto, solo como freno si dos bots se contestan solos.
+    const tope = modo.soloElBoton ? TOPE_SI_NUNCA_SE_CALLA : config.autoReplyMaxPerConversation
+    if (conv.ai_reply_count >= tope) return
 
     const messages = await buildConversationContext(db, conversationId)
     if (messages.length === 0) return
@@ -220,7 +226,7 @@ export async function dispatchInboundToAiReply(
       'claim_ai_reply_slot',
       {
         conversation_id: conversationId,
-        max_replies: config.autoReplyMaxPerConversation,
+        max_replies: tope,
       },
     )
     if (claimErr || claimed !== true) return
