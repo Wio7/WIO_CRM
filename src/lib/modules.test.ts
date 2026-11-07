@@ -90,3 +90,9 @@ describe('Cobranzas depende de Cuotas', () => {
     expect(isModuleDisabled('/collections', [])).toBe(false);
   });
 });
+
+describe('rutas desconocidas en disabled_modules', () => {
+  it('siguen bloqueadas aunque no estén en el registro', () => {
+    expect(isModuleDisabled('/legacy', ['/legacy'])).toBe(true);
+  });
+});

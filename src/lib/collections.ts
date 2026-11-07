@@ -87,9 +87,13 @@ export function buildDebtors(
   lastReminderByInstallment: ReadonlyMap<string, string> = new Map(),
 ): Debtor[] {
   const map = new Map<string, Debtor>();
+  const seen = new Set<string>();
   for (const r of rows) {
     const plan = r.plan;
     if (!plan || plan.status !== "activo" || !plan.contact) continue;
+    // La paginación puede repetir una cuota: se cuenta una sola vez.
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
     if (r.due_date >= today) continue;
     const key = `${plan.contact.id}|${plan.currency}`;
     let d = map.get(key);
@@ -133,9 +137,12 @@ export function buildDebtors(
 /** Deuda vencida por proyecto y manzana (para ver dónde se concentra). */
 export function groupByManzana(rows: readonly OverdueInstallment[], today: string): GroupTotal[] {
   const map = new Map<string, GroupTotal & { contacts: Set<string> }>();
+  const seen = new Set<string>();
   for (const r of rows) {
     const plan = r.plan;
     if (!plan || plan.status !== "activo" || !plan.contact || r.due_date >= today) continue;
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
     const project = plan.unit?.project?.name ?? "Sin proyecto";
     const manzana = plan.unit?.manzana ?? "—";
     const key = `${project} · Mz ${manzana}|${plan.currency}`;
@@ -164,11 +171,52 @@ export function groupByManzana(rows: readonly OverdueInstallment[], today: strin
     .sort((a, b) => b.overdueAmount - a.overdueAmount);
 }
 
+/**
+ * Cuotas vencidas de planes activos cuyo cliente no se puede ver (el
+ * contacto se borró o el agente no tiene acceso a él). Se muestran como
+ * aviso para que el total no parezca completo cuando no lo es.
+ */
+export function hiddenOverdue(
+  rows: readonly OverdueInstallment[],
+  today: string,
+): { count: number; amount: number } {
+  const seen = new Set<string>();
+  let count = 0;
+  let amount = 0;
+  for (const r of rows) {
+    if (!r.plan || r.plan.status !== "activo" || r.plan.contact || r.due_date >= today) continue;
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    count += 1;
+    amount += Number(r.amount) || 0;
+  }
+  return { count, amount: Math.round(amount * 100) / 100 };
+}
+
+/**
+ * Fecha dd/mm/aaaa. Una fecha sola (YYYY-MM-DD) se muestra tal cual; una
+ * con hora (timestamptz) se pasa al día de Lima.
+ */
+export function fechaLima(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split("-");
+    return `${d}/${m}/${y}`;
+  }
+  const [y, m, d] = hoyLima(new Date(iso)).split("-");
+  return `${d}/${m}/${y}`;
+}
+
 /** Enlace de WhatsApp con un mensaje de cobranza amable listo para enviar. */
 export function whatsappLink(d: Debtor, monto: string): string | null {
   const digits = (d.phone ?? "").replace(/\D/g, "");
-  if (digits.length < 9) return null;
-  const phone = digits.length === 9 ? `51${digits}` : digits;
+  // Celular peruano: 9 dígitos que empiezan con 9 (se le pone 51). Un fijo
+  // con código de ciudad (056...) no tiene WhatsApp. Más de 10 dígitos ya
+  // trae código de país.
+  let phone: string;
+  if (digits.length === 9 && digits.startsWith("9")) phone = `51${digits}`;
+  else if (digits.length >= 11) phone = digits;
+  else return null;
   const nombre = d.name.split(/\s+/)[0];
   const lotes = d.units.length ? ` del lote ${d.units.join(", ")}` : "";
   const cuotas = d.overdueCount === 1 ? "una cuota pendiente" : `${d.overdueCount} cuotas pendientes`;
@@ -186,7 +234,7 @@ export function debtorsCsv(list: readonly Debtor[]): string {
   };
   const head = ["Cliente", "DNI", "Teléfono", "Proyecto", "Lotes", "Cuotas vencidas", "Monto vencido", "Moneda", "Vence desde", "Días de atraso", "Tramo", "Último aviso"];
   const lines = list.map((d) =>
-    [d.name, d.dni, d.phone, d.projects.join(", "), d.units.join(", "), d.overdueCount, d.overdueAmount.toFixed(2), d.currency, d.oldestDue, d.daysLate, d.tramo, d.lastReminder?.slice(0, 10) ?? ""]
+    [d.name, d.dni, d.phone, d.projects.join(", "), d.units.join(", "), d.overdueCount, d.overdueAmount.toFixed(2), d.currency, d.oldestDue, d.daysLate, d.tramo, d.lastReminder ? fechaLima(d.lastReminder) : ""]
       .map(esc)
       .join(";"),
   );
