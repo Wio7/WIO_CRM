@@ -9,9 +9,14 @@
 //
 // Allow-listed, never `*`: set APP_CORS_ORIGINS to a comma-separated
 // list of exact origins (scheme + host [+ port], no trailing slash).
-// Unset → no CORS headers at all, so behaviour is unchanged for
-// deployments that don't run a companion app.
+//
+// Las apps de los clientes de Wio viven en subdominios del dominio
+// propio (golden.wiocompany.com, broker.wiocompany.com...) y entran
+// siempre, sin sumar cada una a mano en Vercel. Solo subdominios de
+// wiocompany.com, que es nuestro: nadie de afuera puede publicar ahí.
 // ============================================================
+
+const DOMINIO_PROPIO = 'wiocompany.com';
 
 function allowedOrigins(): string[] {
   return (process.env.APP_CORS_ORIGINS ?? '')
@@ -20,10 +25,30 @@ function allowedOrigins(): string[] {
     .filter(Boolean);
 }
 
+/** https://<algo>.wiocompany.com, sin puerto ni ruta. */
+function esSubdominioPropio(origin: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === 'https:' &&
+    url.origin === origin &&
+    url.port === '' &&
+    url.hostname.endsWith(`.${DOMINIO_PROPIO}`)
+  );
+}
+
+export function origenPermitido(origin: string | null): boolean {
+  return !!origin && (allowedOrigins().includes(origin) || esSubdominioPropio(origin));
+}
+
 /** CORS headers for this request, or `{}` if its origin isn't allowed. */
 export function corsHeaders(request: Request): Record<string, string> {
   const origin = request.headers.get('origin');
-  if (!origin || !allowedOrigins().includes(origin)) return {};
+  if (!origin || !origenPermitido(origin)) return {};
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
