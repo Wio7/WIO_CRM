@@ -36,7 +36,7 @@ lote, sin rehacer el cronograma a mano.
     céntimos exactos; ninguna baja de 0).
 - Se registra en `plan_prepayments` (monto, modo, método, operación, nota,
   autor, detalle antes/después) para auditoría.
-- Se aplica con un RPC `apply_prepayment` (transacción, SECURITY INVOKER):
+- Se aplica con un RPC `apply_prepayment` (transacción, SECURITY DEFINER con permiso explícito; ver 083):
   recibe los montos nuevos calculados en la app y valida en la base que
   las cuotas sean del plan, pendientes y futuras, que ninguna suba ni baje
   de 0 y que la suma rebajada sea exactamente el abono.

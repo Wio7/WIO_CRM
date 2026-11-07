@@ -91,7 +91,7 @@ export default function CollectionsPage() {
         const { data, error: err } = await supabase
           .from("installments")
           .select(
-            "id, plan_id, number, amount, due_date, plan:payment_plans(id, currency, status, contact:contacts(id, name, phone, dni), unit:real_estate_units(code, manzana, project:real_estate_projects(name)))",
+            "id, plan_id, number, amount, due_date, voucher_path, plan:payment_plans(id, currency, status, contact:contacts(id, name, phone, dni), unit:real_estate_units(code, manzana, project:real_estate_projects(name)))",
           )
           .eq("status", "pendiente")
           .lt("due_date", today)
@@ -242,7 +242,7 @@ export default function CollectionsPage() {
         </div>
         <div className="flex gap-2">
         {esAdmin && accountId && (
-          <Button variant="outline" size="sm" onClick={() => setMoraOpen(true)}>
+          <Button variant="outline" size="sm" onClick={() => setMoraOpen(true)} disabled={loading}>
             <Percent className="h-4 w-4" /> {conMora ? "Mora" : "Configurar mora"}
           </Button>
         )}
@@ -377,6 +377,11 @@ export default function CollectionsPage() {
                         <td className="px-3 py-2 text-right">
                           <span className="font-semibold">{formatCurrency(d.overdueAmount, d.currency)}</span>
                           <span className="block text-xs text-muted-foreground">{d.overdueCount} cuota{d.overdueCount === 1 ? "" : "s"}</span>
+                          {d.inReviewCount > 0 && (
+                            <span className="block text-xs text-sky-300">
+                              + {formatCurrency(d.inReviewAmount, d.currency)} con voucher en revisión
+                            </span>
+                          )}
                           {conMora && moraDe(d) > 0 && (
                             <span className="block text-xs text-amber-400">+ mora {formatCurrency(moraDe(d), d.currency)}</span>
                           )}
@@ -396,7 +401,7 @@ export default function CollectionsPage() {
                                 <ClipboardList className="h-3.5 w-3.5" /> Gestión
                               </Button>
                             )}
-                            <CobrarButton d={d} />
+                            {d.overdueCount > 0 ? <CobrarButton d={d} /> : <EnRevision d={d} />}
                           </div>
                         </td>
                       </tr>
@@ -432,7 +437,7 @@ export default function CollectionsPage() {
                           <ClipboardList className="h-3.5 w-3.5" /> Gestión
                         </Button>
                       )}
-                      <CobrarButton d={d} />
+                      {d.overdueCount > 0 ? <CobrarButton d={d} /> : <EnRevision d={d} />}
                     </div>
                   </li>
                 ))}
@@ -507,6 +512,14 @@ function Seguimiento({ accion, estado }: { accion?: CollectionAction; estado: Pr
           {estado === "vencida" ? "promesa vencida" : "promete"} {fecha(accion.promise_date)}
         </span>
       )}
+    </span>
+  );
+}
+
+function EnRevision({ d }: { d: Debtor }) {
+  return (
+    <span className="rounded-full bg-sky-500/10 px-2 py-1 text-xs text-sky-300">
+      {d.inReviewCount} voucher{d.inReviewCount === 1 ? "" : "s"} en revisión
     </span>
   );
 }

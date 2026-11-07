@@ -9,6 +9,8 @@ export interface OverdueInstallment {
   number: number;
   amount: number | string;
   due_date: string; // YYYY-MM-DD
+  /** Voucher subido por el cliente y aún sin aprobar (047): no es deuda a cobrar. */
+  voucher_path?: string | null;
   plan: {
     id: string;
     currency: string;
@@ -41,6 +43,9 @@ export interface Debtor {
   tramo: Tramo;
   /** Último aviso de cuota que se le mandó (ISO) o null. */
   lastReminder: string | null;
+  /** Cuotas vencidas cuyo voucher ya mandó el cliente y espera aprobación. */
+  inReviewCount: number;
+  inReviewAmount: number;
 }
 
 export interface GroupTotal {
@@ -87,6 +92,7 @@ export function buildDebtors(
   lastReminderByInstallment: ReadonlyMap<string, string> = new Map(),
 ): Debtor[] {
   const map = new Map<string, Debtor>();
+  const reviewOldest = new Map<string, string>();
   const seen = new Set<string>();
   for (const r of rows) {
     const plan = r.plan;
@@ -108,16 +114,26 @@ export function buildDebtors(
         projects: [],
         overdueCount: 0,
         overdueAmount: 0,
-        oldestDue: r.due_date,
+        oldestDue: "",
         daysLate: 0,
         tramo: "1-30",
         lastReminder: null,
+        inReviewCount: 0,
+        inReviewAmount: 0,
       };
       map.set(key, d);
+      reviewOldest.set(key, r.due_date);
     }
-    d.overdueCount += 1;
-    d.overdueAmount += Number(r.amount) || 0;
-    if (r.due_date < d.oldestDue) d.oldestDue = r.due_date;
+    if (r.voucher_path) {
+      // Ya mandó su voucher: se muestra aparte, no se le cobra otra vez.
+      d.inReviewCount += 1;
+      d.inReviewAmount += Number(r.amount) || 0;
+      if (r.due_date < reviewOldest.get(key)!) reviewOldest.set(key, r.due_date);
+    } else {
+      d.overdueCount += 1;
+      d.overdueAmount += Number(r.amount) || 0;
+      if (!d.oldestDue || r.due_date < d.oldestDue) d.oldestDue = r.due_date;
+    }
     const code = plan.unit?.code;
     if (code && !d.units.includes(code)) d.units.push(code);
     const project = plan.unit?.project?.name;
@@ -126,12 +142,21 @@ export function buildDebtors(
     if (sent && (!d.lastReminder || sent > d.lastReminder)) d.lastReminder = sent;
   }
   const out = [...map.values()];
-  for (const d of out) {
+  for (const [key, d] of map) {
+    // Sin deuda propia (todo en revisión): el atraso se mide desde la cuota en revisión.
+    if (!d.oldestDue) d.oldestDue = reviewOldest.get(key)!;
     d.daysLate = daysBetween(d.oldestDue, today);
     d.tramo = tramoDe(d.daysLate);
     d.overdueAmount = Math.round(d.overdueAmount * 100) / 100;
+    d.inReviewAmount = Math.round(d.inReviewAmount * 100) / 100;
   }
-  return out.sort((a, b) => b.daysLate - a.daysLate || b.overdueAmount - a.overdueAmount);
+  // Primero quien de verdad debe; los que solo esperan aprobación, al final.
+  return out.sort(
+    (a, b) =>
+      Number(b.overdueCount > 0) - Number(a.overdueCount > 0) ||
+      b.daysLate - a.daysLate ||
+      b.overdueAmount - a.overdueAmount,
+  );
 }
 
 /** Deuda vencida por proyecto y manzana (para ver dónde se concentra). */
@@ -141,6 +166,7 @@ export function groupByManzana(rows: readonly OverdueInstallment[], today: strin
   for (const r of rows) {
     const plan = r.plan;
     if (!plan || plan.status !== "activo" || !plan.contact || r.due_date >= today) continue;
+    if (r.voucher_path) continue;
     if (seen.has(r.id)) continue;
     seen.add(r.id);
     const project = plan.unit?.project?.name ?? "Sin proyecto";
@@ -209,7 +235,7 @@ export function fechaLima(iso: string | null | undefined): string {
 
 /** Enlace de WhatsApp con un mensaje de cobranza amable listo para enviar. */
 export function whatsappLink(d: Debtor, monto: string): string | null {
-  const digits = (d.phone ?? "").replace(/\D/g, "");
+  const digits = (d.phone ?? "").replace(/\D/g, "").replace(/^00/, "");
   // Celular peruano: 9 dígitos que empiezan con 9 (se le pone 51). Un fijo
   // con código de ciudad (056...) no tiene WhatsApp. Más de 10 dígitos ya
   // trae código de país.
@@ -229,12 +255,14 @@ export function whatsappLink(d: Debtor, monto: string): string | null {
 /** CSV (separado por punto y coma, para Excel en español). */
 export function debtorsCsv(list: readonly Debtor[]): string {
   const esc = (v: string | number | null) => {
-    const s = v == null ? "" : String(v);
+    let s = v == null ? "" : String(v);
+    // Excel ejecuta como fórmula lo que empieza con = + - @ (nombres de WhatsApp).
+    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const head = ["Cliente", "DNI", "Teléfono", "Proyecto", "Lotes", "Cuotas vencidas", "Monto vencido", "Moneda", "Vence desde", "Días de atraso", "Tramo", "Último aviso"];
+  const head = ["Cliente", "DNI", "Teléfono", "Proyecto", "Lotes", "Cuotas vencidas", "Monto vencido", "Moneda", "Vence desde", "Días de atraso", "Tramo", "Último aviso", "En revisión"];
   const lines = list.map((d) =>
-    [d.name, d.dni, d.phone, d.projects.join(", "), d.units.join(", "), d.overdueCount, d.overdueAmount.toFixed(2), d.currency, d.oldestDue, d.daysLate, d.tramo, d.lastReminder ? fechaLima(d.lastReminder) : ""]
+    [d.name, d.dni, d.phone, d.projects.join(", "), d.units.join(", "), d.overdueCount, d.overdueAmount.toFixed(2), d.currency, d.oldestDue, d.daysLate, d.tramo, d.lastReminder ? fechaLima(d.lastReminder) : "", d.inReviewAmount ? d.inReviewAmount.toFixed(2) : ""]
       .map(esc)
       .join(";"),
   );

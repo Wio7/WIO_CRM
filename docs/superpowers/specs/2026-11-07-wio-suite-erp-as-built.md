@@ -56,7 +56,7 @@ para que un revisor sin contexto pueda juzgarlo contra el código real.
   enlace de WhatsApp con mensaje (solo celulares peruanos o con código de
   país), CSV con `;`, fechas en día de Lima.
 - Último aviso automático: `installment_reminders` (052) solo enviados.
-- Agentes: ven solo sus clientes (RLS de contactos); la pantalla lo dice.
+- Agentes: ven solo los NOMBRES de sus clientes (RLS de contactos). Montos, lotes y abonos de planes (payment_plans, installments, plan_prepayments) son legibles por cualquier agente de la cuenta (policies de 043). Pendiente de decisión del dueño.
 
 ## 5. Gestiones de cobranza (PR #27, #28, migración 082 aplicada)
 
@@ -110,3 +110,11 @@ asistente (el dueño pidió avanzar sin preguntas).
 `src/components/saas-owner/account-modules-dialog.tsx`,
 `supabase/migrations/{082_gestiones_cobranza,083_mora_y_abonos}.sql`.
 Contexto: `supabase/migrations/{043,047,052,066,067}*.sql`.
+
+## 9. Corrección tras la revisión EGM + superpowers (2026-11-07)
+
+- "pagado + saldo = total" NO está garantizado en la base: las policies de
+  043 dejan a cualquier agente editar montos y estados de cuotas y planes
+  directo, y registrar un pago acepta cualquier monto. El RPC de abonos
+  solo protege su propio camino. Ver `docs/superpowers/reviews/2026-11-07-erp-review.md` (A).
+- Cobranzas ya no trata como deuda las cuotas con voucher en revisión.

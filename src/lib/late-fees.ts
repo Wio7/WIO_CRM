@@ -39,6 +39,8 @@ export function lateFeesByDebtor(
     if (!plan || plan.status !== "activo" || !plan.contact || r.due_date >= today) continue;
     if (seen.has(r.id)) continue;
     seen.add(r.id);
+    // Voucher en revisión: el cliente ya pagó, no se le calcula mora.
+    if (r.voucher_path) continue;
     const fee = lateFee(Number(r.amount) || 0, daysBetween(r.due_date, today), s);
     if (!fee) continue;
     const key = `${plan.contact.id}|${plan.currency || "PEN"}`;

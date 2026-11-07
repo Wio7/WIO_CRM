@@ -55,3 +55,9 @@ describe('planHealth', () => {
     expect(planHealth(plan({ status: 'suspendido' }))).toBe('otro');
   });
 });
+
+describe('revisión EGM: planes cancelados', () => {
+  it('un plan cancelado no se muestra como suspendido', () => {
+    expect(planHealth(plan({ status: 'cancelado' }))).toBe('cancelado');
+  });
+});

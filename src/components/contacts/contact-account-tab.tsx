@@ -45,6 +45,7 @@ const HEALTH: Record<ReturnType<typeof planHealth>, { label: string; className: 
   "al-dia": { label: "Al día", className: "bg-emerald-500/10 text-emerald-400" },
   "con-atraso": { label: "Con atraso", className: "bg-rose-500/10 text-rose-400" },
   pagado: { label: "Pagado", className: "bg-primary/10 text-primary" },
+  cancelado: { label: "Cancelado", className: "bg-muted text-muted-foreground line-through" },
   otro: { label: "Suspendido", className: "bg-muted text-muted-foreground" },
 };
 
@@ -59,6 +60,7 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
   const [reservations, setReservations] = useState<ReservationRow[]>([]);
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [balances, setBalances] = useState<PlanBalanceRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,6 +81,8 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
         supabase.from("payment_plan_balances").select("*").eq("contact_id", contactId),
       ]);
       if (cancelled) return;
+      // Un error de lectura no es "no tiene deudas": se dice.
+      setError(res.error?.message ?? pl.error?.message ?? bal.error?.message ?? null);
       setReservations((res.data ?? []) as unknown as ReservationRow[]);
       setPlans((pl.data ?? []) as unknown as PlanRow[]);
       setBalances((bal.data ?? []) as PlanBalanceRow[]);
@@ -94,6 +98,12 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
       <div className="flex justify-center py-8">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <p className="py-8 text-center text-sm text-rose-400">No se pudo leer la cuenta del cliente: {error}</p>
     );
   }
 

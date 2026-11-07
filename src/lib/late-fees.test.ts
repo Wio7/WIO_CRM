@@ -52,3 +52,10 @@ describe('settingsFromAccount', () => {
     expect(settingsFromAccount({ late_fee_type: 'porcentaje_mensual', late_fee_value: 2, late_fee_grace_days: -4 }).graceDays).toBe(0);
   });
 });
+
+describe('revisión EGM: mora y vouchers en revisión', () => {
+  it('no cobra mora por una cuota cuyo voucher está en revisión', () => {
+    const r = { ...cuota('v', 'c9', '2026-10-01', 500), voucher_path: 'docs/v.jpg' };
+    expect(lateFeesByDebtor([r], '2026-11-07', fija).get('c9|PEN') ?? 0).toBe(0);
+  });
+});
