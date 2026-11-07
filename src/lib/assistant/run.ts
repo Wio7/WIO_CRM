@@ -3,16 +3,18 @@
 // herramientas que necesite (hasta unas pocas vueltas) y sale una
 // respuesta corta para leer en el celular.
 //
-// Habla con OpenAI (Chat Completions con "tools"). La llave es la del
-// servidor (OPENAI_API_KEY, la misma que usa la transcripción de voz); si
-// no está, la de la IA de la cuenta cuando es de OpenAI.
+// Habla con OpenAI (Chat Completions con "tools"). Golden usa la llave del
+// servidor (OPENAI_API_KEY, la misma que usa la transcripción de voz); las
+// demás cuentas, la de su propia IA (así cada cliente paga lo suyo), y la
+// del servidor solo si no tienen una.
 // ============================================================
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadAiConfig } from "@/lib/ai/config";
 import { AI_PROVIDER_DEFAULT_MODEL } from "@/lib/ai/defaults";
-import { HERRAMIENTAS, ejecutarHerramienta, type Accion, type ContextoAsistente } from "./tools";
+import { esCuentaDeGolden } from "@/lib/golden/catalogo";
+import { HERRAMIENTAS, ejecutarHerramienta, marcaDeLaCuenta, type Accion, type ContextoAsistente } from "./tools";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const VUELTAS_MAXIMAS = 5;
@@ -37,15 +39,16 @@ interface MensajeOpenAi {
 async function credenciales(db: SupabaseClient, accountId: string) {
   const env = process.env.OPENAI_API_KEY?.trim();
   const modeloEnv = process.env.ASSISTANT_MODEL?.trim();
-  if (env) return { apiKey: env, model: modeloEnv || AI_PROVIDER_DEFAULT_MODEL.openai };
+  const delServidor = env ? { apiKey: env, model: modeloEnv || AI_PROVIDER_DEFAULT_MODEL.openai } : null;
+  if (esCuentaDeGolden(accountId) && delServidor) return delServidor;
   const config = await loadAiConfig(db, accountId, { requireActive: false }).catch(() => null);
   if (config?.provider === "openai" && config.apiKey) {
     return { apiKey: config.apiKey, model: modeloEnv || config.model };
   }
-  return null;
+  return delServidor;
 }
 
-function instrucciones(ctx: ContextoAsistente): string {
+export function instrucciones(ctx: ContextoAsistente, marca = "Golden Habitat"): string {
   const ahora = new Intl.DateTimeFormat("es-PE", {
     timeZone: "America/Lima",
     dateStyle: "full",
@@ -59,7 +62,9 @@ function instrucciones(ctx: ContextoAsistente): string {
   }[ctx.rol] ?? ctx.rol;
 
   return [
-    `Eres el Asistente Golden, el compañero de trabajo del equipo de Golden Habitat (inmobiliaria en Ica, Perú: lotes, casas y departamentos). Hablas con ${ctx.nombre}, ${cargo}${ctx.area ? ` del área de ${ctx.area}` : ""}.`,
+    esCuentaDeGolden(ctx.accountId)
+      ? `Eres el Asistente Golden, el compañero de trabajo del equipo de Golden Habitat (inmobiliaria en Ica, Perú: lotes, casas y departamentos). Hablas con ${ctx.nombre}, ${cargo}${ctx.area ? ` del área de ${ctx.area}` : ""}.`
+      : `Eres el Asistente de ${marca}, el compañero de trabajo del equipo de ${marca} (Perú). Nunca hables de otra empresa. Hablas con ${ctx.nombre}, ${cargo}${ctx.area ? ` del área de ${ctx.area}` : ""}.`,
     `Ahora en Lima es ${ahora}. Las fechas y horas que des y que recibas son hora de Lima (UTC-5, sin cambio de horario).`,
     "Tu trabajo: ayudar a vender y a cobrar. Resumes clientes, dices qué es lo urgente, miras la agenda, propones horas, agendas citas, dejas notas y redactas mensajes para que la persona los copie y los mande.",
     "Reglas:",
@@ -130,7 +135,7 @@ export async function responder(
   const texto = await conversar({
     db: ctx.db,
     accountId: ctx.accountId,
-    sistema: instrucciones(ctx),
+    sistema: instrucciones(ctx, await marcaDeLaCuenta(ctx.accountId)),
     herramientas: HERRAMIENTAS,
     ejecutar: async (nombre, argumentos) => {
       const r = await ejecutarHerramienta(ctx, nombre, argumentos);

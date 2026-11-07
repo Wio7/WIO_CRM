@@ -17,7 +17,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { diasLibres } from "@/lib/agenda/slots";
-import { catalogoDeGolden } from "@/lib/golden/catalogo";
+import { catalogoDeGolden, esCuentaDeGolden } from "@/lib/golden/catalogo";
 import { nombreDeCita } from "@/lib/agenda/tipos";
 import { notifyClient } from "@/lib/push/send";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
@@ -84,7 +84,7 @@ export const HERRAMIENTAS = [
     function: {
       name: "catalogo",
       description:
-        "QUÉ VENDE GOLDEN: los proyectos que hay en la app —casas, lotes y departamentos— con su precio, su ubicación, su financiamiento, cuántos lotes quedan libres de cada tamaño y qué unidades siguen en venta. Úsala SIEMPRE que pregunten por precios, por lo que se ofrece, por qué hay disponible o por qué mandarle a un cliente. No tiene nada que ver con los clientes asignados: contesta aunque la persona no tenga ninguno.",
+        "QUÉ VENDE LA EMPRESA: los proyectos que hay en la app —casas, lotes y departamentos— con su precio, su ubicación, su financiamiento, cuántos lotes quedan libres de cada tamaño y qué unidades siguen en venta. Úsala SIEMPRE que pregunten por precios, por lo que se ofrece, por qué hay disponible o por qué mandarle a un cliente. No tiene nada que ver con los clientes asignados: contesta aunque la persona no tenga ninguno.",
       parameters: {
         type: "object",
         properties: {
@@ -791,11 +791,53 @@ async function nombresDelEquipo(ctx: ContextoAsistente): Promise<Map<string, str
 }
 
 /**
+ * El nombre con el que se presenta la cuenta: Golden Habitat, Broker
+ * Home... Sale de `accounts.brand_name` (o del nombre de la cuenta).
+ */
+export async function marcaDeLaCuenta(accountId: string): Promise<string> {
+  if (esCuentaDeGolden(accountId)) return "Golden Habitat";
+  const { data } = await supabaseAdmin()
+    .from("accounts")
+    .select("name, brand_name")
+    .eq("id", accountId)
+    .maybeSingle();
+  return ((data?.brand_name as string | null) ?? "").trim() || ((data?.name as string | null) ?? "").trim() || "la empresa";
+}
+
+/**
+ * Lo que vende una cuenta que no es Golden: la información del negocio que
+ * se cargó para su IA de WhatsApp. Así el equipo y el cliente oyen lo mismo.
+ */
+async function catalogoDeLaCuenta(accountId: string): Promise<Resultado> {
+  const { data } = await supabaseAdmin()
+    .from("ai_configs")
+    .select("system_prompt")
+    .eq("account_id", accountId)
+    .maybeSingle();
+  const informacion = ((data?.system_prompt as string | null) ?? "").trim();
+  if (!informacion) {
+    return {
+      datos: {
+        error:
+          "Esta cuenta todavía no tiene cargada la información de lo que vende. Se carga en el contexto de la IA de WhatsApp.",
+      },
+    };
+  }
+  return {
+    datos: {
+      leido_de: "la información del negocio que usa la IA de WhatsApp (lo mismo que oye el cliente)",
+      informacion,
+    },
+  };
+}
+
+/**
  * Qué vende Golden. Sale de la app —lo mismo que ve el cliente— y no de
  * una lista pegada a mano, así que el asesor y el cliente nunca oyen dos
- * precios distintos.
+ * precios distintos. Las demás cuentas usan su propia información.
  */
 async function catalogo(ctx: ContextoAsistente, args: { buscar?: string }): Promise<Resultado> {
+  if (!esCuentaDeGolden(ctx.accountId)) return catalogoDeLaCuenta(ctx.accountId);
   const datos = await catalogoDeGolden();
   if (!datos) {
     return {
@@ -976,6 +1018,14 @@ async function buscarLote(
   ctx: ContextoAsistente,
   args: { proyecto?: string; manzana?: string; area_minima?: number; area_maxima?: number; lote?: string },
 ): Promise<Resultado> {
+  if (!esCuentaDeGolden(ctx.accountId)) {
+    return {
+      datos: {
+        error:
+          "Esta cuenta no tiene planos de lotes cargados en la app, así que no se puede ver lote por lote. Usa `catalogo` para la información del proyecto y, para un lote concreto, que lo confirme el asesor.",
+      },
+    };
+  }
   const datos = await catalogoDeGolden();
   if (!datos) return { datos: { error: "No se pudo leer el catálogo de la app." } };
 
@@ -1374,7 +1424,7 @@ async function agendarCita(ctx: ContextoAsistente, args: ArgsCita): Promise<Resu
   if (!nuevo) {
     await notifyClient(supabaseAdmin(), {
       contactId: uno.id,
-      title: "Golden Habitat",
+      title: await marcaDeLaCuenta(ctx.accountId),
       body: `Tienes una ${texto}. La ves en la pestaña Citas.`,
     }).catch(() => {});
   }
