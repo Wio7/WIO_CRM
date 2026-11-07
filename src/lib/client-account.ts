@@ -75,8 +75,9 @@ export function summarizeClientAccount(rows: readonly PlanBalanceRow[]): Currenc
 }
 
 /** Estado corto de un plan para la ficha. */
-export function planHealth(r: PlanBalanceRow): "al-dia" | "con-atraso" | "pagado" | "otro" {
+export function planHealth(r: PlanBalanceRow): "al-dia" | "con-atraso" | "pagado" | "cancelado" | "otro" {
   if (r.status === "pagado" || (r.status === "activo" && r.pending_count === 0)) return "pagado";
+  if (r.status === "cancelado") return "cancelado";
   if (r.status !== "activo") return "otro";
   return r.overdue_count > 0 ? "con-atraso" : "al-dia";
 }

@@ -118,14 +118,25 @@ export async function POST(request: Request) {
   const operacion = String(form?.get("operacion") ?? "").trim().slice(0, 60);
   const monto = Number(form?.get("monto") ?? 0) || null;
 
-  const { error: errCuota } = await db
+  const { data: actualizadas, error: errCuota } = await db
     .from("installments")
     .update({
       voucher_path: ruta,
       paid_method: metodo || null,
       paid_reference: operacion || null,
     })
-    .eq("id", cuota.id);
+    .eq("id", cuota.id)
+    // Si en el medio la cuota se pagó o la cubrió un abono, no se le pega el voucher.
+    .eq("status", "pendiente")
+    .select("id");
+
+  if (!errCuota && (!actualizadas || actualizadas.length === 0)) {
+    await db.storage.from("client-docs").remove([ruta]).catch(() => {});
+    return withCors(
+      request,
+      NextResponse.json({ ok: false, reason: "ya_pagada" }, { status: 409 }),
+    );
+  }
 
   if (errCuota) {
     // Sin la 047 no hay dónde guardar la ruta. Se borra la foto en vez de

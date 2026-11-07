@@ -27,6 +27,7 @@ import {
 } from "@/lib/storage/upload-media";
 import { falta047 } from "@/lib/payment-plans/migration-047";
 import { PrepaymentDialog } from "./prepayment-dialog";
+import { hoyLima } from "@/lib/collections";
 import { cn } from "@/lib/utils";
 import type {
   Installment,
@@ -64,12 +65,8 @@ interface PaymentPlanDetailProps {
 
 const METODOS = ["Yape", "Plin", "Transferencia", "Depósito", "Efectivo"];
 
-const hoy = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
-};
+// Día de Lima, igual que la vista de saldos (083) y Cobranzas.
+const hoy = () => hoyLima();
 
 const fecha = (iso: string | null | undefined) =>
   iso
@@ -269,7 +266,7 @@ export function PaymentPlanDetail({
       status: "pagada",
       // Mediodía y no medianoche: la fecha que escribió el asesor es la
       // que tiene que leerse después en Lima, no el día anterior.
-      paid_at: new Date(`${pagadoEl}T12:00:00`).toISOString(),
+      paid_at: new Date(`${pagadoEl}T12:00:00-05:00`).toISOString(),
       paid_amount: importe,
     }, {
       paid_method: metodo.trim() || null,
@@ -312,11 +309,14 @@ export function PaymentPlanDetail({
     }, {
       paid_method: null,
       paid_reference: null,
+      // Sin esto la cuota queda "con voucher en revisión" y bloquea abonos y avisos.
+      voucher_path: null,
       registered_by: profile?.id ?? null,
     });
     if (error) {
       setGuardando(false);
-      toast.error("No se pudo deshacer");
+      toast.error(error.message.startsWith("La cuota cambió") ? error.message : "No se pudo deshacer");
+      if (error.message.startsWith("La cuota cambió")) await cargar();
       return;
     }
     // Vuelve a haber algo pendiente: el plan ya no está pagado.

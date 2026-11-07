@@ -133,3 +133,40 @@ describe('correcciones de la revisión', () => {
     expect(debtorsCsv([{ ...d, lastReminder: '2026-11-08T02:00:00Z' }])).toContain(';07/11/2026');
   });
 });
+
+describe('revisión EGM: vouchers en revisión, CSV y teléfonos', () => {
+  const conVoucher = (id: string, due: string, amount = 500): OverdueInstallment => ({ ...cuota({ id, due_date: due, amount }), voucher_path: 'docs/v.jpg' });
+
+  it('una cuota con voucher en revisión no cuenta como deuda vencida, va aparte', () => {
+    const [d] = buildDebtors([cuota({ id: 'a', due_date: '2026-10-05' }), conVoucher('b', '2026-09-05', 300)], HOY);
+    expect(d.overdueCount).toBe(1);
+    expect(d.overdueAmount).toBe(500);
+    expect(d.inReviewCount).toBe(1);
+    expect(d.inReviewAmount).toBe(300);
+    // el atraso se mide desde la cuota que de verdad se debe
+    expect(d.oldestDue).toBe('2026-10-05');
+  });
+
+  it('un cliente con todo en revisión queda al final y sin deuda vencida', () => {
+    const out = buildDebtors([conVoucher('x', '2026-08-05'), cuota({ id: 'y', contact: 'c2', due_date: '2026-11-01' })], HOY);
+    expect(out.map((d) => d.contactId)).toEqual(['c2', 'c1']);
+    expect(out[1]).toMatchObject({ overdueCount: 0, overdueAmount: 0, inReviewCount: 1 });
+  });
+
+  it('la deuda por manzana no cuenta cuotas en revisión', () => {
+    const g = groupByManzana([cuota({ id: 'a' }), conVoucher('b', '2026-10-05')], HOY);
+    expect(g[0].overdueAmount).toBe(500);
+  });
+
+  it('el CSV neutraliza fórmulas en textos que vienen de afuera', () => {
+    const [d] = buildDebtors([cuota({})], HOY);
+    const csv = debtorsCsv([{ ...d, name: '=HYPERLINK("x")', phone: '+51987654321' }]);
+    expect(csv).toContain(`"'=HYPERLINK(""x"")"`);
+    expect(csv).toContain(";'+51987654321;");
+  });
+
+  it('acepta números con prefijo 00', () => {
+    const [d] = buildDebtors([cuota({})], HOY);
+    expect(whatsappLink({ ...d, phone: '0051987654321' }, 'x')!.startsWith('https://wa.me/51987654321')).toBe(true);
+  });
+});
