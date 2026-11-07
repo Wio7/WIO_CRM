@@ -38,14 +38,9 @@ END $$;
 -- ------------------------------------------------------------
 -- 2. Estado 'adelantada' para cuotas cubiertas por un abono
 -- ------------------------------------------------------------
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'installments_status_check') THEN
-    ALTER TABLE public.installments DROP CONSTRAINT installments_status_check;
-  END IF;
-  ALTER TABLE public.installments ADD CONSTRAINT installments_status_check
-    CHECK (status IN ('pendiente', 'pagada', 'condonada', 'adelantada'));
-END $$;
+ALTER TABLE public.installments DROP CONSTRAINT IF EXISTS installments_status_check;
+ALTER TABLE public.installments ADD CONSTRAINT installments_status_check
+  CHECK (status IN ('pendiente', 'pagada', 'condonada', 'adelantada'));
 
 -- ------------------------------------------------------------
 -- 3. Registro de abonos
@@ -70,36 +65,26 @@ CREATE INDEX IF NOT EXISTS idx_plan_prepayments_plan
 
 ALTER TABLE public.plan_prepayments ENABLE ROW LEVEL SECURITY;
 
--- Mismo criterio que payment_plans (043). Se escribe solo por el RPC de
--- abajo (que corre con los permisos de quien llama); no hay policy de
--- UPDATE: un abono no se edita, se corrige con otro movimiento.
+-- El equipo lo lee (mismo criterio que payment_plans, 043). Nadie lo
+-- escribe ni lo borra directo: solo el RPC apply_prepayment, que baja las
+-- cuotas y registra el abono en la misma transacción. Así pagado + saldo
+-- = total no se puede descuadrar insertando o borrando una fila suelta.
 DROP POLICY IF EXISTS plan_prepayments_select ON public.plan_prepayments;
 CREATE POLICY plan_prepayments_select ON public.plan_prepayments FOR SELECT
   USING (public.is_account_member(account_id, 'agent'));
-
 DROP POLICY IF EXISTS plan_prepayments_insert ON public.plan_prepayments;
-CREATE POLICY plan_prepayments_insert ON public.plan_prepayments FOR INSERT
-  WITH CHECK (
-    public.is_account_member(account_id, 'agent')
-    AND created_by = auth.uid()
-    AND EXISTS (
-      SELECT 1 FROM public.payment_plans p
-      WHERE p.id = plan_prepayments.plan_id AND p.account_id = plan_prepayments.account_id
-    )
-  );
-
 DROP POLICY IF EXISTS plan_prepayments_delete ON public.plan_prepayments;
-CREATE POLICY plan_prepayments_delete ON public.plan_prepayments FOR DELETE
-  USING (public.is_account_member(account_id, 'admin'));
 
 -- ------------------------------------------------------------
 -- 4. RPC: aplicar un abono en una sola transacción
 --
 -- La app calcula los montos nuevos (src/lib/prepayments.ts, con pruebas)
--- y la base vuelve a validar todo: cuotas del plan, pendientes, que
--- vencen de hoy (Lima) en adelante, que ninguna suba ni quede negativa y
--- que lo rebajado sume exactamente el abono. SECURITY INVOKER: los
--- permisos (RLS de installments y plan_prepayments) son los de quien llama.
+-- y la base vuelve a validar todo: cuotas del plan, pendientes, sin
+-- voucher en revisión, que vencen de hoy (Lima) en adelante, que ninguna
+-- suba ni quede negativa y que lo rebajado sume exactamente el abono.
+-- SECURITY DEFINER porque es la única vía para escribir plan_prepayments;
+-- el permiso lo comprueba explícitamente (agente o más de la cuenta del
+-- plan, con la cuenta activa).
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.apply_prepayment(
   p_plan_id   uuid,
@@ -111,7 +96,7 @@ CREATE OR REPLACE FUNCTION public.apply_prepayment(
   p_note      text DEFAULT NULL
 ) RETURNS uuid
 LANGUAGE plpgsql
-SECURITY INVOKER
+SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
@@ -124,6 +109,9 @@ DECLARE
   v_audit    jsonb := '[]'::jsonb;
   v_id       uuid;
 BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Sin sesión';
+  END IF;
   IF p_amount IS NULL OR p_amount <= 0 THEN
     RAISE EXCEPTION 'El abono debe ser mayor a cero';
   END IF;
@@ -136,14 +124,12 @@ BEGIN
 
   -- Bloquea el plan: dos abonos a la vez sobre el mismo plan no se cruzan.
   SELECT * INTO v_plan FROM payment_plans WHERE id = p_plan_id FOR UPDATE;
-  IF NOT FOUND THEN
+  -- Mismo mensaje si no existe o no es de su cuenta: no revela planes ajenos.
+  IF NOT FOUND OR NOT public.is_account_member(v_plan.account_id, 'agent') THEN
     RAISE EXCEPTION 'Plan no encontrado';
   END IF;
   IF v_plan.status <> 'activo' THEN
     RAISE EXCEPTION 'Solo se abona a planes activos';
-  END IF;
-  IF NOT public.is_account_member(v_plan.account_id, 'agent') THEN
-    RAISE EXCEPTION 'Sin permiso sobre este plan';
   END IF;
 
   FOR v_change IN SELECT * FROM jsonb_array_elements(p_changes) LOOP
@@ -158,6 +144,9 @@ BEGIN
     END IF;
     IF v_inst.due_date < v_today THEN
       RAISE EXCEPTION 'La cuota % ya venció; se paga, no se abona', v_inst.number;
+    END IF;
+    IF v_inst.voucher_path IS NOT NULL THEN
+      RAISE EXCEPTION 'La cuota % tiene un voucher en revisión; apruébalo o recházalo primero', v_inst.number;
     END IF;
     v_new := round((v_change->>'newAmount')::numeric, 2);
     IF v_new IS NULL OR v_new < 0 OR v_new >= v_inst.amount THEN
@@ -181,9 +170,10 @@ BEGIN
     RAISE EXCEPTION 'Lo rebajado (%) no coincide con el abono (%)', v_total, round(p_amount, 2);
   END IF;
 
-  INSERT INTO plan_prepayments (account_id, plan_id, amount, mode, method, reference, note, changes)
+  INSERT INTO plan_prepayments (account_id, plan_id, amount, mode, method, reference, note, changes, created_by)
   VALUES (v_plan.account_id, p_plan_id, round(p_amount, 2), p_mode,
-          NULLIF(trim(p_method), ''), NULLIF(trim(p_reference), ''), NULLIF(trim(p_note), ''), v_audit)
+          NULLIF(trim(p_method), ''), NULLIF(trim(p_reference), ''), NULLIF(left(trim(p_note), 1000), ''), v_audit,
+          auth.uid())
   RETURNING id INTO v_id;
 
   -- Si ya no queda nada pendiente, el plan queda pagado.
@@ -195,6 +185,8 @@ BEGIN
 END;
 $$;
 
+ALTER FUNCTION public.apply_prepayment(uuid, numeric, text, jsonb, text, text, text) OWNER TO postgres;
+REVOKE EXECUTE ON FUNCTION public.apply_prepayment(uuid, numeric, text, jsonb, text, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.apply_prepayment(uuid, numeric, text, jsonb, text, text, text) TO authenticated;
 
 -- ------------------------------------------------------------
@@ -229,8 +221,10 @@ LEFT JOIN LATERAL (
     COUNT(*) FILTER (WHERE x.status = 'pagada')                                          AS paid_count,
     SUM(x.amount) FILTER (WHERE x.status = 'pendiente')                                  AS pending_amount,
     COUNT(*) FILTER (WHERE x.status = 'pendiente')                                       AS pending_count,
-    COUNT(*) FILTER (WHERE x.status = 'pendiente' AND x.due_date < current_date)         AS overdue_count,
-    SUM(x.amount) FILTER (WHERE x.status = 'pendiente' AND x.due_date < current_date)    AS overdue_amount,
+    -- Atraso según el día de Lima (no UTC): de 19:00 a 24:00 Lima una
+    -- cuota que vence hoy todavía no está atrasada.
+    COUNT(*) FILTER (WHERE x.status = 'pendiente' AND x.due_date < (now() AT TIME ZONE 'America/Lima')::date)      AS overdue_count,
+    SUM(x.amount) FILTER (WHERE x.status = 'pendiente' AND x.due_date < (now() AT TIME ZONE 'America/Lima')::date) AS overdue_amount,
     MIN(x.due_date) FILTER (WHERE x.status = 'pendiente')                                AS next_due_date
   FROM installments x WHERE x.plan_id = p.id
 ) i ON true

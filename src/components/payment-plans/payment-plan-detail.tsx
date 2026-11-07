@@ -120,20 +120,32 @@ export function PaymentPlanDetail({
   const guardarCuota = useCallback(
     async (
       id: string,
+      // Estado que debe tener la cuota para tocarla: con la pantalla vieja
+      // (otro asesor la cambió, o un abono la cubrió) no se pisa nada.
+      estadoActual: string,
       base: Record<string, unknown>,
       detalle: Record<string, unknown>,
-    ) => {
+    ): Promise<{ message: string } | null> => {
+      const cambio = "La cuota cambió mientras la tenías abierta; se recargó.";
       if (!sinDetalle.current) {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from("installments")
           .update({ ...base, ...detalle })
-          .eq("id", id);
-        if (!error) return null;
+          .eq("id", id)
+          .eq("status", estadoActual)
+          .select("id");
+        if (!error) return data && data.length > 0 ? null : { message: cambio };
         if (!falta047(error)) return error;
         sinDetalle.current = true;
       }
-      const { error } = await supabase.from("installments").update(base).eq("id", id);
-      return error;
+      const { data, error } = await supabase
+        .from("installments")
+        .update(base)
+        .eq("id", id)
+        .eq("status", estadoActual)
+        .select("id");
+      if (error) return error;
+      return data && data.length > 0 ? null : { message: cambio };
     },
     [supabase],
   );
@@ -253,7 +265,7 @@ export function PaymentPlanDetail({
       return;
     }
     setGuardando(true);
-    const error = await guardarCuota(c.id, {
+    const error = await guardarCuota(c.id, "pendiente", {
       status: "pagada",
       // Mediodía y no medianoche: la fecha que escribió el asesor es la
       // que tiene que leerse después en Lima, no el día anterior.
@@ -268,7 +280,8 @@ export function PaymentPlanDetail({
 
     if (error) {
       setGuardando(false);
-      toast.error("No se pudo registrar el pago");
+      toast.error(error.message.startsWith("La cuota cambió") ? error.message : "No se pudo registrar el pago");
+      if (error.message.startsWith("La cuota cambió")) await cargar();
       console.error("[payment-plan] pay installment:", error.message);
       return;
     }
@@ -292,7 +305,7 @@ export function PaymentPlanDetail({
   async function deshacerPago(c: Installment) {
     if (!plan) return;
     setGuardando(true);
-    const error = await guardarCuota(c.id, {
+    const error = await guardarCuota(c.id, "pagada", {
       status: "pendiente",
       paid_at: null,
       paid_amount: null,
@@ -379,7 +392,7 @@ export function PaymentPlanDetail({
               <Resumen titulo="Próxima" valor={fecha(balance?.next_due_date)} />
               <Resumen
                 titulo="Pagadas"
-                valor={`${balance?.paid_count ?? 0} de ${plan.installments_count}`}
+                valor={`${(balance?.paid_count ?? 0) + cuotas.filter((x) => x.status === "adelantada").length} de ${plan.installments_count}`}
               />
             </div>
 

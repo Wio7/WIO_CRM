@@ -9,6 +9,8 @@ export interface PendingInstallment {
   number: number;
   amount: number | string;
   due_date: string; // YYYY-MM-DD
+  /** Voucher subido por el cliente y aún sin aprobar (047). */
+  voucher_path?: string | null;
 }
 
 export interface InstallmentChange {
@@ -22,6 +24,8 @@ export interface PrepaymentPlan {
   error: string | null;
   /** Cuotas vencidas que el abono no toca (se pagan primero). */
   overdueSkipped: number;
+  /** Cuotas con voucher en revisión que el abono no toca (evita pagar dos veces). */
+  inReviewSkipped: number;
   /** Suma de las cuotas futuras que se pueden abonar. */
   available: number;
 }
@@ -34,10 +38,12 @@ export function planPrepayment(
   mode: PrepaymentMode,
   today: string,
 ): PrepaymentPlan {
-  const future = pending.filter((p) => p.due_date >= today).sort((a, b) => a.number - b.number);
-  const overdueSkipped = pending.length - future.length;
+  const notOverdue = pending.filter((p) => p.due_date >= today);
+  const overdueSkipped = pending.length - notOverdue.length;
+  const future = notOverdue.filter((p) => !p.voucher_path).sort((a, b) => a.number - b.number);
+  const inReviewSkipped = notOverdue.length - future.length;
   const availableCents = future.reduce((s, p) => s + toCents(p.amount), 0);
-  const base = { overdueSkipped, available: availableCents / 100 };
+  const base = { overdueSkipped, inReviewSkipped, available: availableCents / 100 };
 
   if (!(amount > 0) || !Number.isFinite(amount)) return { ...base, changes: null, error: "El abono debe ser mayor a cero." };
   if (future.length === 0) return { ...base, changes: null, error: "No hay cuotas futuras pendientes para abonar." };

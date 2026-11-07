@@ -47,10 +47,11 @@ export function LateFeeSettingsDialog({ open, onOpenChange, accountId, current, 
     if (tipo === "porcentaje_mensual" && v > 100) return toast.error("El porcentaje no puede pasar de 100.");
     if (!Number.isInteger(g) || g < 0 || g > 365) return toast.error("Los días de gracia van de 0 a 365.");
     setGuardando(true);
-    const { error } = await createClient()
+    const { data, error } = await createClient()
       .from("accounts")
       .update({ late_fee_type: tipo, late_fee_value: v, late_fee_grace_days: g })
-      .eq("id", accountId);
+      .eq("id", accountId)
+      .select("id");
     setGuardando(false);
     if (error) {
       toast.error(
@@ -58,6 +59,11 @@ export function LateFeeSettingsDialog({ open, onOpenChange, accountId, current, 
           ? "Falta aplicar la migración 083 (mora y abonos) en Supabase."
           : `No se pudo guardar: ${error.message}`,
       );
+      return;
+    }
+    // Sin fila devuelta = la base no dejó cambiarla (solo admins).
+    if (!data || data.length === 0) {
+      toast.error("No se guardó: solo un administrador de la cuenta puede cambiar la mora.");
       return;
     }
     toast.success("Mora guardada");

@@ -56,7 +56,8 @@ export function PrepaymentDialog({ open, onOpenChange, planId, currency, cuotas,
     const cubiertas = calculo.changes.filter((c) => c.status === "adelantada").length;
     const rebajadas = calculo.changes.length - cubiertas;
     const ejemplo = calculo.changes.find((c) => c.status === "pendiente")?.newAmount;
-    return { cubiertas, rebajadas, ejemplo };
+    const nuevos = calculo.changes.map((c) => c.newAmount);
+    return { cubiertas, rebajadas, ejemplo, min: Math.min(...nuevos), max: Math.max(...nuevos) };
   }, [calculo]);
 
   async function aplicar() {
@@ -67,7 +68,7 @@ export function PrepaymentDialog({ open, onOpenChange, planId, currency, cuotas,
     setGuardando(true);
     const { error } = await createClient().rpc("apply_prepayment", {
       p_plan_id: planId,
-      p_amount: Number(monto),
+      p_amount: Math.round(Number(monto) * 100) / 100,
       p_mode: modo,
       p_changes: calculo.changes.map((c) => ({ id: c.id, newAmount: c.newAmount })),
       p_method: metodo || null,
@@ -100,6 +101,13 @@ export function PrepaymentDialog({ open, onOpenChange, planId, currency, cuotas,
           <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
             Tiene {calculo.overdueSkipped} cuota{calculo.overdueSkipped === 1 ? "" : "s"} vencida
             {calculo.overdueSkipped === 1 ? "" : "s"}: el abono no las toca; esas se registran como pago.
+          </p>
+        )}
+
+        {calculo.inReviewSkipped > 0 && (
+          <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+            {calculo.inReviewSkipped} cuota{calculo.inReviewSkipped === 1 ? " tiene" : "s tienen"} un voucher en
+            revisión y no entra{calculo.inReviewSkipped === 1 ? "" : "n"} en el abono: apruébalo o recházalo primero.
           </p>
         )}
 
@@ -159,10 +167,12 @@ export function PrepaymentDialog({ open, onOpenChange, planId, currency, cuotas,
                   ? `Quedan cubiertas ${resumen?.cubiertas ?? 0} cuota(s) del final${
                       resumen?.rebajadas ? " y una baja a " + formatCurrency(resumen.ejemplo ?? 0, currency) : ""
                     }.`
-                  : `Las ${calculo.changes?.length ?? 0} cuotas futuras bajan a unos ${formatCurrency(
-                      resumen?.ejemplo ?? 0,
-                      currency,
-                    )} cada una.`}
+                  : resumen && resumen.min === resumen.max
+                    ? `Las ${calculo.changes?.length ?? 0} cuotas futuras quedan en ${formatCurrency(resumen.min, currency)} cada una.`
+                    : `Las ${calculo.changes?.length ?? 0} cuotas futuras bajan; quedan entre ${formatCurrency(
+                        resumen?.min ?? 0,
+                        currency,
+                      )} y ${formatCurrency(resumen?.max ?? 0, currency)}.`}
             </p>
           )}
         </div>

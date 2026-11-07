@@ -36,7 +36,7 @@ describe('planPrepayment — reducir cuota', () => {
     const r = planPrepayment(base, 100, 'reducir_cuota', HOY);
     expect(r.error).toBeNull();
     expect(sumaRebajas(r, base)).toBe(100);
-    const nuevos = r.changes!.map((c) => c.newAmount).sort();
+    const nuevos = r.changes!.map((c) => c.newAmount).sort((a, b) => a - b);
     expect(nuevos).toEqual([466.66, 466.67, 466.67]);
   });
 
@@ -67,5 +67,15 @@ describe('planPrepayment — validaciones', () => {
     const base = cuotas([500, 500]);
     const r = planPrepayment(base, 1000, 'reducir_cuota', HOY);
     expect(r.changes!.every((c) => c.status === 'adelantada' && c.newAmount === 0)).toBe(true);
+  });
+});
+
+describe('planPrepayment — cuotas con voucher en revisión', () => {
+  it('no las toca: el cliente ya mandó su pago por esa cuota', () => {
+    const base = cuotas([500, 500, 500]).map((c, i) => (i === 2 ? { ...c, voucher_path: 'docs/v.jpg' } : c));
+    const r = planPrepayment(base, 600, 'reducir_plazo', HOY);
+    expect(r.changes!.map((c) => c.id)).toEqual(['i2', 'i1']);
+    expect(r.inReviewSkipped).toBe(1);
+    expect(r.available).toBe(1000);
   });
 });
