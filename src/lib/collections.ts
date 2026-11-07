@@ -8,6 +8,8 @@ export interface OverdueInstallment {
   plan_id: string;
   number: number;
   amount: number | string;
+  /** Saldo pendiente (pagos parciales); si viene, se usa en vez de amount. */
+  remaining?: number | string | null;
   due_date: string; // YYYY-MM-DD
   /** Voucher subido por el cliente y aún sin aprobar (047): no es deuda a cobrar. */
   voucher_path?: string | null;
@@ -58,6 +60,9 @@ export interface GroupTotal {
 }
 
 const DAY = 86_400_000;
+
+/** Lo que falta cobrar de una cuota: su saldo si viene, si no el monto. */
+const saldoDe = (r: OverdueInstallment) => Number(r.remaining ?? r.amount) || 0;
 
 /** Días entre dos fechas YYYY-MM-DD (hoy - vencimiento). */
 export function daysBetween(due: string, today: string): number {
@@ -127,11 +132,11 @@ export function buildDebtors(
     if (r.voucher_path) {
       // Ya mandó su voucher: se muestra aparte, no se le cobra otra vez.
       d.inReviewCount += 1;
-      d.inReviewAmount += Number(r.amount) || 0;
+      d.inReviewAmount += saldoDe(r);
       if (r.due_date < reviewOldest.get(key)!) reviewOldest.set(key, r.due_date);
     } else {
       d.overdueCount += 1;
-      d.overdueAmount += Number(r.amount) || 0;
+      d.overdueAmount += saldoDe(r);
       if (!d.oldestDue || r.due_date < d.oldestDue) d.oldestDue = r.due_date;
     }
     const code = plan.unit?.code;
@@ -157,6 +162,11 @@ export function buildDebtors(
       b.daysLate - a.daysLate ||
       b.overdueAmount - a.overdueAmount,
   );
+}
+
+/** Causal de resolución: cuotas o días de atraso alcanzan el umbral (0 = desactivado). */
+export function inResolution(d: Debtor, s: { installments: number; days: number }): boolean {
+  return (s.installments > 0 && d.overdueCount >= s.installments) || (s.days > 0 && d.daysLate >= s.days);
 }
 
 /** Deuda vencida por proyecto y manzana (para ver dónde se concentra). */
@@ -186,7 +196,7 @@ export function groupByManzana(rows: readonly OverdueInstallment[], today: strin
       map.set(key, g);
     }
     g.contacts.add(plan.contact.id);
-    g.overdueAmount += Number(r.amount) || 0;
+    g.overdueAmount += saldoDe(r);
   }
   return [...map.values()]
     .map(({ contacts, ...g }) => ({
@@ -214,7 +224,7 @@ export function hiddenOverdue(
     if (seen.has(r.id)) continue;
     seen.add(r.id);
     count += 1;
-    amount += Number(r.amount) || 0;
+    amount += saldoDe(r);
   }
   return { count, amount: Math.round(amount * 100) / 100 };
 }

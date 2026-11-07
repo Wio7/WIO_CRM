@@ -8,6 +8,7 @@ import {
   hiddenOverdue,
   groupByManzana,
   hoyLima,
+  inResolution,
   tramoDe,
   whatsappLink,
   type OverdueInstallment,
@@ -169,4 +170,23 @@ describe('revisión EGM: vouchers en revisión, CSV y teléfonos', () => {
     const [d] = buildDebtors([cuota({})], HOY);
     expect(whatsappLink({ ...d, phone: '0051987654321' }, 'x')!.startsWith('https://wa.me/51987654321')).toBe(true);
   });
+});
+
+describe('saldo por cuota (remaining)', () => {
+  it('usa remaining en lugar de amount si viene', () => {
+    const c = { ...cuota({ id: 'r1', amount: 500 }), remaining: 200 };
+    expect(buildDebtors([c], HOY)[0].overdueAmount).toBe(200);
+    expect(groupByManzana([c], HOY)[0].overdueAmount).toBe(200);
+    const oculta = { ...cuota({ id: 'r2', amount: 500 }), remaining: '150', plan: { ...cuota({}).plan!, contact: null } };
+    expect(hiddenOverdue([oculta], HOY).amount).toBe(150);
+  });
+});
+
+describe('inResolution (causal de resolución)', () => {
+  const d = (overdueCount: number, daysLate: number) => ({ overdueCount, daysLate }) as Parameters<typeof inResolution>[0];
+  const s = { installments: 2, days: 60 };
+  it('por cuotas', () => expect(inResolution(d(2, 5), s)).toBe(true));
+  it('por días', () => expect(inResolution(d(1, 61), s)).toBe(true));
+  it('no alcanza', () => expect(inResolution(d(1, 30), s)).toBe(false));
+  it('sin configurar nunca', () => expect(inResolution(d(9, 999), { installments: 0, days: 0 })).toBe(false));
 });
