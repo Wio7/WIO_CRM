@@ -114,7 +114,7 @@ export function ClientSummary({ contactId }: ClientSummaryProps) {
       <div className="mb-2 flex items-center gap-2">
         <Home className="h-3.5 w-3.5 text-primary" />
         <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Cliente de Golden
+          Cliente
         </h4>
       </div>
 

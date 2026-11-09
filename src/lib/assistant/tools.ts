@@ -529,7 +529,11 @@ async function misClientes(
   // Quién debe: una sola consulta a la vista de saldos.
   const ids = filas.map((f) => f.contact?.id).filter(Boolean) as string[];
   const deuda = new Map<string, { atrasadas: number; monto: number; moneda: string }>();
-  if (ids.length) {
+  const sinCobranzas = await sinAccesoCobranzas(ctx);
+  if (sinCobranzas && args.filtro === "atrasados") {
+    return { datos: { error: SIN_ACCESO_COBRANZAS } };
+  }
+  if (ids.length && !sinCobranzas) {
     const { data: saldos } = await ctx.db
       .from("payment_plan_balances")
       .select("contact_id, overdue_count, overdue_amount, currency")
@@ -580,6 +584,7 @@ async function misClientes(
           senales_de_interes: v?.senales ?? [],
           cuando: f.last_message_at ? cuandoLima(f.last_message_at) : null,
           cerrada: f.status === "closed",
+          ...(sinCobranzas ? { cobranza: SIN_ACCESO_COBRANZAS } : {}),
           ...(d ? { cuotas_atrasadas: d.atrasadas, monto_atrasado: `${d.moneda} ${d.monto.toFixed(2)}` } : {}),
         };
       }),
@@ -1001,12 +1006,15 @@ async function resumenDeConversacion(ctx: ContextoAsistente, args: { cliente: st
   const calladoMin = desde ? Math.round((Date.now() - desde) / 60_000) : null;
   const ventanaMin = desde ? Math.round(24 * 60 - (Date.now() - desde) / 60_000) : null;
 
+  const sinCobranzas = await sinAccesoCobranzas(ctx);
   const [{ data: saldo }, { data: citas }] = await Promise.all([
-    ctx.db
-      .from("payment_plan_balances")
-      .select("currency, pending_amount, overdue_count, next_due_date")
-      .eq("contact_id", uno.id)
-      .maybeSingle(),
+    sinCobranzas
+      ? Promise.resolve({ data: null })
+      : ctx.db
+          .from("payment_plan_balances")
+          .select("currency, pending_amount, overdue_count, next_due_date")
+          .eq("contact_id", uno.id)
+          .maybeSingle(),
     ctx.db
       .from("appointments")
       .select("starts_at, kind, status")
@@ -1035,7 +1043,7 @@ async function resumenDeConversacion(ctx: ContextoAsistente, args: { cliente: st
       // pasó: sólo se le puede mandar una plantilla.
       minutos_de_ventana_restantes: ventanaMin,
       senales_de_interes: senales,
-      ya_es_cliente: Boolean(saldo),
+      ...(sinCobranzas ? { cobranza: SIN_ACCESO_COBRANZAS } : { ya_es_cliente: Boolean(saldo) }),
       ...(saldo
         ? {
             por_pagar: `${saldo.currency === "PEN" ? "S/" : saldo.currency} ${Number(saldo.pending_amount ?? 0).toFixed(2)}`,
