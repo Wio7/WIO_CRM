@@ -105,9 +105,17 @@ Solo importación; la exportación al Excel de carga queda diferida (§4).
 - Menor: `src/lib/modules.ts` rotula `/caja` como "Golden Caja"; debe ser genérico.
 
 ## 5. Decisiones del dueño
-1. **Mora oficial ante el cliente:** la que calcula Caja Ica, o la del ERP
-   (S/ 6 por día por contrato, tope 60 días). Define cómo se concilian los
-   abonos que incluyen mora.
+1. **Mora oficial ante el cliente: la de Caja Ica** (decidido 2026-11-09;
+   reemplaza a la regla de la Fase A §9.1 como cifra oficial). Consecuencias:
+   - Al importar, un abono que trae cuota + mora se parte: la cuota va al
+     libro de pagos con el RPC; la mora se guarda como **mora cobrada según
+     Caja Ica** (dato aparte, no reduce la deuda de la cuota).
+   - La exoneración de mora se hace en Caja Ica; la cola de aprobaciones
+     solo registra la decisión de gerencia.
+   - El cálculo del ERP (S/ 6 por día, tope 60 días) queda como **estimado**
+     para cobranzas entre importaciones, rotulado así en pantalla (decisión
+     de Aurex, a confirmar). Si el reporte de Caja Ica no trae la mora por
+     separado, esas filas van a "por revisar".
 2. **Quién confirma los pagos importados y aprueba transferencias:**
    cobranzas, contabilidad o gerencia (hoy los documentos dicen las tres).
 3. Contrato en el portal: PDF sin firma o solo escaneado firmado.
