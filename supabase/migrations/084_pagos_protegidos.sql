@@ -463,8 +463,9 @@ CREATE TRIGGER installment_payments_immutable
 
 -- Abonos a capital (083): también son dinero recibido. Mismo criterio que
 -- el libro de pagos: la cuenta entera los borra en cascada; un plan con
--- abonos en una cuenta viva no se borra (NO ACTION), y un abono suelto
--- no se borra ni con service role. No hay "deshacer abono" todavía.
+-- abonos en una cuenta viva no se borra (NO ACTION), y un abono no se
+-- borra ni se reescribe ni con service role; solo created_by pasa a NULL
+-- al borrar el usuario de Auth. No hay "deshacer abono" todavía.
 DO $$
 BEGIN
   ALTER TABLE public.plan_prepayments DROP CONSTRAINT IF EXISTS plan_prepayments_plan_id_fkey;
@@ -473,21 +474,52 @@ BEGIN
       FOREIGN KEY (plan_id) REFERENCES public.payment_plans(id) ON DELETE NO ACTION;
 END $$;
 
-CREATE OR REPLACE FUNCTION public.guard_plan_prepayment_delete()
+-- Solo lectura para usuarios (escribe apply_prepayment, dueño postgres).
+REVOKE ALL ON public.plan_prepayments FROM anon;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.plan_prepayments FROM authenticated;
+
+DROP TRIGGER IF EXISTS plan_prepayments_no_delete ON public.plan_prepayments;
+DROP FUNCTION IF EXISTS public.guard_plan_prepayment_delete();
+CREATE OR REPLACE FUNCTION public.guard_plan_prepayment_immutable()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM public.accounts WHERE id = OLD.account_id) THEN
-    RETURN OLD;
+  IF TG_OP = 'DELETE' THEN
+    IF NOT EXISTS (SELECT 1 FROM public.accounts WHERE id = OLD.account_id) THEN
+      RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'Un abono a capital no se borra' USING ERRCODE = '42501';
   END IF;
-  RAISE EXCEPTION 'Un abono a capital no se borra' USING ERRCODE = '42501';
+  IF NEW.created_by IS NULL
+     AND (to_jsonb(NEW) - 'created_by') = (to_jsonb(OLD) - 'created_by') THEN
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'Un abono a capital no se modifica' USING ERRCODE = '42501';
 END;
 $$;
-ALTER FUNCTION public.guard_plan_prepayment_delete() OWNER TO postgres;
-DROP TRIGGER IF EXISTS plan_prepayments_no_delete ON public.plan_prepayments;
-CREATE TRIGGER plan_prepayments_no_delete
-  BEFORE DELETE ON public.plan_prepayments
-  FOR EACH ROW EXECUTE FUNCTION public.guard_plan_prepayment_delete();
+ALTER FUNCTION public.guard_plan_prepayment_immutable() OWNER TO postgres;
+DROP TRIGGER IF EXISTS plan_prepayments_immutable ON public.plan_prepayments;
+CREATE TRIGGER plan_prepayments_immutable
+  BEFORE UPDATE OR DELETE ON public.plan_prepayments
+  FOR EACH ROW EXECUTE FUNCTION public.guard_plan_prepayment_immutable();
+
+-- TRUNCATE salta RLS y los triggers por fila: se bloquea en los dos libros.
+CREATE OR REPLACE FUNCTION public.guard_ledger_truncate()
+RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public
+AS $$
+BEGIN
+  RAISE EXCEPTION 'El libro % no se vacía', TG_TABLE_NAME USING ERRCODE = '42501';
+END;
+$$;
+ALTER FUNCTION public.guard_ledger_truncate() OWNER TO postgres;
+DROP TRIGGER IF EXISTS plan_prepayments_no_truncate ON public.plan_prepayments;
+CREATE TRIGGER plan_prepayments_no_truncate
+  BEFORE TRUNCATE ON public.plan_prepayments
+  FOR EACH STATEMENT EXECUTE FUNCTION public.guard_ledger_truncate();
+DROP TRIGGER IF EXISTS installment_payments_no_truncate ON public.installment_payments;
+CREATE TRIGGER installment_payments_no_truncate
+  BEFORE TRUNCATE ON public.installment_payments
+  FOR EACH STATEMENT EXECUTE FUNCTION public.guard_ledger_truncate();
 
 -- Copia histórica: una fila legacy por cuota 'pagada' (adelantada y
 -- condonada no se copian). Idempotente: no toca cuotas que ya tienen

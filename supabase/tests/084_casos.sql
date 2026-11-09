@@ -568,6 +568,7 @@ DO $$
 DECLARE
   v_u  uuid := '0840c000-0000-4000-8000-000000000007';
   v_id uuid;
+  v_ab uuid;
   v_p  record;
 BEGIN
   INSERT INTO auth.users (id, instance_id, aud, role, email, raw_user_meta_data, created_at, updated_at)
@@ -582,11 +583,19 @@ BEGIN
           '0840c000-0000-4000-8000-000000000202', 1, current_date, v_u, now(), v_u, 'Prueba de borrado')
   RETURNING id INTO v_id;
 
+  INSERT INTO public.plan_prepayments (account_id, plan_id, amount, mode, created_by)
+  VALUES (current_setting('t084.acc')::uuid, '0840c000-0000-4000-8000-000000000101', 1, 'reducir_cuota', v_u)
+  RETURNING id INTO v_ab;
+
   DELETE FROM auth.users WHERE id = v_u;
 
   SELECT * INTO v_p FROM public.installment_payments WHERE id = v_id;
   IF NOT FOUND OR v_p.registered_by IS NOT NULL OR v_p.voided_by IS NOT NULL OR v_p.amount <> 1 THEN
     RAISE EXCEPTION 'FALLO borrar usuario: el pago no quedó con registered_by/voided_by en NULL';
+  END IF;
+  SELECT * INTO v_p FROM public.plan_prepayments WHERE id = v_ab;
+  IF NOT FOUND OR v_p.created_by IS NOT NULL OR v_p.amount <> 1 THEN
+    RAISE EXCEPTION 'FALLO borrar usuario: el abono no quedó con created_by en NULL';
   END IF;
 END $$;
 
@@ -625,13 +634,15 @@ BEGIN
   INSERT INTO public.plan_prepayments (account_id, plan_id, amount, mode)
   VALUES (v_acc, '0840c000-0000-4000-8000-000000000102', 100, 'reducir_cuota');
 
+  -- La FK (NO ACTION) es la que lo frena: 23503, y el plan sigue ahí.
   v_msg := NULL;
   BEGIN
     DELETE FROM public.payment_plans WHERE id = '0840c000-0000-4000-8000-000000000102';
-  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLSTATE;
   END;
-  IF v_msg IS NULL THEN
-    RAISE EXCEPTION 'FALLO borrar plan con abono: se borró el plan y su abono';
+  IF v_msg IS DISTINCT FROM '23503'
+     OR NOT EXISTS (SELECT 1 FROM public.payment_plans WHERE id = '0840c000-0000-4000-8000-000000000102') THEN
+    RAISE EXCEPTION 'FALLO borrar plan con abono: esperaba FK 23503 y el plan intacto (SQLSTATE: %)', v_msg;
   END IF;
 
   v_msg := NULL;
@@ -641,6 +652,35 @@ BEGIN
   END;
   IF v_msg IS NULL OR v_msg NOT ILIKE '%no se borra%' THEN
     RAISE EXCEPTION 'FALLO abonos: postgres borró un abono de una cuenta viva (mensaje: %)', v_msg;
+  END IF;
+
+  -- Tampoco se reescribe (monto ni plan), ni siquiera como postgres.
+  v_msg := NULL;
+  BEGIN
+    UPDATE public.plan_prepayments SET amount = 0.01
+     WHERE plan_id = '0840c000-0000-4000-8000-000000000102';
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL OR v_msg NOT ILIKE '%no se modifica%' THEN
+    RAISE EXCEPTION 'FALLO abonos: postgres reescribió el monto de un abono (mensaje: %)', v_msg;
+  END IF;
+
+  -- TRUNCATE salta RLS y los triggers por fila: se bloquea en ambos libros.
+  v_msg := NULL;
+  BEGIN
+    TRUNCATE public.plan_prepayments;
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL THEN
+    RAISE EXCEPTION 'FALLO abonos: TRUNCATE vació los abonos';
+  END IF;
+  v_msg := NULL;
+  BEGIN
+    TRUNCATE public.installment_payments;
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL THEN
+    RAISE EXCEPTION 'FALLO libro: TRUNCATE vació los pagos';
   END IF;
 
   DELETE FROM public.accounts WHERE id = v_acc;
