@@ -26,7 +26,7 @@ import {
   type RpcResult,
 } from "@/lib/payment-plans/rpc";
 import { validateAdvance } from "@/lib/advance-payments";
-import { CURRENCIES, formatCurrency } from "@/lib/currency";
+import { formatCurrency } from "@/lib/currency";
 import {
   MEDIA_MAX_BYTES_BY_KIND,
   signedDocUrl,
@@ -226,12 +226,6 @@ export function PaymentPlanDetail({
 
   const faltantes = plan ? plan.installments_count - cuotas.length : 0;
 
-  // Con cualquier pago (activo o ya cobrado) la moneda deja de poder cambiarse.
-  const hayPagos =
-    pagos.some((x) => !x.voided_at) ||
-    cuotas.some((x) => x.status === "pagada") ||
-    (balance?.paid_amount ?? 0) > 0;
-
   // Cuotas que se pueden marcar para adelantar: pendientes, no vencidas.
   const adelantables = useMemo(
     () => cuotas.filter((x) => x.status === "pendiente" && x.due_date >= hoy()),
@@ -292,6 +286,8 @@ export function PaymentPlanDetail({
     if (!res.ok) {
       // El mensaje de la base es la explicación (regla de 7 días, partes, monto).
       toast.error(res.message);
+      // Que la pantalla no quede vieja si otro asesor cambió algo mientras tanto.
+      await cargar();
       return false;
     }
     toast.success(exito);
@@ -433,41 +429,9 @@ export function PaymentPlanDetail({
               />
             </div>
 
-            {/* Cambiar la moneda de un plan ya creado. Existe porque la
-                cuenta nació en dólares y los planes salieron en dólares
-                sin que nadie lo eligiera: sin esto, arreglarlo obligaba a
-                borrar el plan y volver a escribir las 70 cuotas. */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Moneda</span>
-              <select
-                value={plan.currency}
-                disabled={!canAct || guardando || hayPagos}
-                title={hayPagos ? "No se puede cambiar la moneda de un plan con pagos" : undefined}
-                onChange={async (e) => {
-                  const moneda = e.target.value;
-                  setGuardando(true);
-                  const { error } = await supabase
-                    .from("payment_plans")
-                    .update({ currency: moneda })
-                    .eq("id", plan.id);
-                  setGuardando(false);
-                  if (error) {
-                    toast.error(`No se pudo cambiar la moneda: ${error.message}`);
-                    return;
-                  }
-                  toast.success(`El plan queda en ${moneda}`);
-                  await cargar();
-                  onChanged();
-                }}
-                className="h-8 rounded-lg border border-border bg-muted px-2 text-xs text-foreground outline-none focus:border-primary"
-              >
-                {CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.symbol} {c.code}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Moneda: <span className="text-foreground">{plan.currency}</span>
+            </p>
 
             {plan.status === "activo" && (balance?.pending_count ?? 0) > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-2">
