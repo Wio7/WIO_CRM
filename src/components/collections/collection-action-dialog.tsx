@@ -122,7 +122,12 @@ export function CollectionActionDialog({ open, onOpenChange, contactId, contactN
       .single();
     setSaving(false);
     if (error) {
-      toast.error(`No se pudo guardar: ${error.message}`);
+      // Antes de la 084 la base no conoce Ultimátum ni Pase a legal.
+      toast.error(
+        /collection_actions_result_check/.test(error.message)
+          ? "Falta aplicar la migración 084 para registrar este resultado."
+          : `No se pudo guardar: ${error.message}`,
+      );
       return;
     }
     toast.success("Gestión registrada");

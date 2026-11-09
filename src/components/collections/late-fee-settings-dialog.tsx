@@ -67,7 +67,7 @@ export function LateFeeSettingsDialog({ open, onOpenChange, accountId, current, 
       return;
     }
     toast.success("Mora guardada");
-    onSaved({ type: tipo, value: v, graceDays: g });
+    onSaved({ type: tipo, value: v, graceDays: g, capDays: current.capDays });
     onOpenChange(false);
   }
 

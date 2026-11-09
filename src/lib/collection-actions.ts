@@ -7,7 +7,10 @@ export type ActionResult =
   | "promesa"
   | "pago"
   | "rehusa"
-  | "numero_errado";
+  | "numero_errado"
+  // Sin envío automático: solo dejan constancia (con la fecha de la fila).
+  | "ultimatum"
+  | "pase_legal";
 
 export interface CollectionAction {
   id: string;
@@ -38,6 +41,8 @@ export const RESULTS: ReadonlyArray<{ key: ActionResult; label: string }> = [
   { key: "no_contesta", label: "No contesta" },
   { key: "rehusa", label: "Se niega a pagar" },
   { key: "numero_errado", label: "Número errado" },
+  { key: "ultimatum", label: "Ultimátum enviado" },
+  { key: "pase_legal", label: "Pase a legal" },
 ];
 
 export const resultLabel = (r: ActionResult) => RESULTS.find((x) => x.key === r)?.label ?? r;

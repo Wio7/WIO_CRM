@@ -88,7 +88,21 @@ export async function recordatoriosDeCuotas(db: SupabaseClient): Promise<{ envia
       return { enviados, omitidos: error.message };
     }
 
-    for (const c of (data ?? []) as unknown as Cuota[]) {
+    // Saldo real (084): con pagos en partes se recuerda lo que falta, no el
+    // monto original. Sin la vista (084 sin aplicar) se usa el monto.
+    const cuotas = (data ?? []) as unknown as Cuota[];
+    const saldos = new Map<string, number>();
+    if (cuotas.length > 0) {
+      const { data: filas, error: errSaldo } = await db
+        .from("installment_balances")
+        .select("installment_id, remaining")
+        .in("installment_id", cuotas.map((c) => c.id));
+      if (!errSaldo) {
+        for (const f of filas ?? []) saldos.set(f.installment_id as string, Number(f.remaining));
+      }
+    }
+
+    for (const c of cuotas) {
       const contacto = c.plan?.contact;
       if (!contacto) continue;
       // Si ya dejó el voucher, no se le cobra: cobranzas lo está revisando.
@@ -116,7 +130,7 @@ export async function recordatoriosDeCuotas(db: SupabaseClient): Promise<{ envia
       }
 
       const nombre = (contacto.name ?? "").trim().split(/\s+/)[0] ?? "";
-      const monto = dinero(c.amount, c.plan?.currency ?? "PEN");
+      const monto = dinero(saldos.get(c.id) ?? c.amount, c.plan?.currency ?? "PEN");
       const vence = fechaLarga(c.due_date);
       const texto = textoDe(tipo, nombre, c.number, monto, vence);
       const canales: string[] = [];

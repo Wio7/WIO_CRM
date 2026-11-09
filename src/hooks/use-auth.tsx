@@ -113,6 +113,13 @@ interface AuthContextValue {
   homeAccountId: string | null;
   /** True if the current account is inactive and the caller is not the super admin. */
   isAccountInactive: boolean;
+  /**
+   * Acceso por módulo del usuario (my_module_access, migración 084):
+   * { cobranzas, legal, cronograma, ventas, gerencia }. null = la 084 no
+   * está aplicada (o aún carga): no se oculta nada. "Sin acceso" es
+   * `moduleAccess.cobranzas === false`, distinto de "no es cliente".
+   */
+  moduleAccess: Record<string, boolean> | null;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -127,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [platformAdmin, setPlatformAdmin] = useState<{ home_account_id: string; visiting_account_id: string | null } | null>(null);
+  const [moduleAccess, setModuleAccess] = useState<Record<string, boolean> | null>(null);
   const [loading, setLoading] = useState(true);
   // Tracked separately from `loading`. The session settles fast (one
   // local cookie read); the profile fetch crosses the network and
@@ -248,6 +256,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           account_role: accountRole,
         });
         setAccount(accountRow);
+        // Consulta aparte: sin la 084 la función no existe y todo sigue visible.
+        const { data: acceso, error: accesoErr } = await supabase.rpc("my_module_access");
+        setModuleAccess(
+          !accesoErr && acceso && typeof acceso === "object"
+            ? (acceso as Record<string, boolean>)
+            : null,
+        );
       } else {
         lastFetchedUserIdRef.current = null;
       }
@@ -322,6 +337,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         setAccount(null);
         setPlatformAdmin(null);
+        setModuleAccess(null);
         setProfileLoading(false);
       }
 
@@ -342,6 +358,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setAccount(null);
     setPlatformAdmin(null);
+    setModuleAccess(null);
     window.location.href = "/login";
   }, []);
 
@@ -392,6 +409,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isVisiting,
         homeAccountId,
         isAccountInactive,
+        moduleAccess,
         ...derived,
       }}
     >
@@ -435,6 +453,7 @@ export function useAuth(): AuthContextValue {
       isVisiting: false,
       homeAccountId: null,
       isAccountInactive: false,
+      moduleAccess: null,
     };
   }
   return ctx;

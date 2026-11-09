@@ -8,6 +8,7 @@ import {
   SIMPLE_VIEW_MODULES,
   enableWithRequirements,
   isModuleDisabled,
+  isModuleVisible,
   isSimpleAccount,
   matchingTemplate,
   moduleArea,
@@ -94,5 +95,29 @@ describe('Cobranzas depende de Cuotas', () => {
 describe('rutas desconocidas en disabled_modules', () => {
   it('siguen bloqueadas aunque no estén en el registro', () => {
     expect(isModuleDisabled('/legacy', ['/legacy'])).toBe(true);
+  });
+});
+
+describe('visibilidad por acceso de módulo (084)', () => {
+  it('oculta Cobranzas a quien no tiene acceso', () => {
+    expect(isModuleVisible('/collections', [], { cobranzas: false })).toBe(false);
+    expect(isModuleVisible('/collections/x', [], { cobranzas: false })).toBe(false);
+  });
+  it('la muestra con acceso', () => {
+    expect(isModuleVisible('/collections', [], { cobranzas: true })).toBe(true);
+  });
+  it('oculta Cuotas sin cronograma y la muestra con él', () => {
+    expect(isModuleVisible('/payment-plans', [], { cronograma: false })).toBe(false);
+    expect(isModuleVisible('/payment-plans', [], { cronograma: true, cobranzas: false })).toBe(true);
+    expect(isModuleVisible('/payment-plans', [], null)).toBe(true);
+  });
+  it('sin la migración 084 (null) no oculta nada', () => {
+    expect(isModuleVisible('/collections', [], null)).toBe(true);
+  });
+  it('módulos sin llave de acceso no se ven afectados', () => {
+    expect(isModuleVisible('/contacts', [], { cobranzas: false })).toBe(true);
+  });
+  it('sigue respetando los módulos apagados de la cuenta', () => {
+    expect(isModuleVisible('/collections', ['/collections'], { cobranzas: true })).toBe(false);
   });
 });

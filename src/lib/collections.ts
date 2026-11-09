@@ -8,6 +8,8 @@ export interface OverdueInstallment {
   plan_id: string;
   number: number;
   amount: number | string;
+  /** Saldo pendiente (pagos parciales); si viene, se usa en vez de amount. */
+  remaining?: number | string | null;
   due_date: string; // YYYY-MM-DD
   /** Voucher subido por el cliente y aún sin aprobar (047): no es deuda a cobrar. */
   voucher_path?: string | null;
@@ -46,6 +48,8 @@ export interface Debtor {
   /** Cuotas vencidas cuyo voucher ya mandó el cliente y espera aprobación. */
   inReviewCount: number;
   inReviewAmount: number;
+  /** Contrato con más cuotas vencidas sin voucher (la causal se mide por contrato). */
+  worstPlan: { planId: string; overdueCount: number; daysLate: number } | null;
 }
 
 export interface GroupTotal {
@@ -58,6 +62,9 @@ export interface GroupTotal {
 }
 
 const DAY = 86_400_000;
+
+/** Lo que falta cobrar de una cuota: su saldo si viene, si no el monto. */
+export const saldoDe = (r: OverdueInstallment) => Number(r.remaining ?? r.amount) || 0;
 
 /** Días entre dos fechas YYYY-MM-DD (hoy - vencimiento). */
 export function daysBetween(due: string, today: string): number {
@@ -93,6 +100,7 @@ export function buildDebtors(
 ): Debtor[] {
   const map = new Map<string, Debtor>();
   const reviewOldest = new Map<string, string>();
+  const planStats = new Map<string, { key: string; count: number; oldest: string }>();
   const seen = new Set<string>();
   for (const r of rows) {
     const plan = r.plan;
@@ -120,6 +128,7 @@ export function buildDebtors(
         lastReminder: null,
         inReviewCount: 0,
         inReviewAmount: 0,
+        worstPlan: null,
       };
       map.set(key, d);
       reviewOldest.set(key, r.due_date);
@@ -127,11 +136,17 @@ export function buildDebtors(
     if (r.voucher_path) {
       // Ya mandó su voucher: se muestra aparte, no se le cobra otra vez.
       d.inReviewCount += 1;
-      d.inReviewAmount += Number(r.amount) || 0;
+      d.inReviewAmount += saldoDe(r);
       if (r.due_date < reviewOldest.get(key)!) reviewOldest.set(key, r.due_date);
     } else {
       d.overdueCount += 1;
-      d.overdueAmount += Number(r.amount) || 0;
+      const ps = planStats.get(r.plan_id);
+      if (!ps) planStats.set(r.plan_id, { key, count: 1, oldest: r.due_date });
+      else {
+        ps.count += 1;
+        if (r.due_date < ps.oldest) ps.oldest = r.due_date;
+      }
+      d.overdueAmount += saldoDe(r);
       if (!d.oldestDue || r.due_date < d.oldestDue) d.oldestDue = r.due_date;
     }
     const code = plan.unit?.code;
@@ -140,6 +155,14 @@ export function buildDebtors(
     if (project && !d.projects.includes(project)) d.projects.push(project);
     const sent = lastReminderByInstallment.get(r.id);
     if (sent && (!d.lastReminder || sent > d.lastReminder)) d.lastReminder = sent;
+  }
+  for (const [planId, ps] of planStats) {
+    const d = map.get(ps.key)!;
+    const daysLate = daysBetween(ps.oldest, today);
+    const w = d.worstPlan;
+    if (!w || ps.count > w.overdueCount || (ps.count === w.overdueCount && daysLate > w.daysLate)) {
+      d.worstPlan = { planId, overdueCount: ps.count, daysLate };
+    }
   }
   const out = [...map.values()];
   for (const [key, d] of map) {
@@ -157,6 +180,13 @@ export function buildDebtors(
       b.daysLate - a.daysLate ||
       b.overdueAmount - a.overdueAmount,
   );
+}
+
+/** Causal de resolución: cuotas o días de atraso de un mismo contrato alcanzan el umbral (0 = desactivado). */
+export function inResolution(d: Debtor, s: { installments: number; days: number }): boolean {
+  const w = d.worstPlan;
+  if (!w) return false;
+  return (s.installments > 0 && w.overdueCount >= s.installments) || (s.days > 0 && w.daysLate >= s.days);
 }
 
 /** Deuda vencida por proyecto y manzana (para ver dónde se concentra). */
@@ -186,7 +216,7 @@ export function groupByManzana(rows: readonly OverdueInstallment[], today: strin
       map.set(key, g);
     }
     g.contacts.add(plan.contact.id);
-    g.overdueAmount += Number(r.amount) || 0;
+    g.overdueAmount += saldoDe(r);
   }
   return [...map.values()]
     .map(({ contacts, ...g }) => ({
@@ -214,7 +244,7 @@ export function hiddenOverdue(
     if (seen.has(r.id)) continue;
     seen.add(r.id);
     count += 1;
-    amount += Number(r.amount) || 0;
+    amount += saldoDe(r);
   }
   return { count, amount: Math.round(amount * 100) / 100 };
 }
@@ -252,14 +282,17 @@ export function whatsappLink(d: Debtor, monto: string): string | null {
   return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 }
 
+/** Celda de CSV (punto y coma): neutraliza fórmulas y protege separadores. */
+export function csvCell(v: string | number | null | undefined): string {
+  let s = v == null ? "" : String(v);
+  // Excel ejecuta como fórmula lo que empieza con = + - @ (nombres de WhatsApp).
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 /** CSV (separado por punto y coma, para Excel en español). */
 export function debtorsCsv(list: readonly Debtor[]): string {
-  const esc = (v: string | number | null) => {
-    let s = v == null ? "" : String(v);
-    // Excel ejecuta como fórmula lo que empieza con = + - @ (nombres de WhatsApp).
-    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
+  const esc = csvCell;
   const head = ["Cliente", "DNI", "Teléfono", "Proyecto", "Lotes", "Cuotas vencidas", "Monto vencido", "Moneda", "Vence desde", "Días de atraso", "Tramo", "Último aviso", "En revisión"];
   const lines = list.map((d) =>
     [d.name, d.dni, d.phone, d.projects.join(", "), d.units.join(", "), d.overdueCount, d.overdueAmount.toFixed(2), d.currency, d.oldestDue, d.daysLate, d.tramo, d.lastReminder ? fechaLima(d.lastReminder) : "", d.inReviewAmount ? d.inReviewAmount.toFixed(2) : ""]

@@ -8,9 +8,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { AccountStatement } from "@/components/collections/account-statement";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
+import { useAuth } from "@/hooks/use-auth";
 import {
   planHealth,
   summarizeClientAccount,
@@ -61,6 +63,8 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [balances, setBalances] = useState<PlanBalanceRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { moduleAccess } = useAuth();
+  const [statement, setStatement] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +96,15 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
       cancelled = true;
     };
   }, [contactId]);
+
+  // Sin acceso a cobranzas (084): "sin acceso" no es "no debe nada".
+  if (moduleAccess?.cobranzas === false) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        Sin acceso a cobranzas. La cuenta del cliente la ve el área de Cobranzas, Contabilidad o Gerencia.
+      </p>
+    );
+  }
 
   if (loading) {
     return (
@@ -169,6 +182,16 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
           <Link href="/payment-plans" className="text-xs text-primary hover:underline">
             Ver en Cuotas
           </Link>
+          <div className="pt-1">
+            <button type="button" onClick={() => setStatement((v) => !v)} className="text-xs text-primary hover:underline">
+              {statement ? "Ocultar estado de cuenta" : "Estado de cuenta (imprimible)"}
+            </button>
+            {statement && (
+              <div className="mt-2">
+                <AccountStatement contactId={contactId} />
+              </div>
+            )}
+          </div>
         </section>
       )}
 

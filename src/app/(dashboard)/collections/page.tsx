@@ -9,8 +9,9 @@
 // vive en src/lib/collections.ts (con pruebas).
 // ============================================================
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardList, Download, Percent, HandCoins, Loader2, MessageCircle } from "lucide-react";
+import { CalendarDays, ClipboardList, Download, FileText, Percent, HandCoins, Loader2, MessageCircle } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
@@ -23,12 +24,13 @@ import {
   fechaLima,
   hiddenOverdue,
   hoyLima,
+  inResolution,
   whatsappLink,
   type Debtor,
   type OverdueInstallment,
   type Tramo,
 } from "@/lib/collections";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ContactDetailView } from "@/components/contacts/contact-detail-view";
 import { CollectionActionDialog } from "@/components/collections/collection-action-dialog";
@@ -73,10 +75,12 @@ export default function CollectionsPage() {
   const [gestion, setGestion] = useState<{ id: string; name: string } | null>(null);
   const [soloPromesasVencidas, setSoloPromesasVencidas] = useState(false);
   const [gestionesError, setGestionesError] = useState<string | null>(null);
-  const { accountRole, accountId } = useAuth();
+  const { accountRole, accountId, moduleAccess } = useAuth();
   const esAdmin = accountRole === "admin" || accountRole === "owner";
   const [mora, setMora] = useState<LateFeeSettings>(NO_LATE_FEE);
   const [moraOpen, setMoraOpen] = useState(false);
+  // Umbrales de causal de resolución de la cuenta (084). 0 = sin badge.
+  const [causal, setCausal] = useState({ installments: 0, days: 0 });
   // Un agente solo ve sus propios clientes (contacts RLS): la pantalla lo dice.
   const soloMisClientes = accountRole === "agent";
   const today = useMemo(() => hoyLima(), []);
@@ -107,9 +111,27 @@ export default function CollectionsPage() {
         if (!data || data.length < PAGE) break;
       }
 
+      const ids = all.map((r) => r.id);
+      // Saldo real por cuota (084): con pagos en partes se cobra lo que falta,
+      // no el monto original. Sin la vista se queda el monto (comportamiento previo).
+      const saldos = new Map<string, number>();
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const { data, error: errSaldo } = await supabase
+          .from("installment_balances")
+          .select("installment_id, remaining")
+          .in("installment_id", ids.slice(i, i + CHUNK));
+        if (errSaldo) break;
+        for (const s of (data ?? []) as { installment_id: string; remaining: number | string }[]) {
+          saldos.set(s.installment_id, Number(s.remaining));
+        }
+      }
+      for (const r of all) {
+        const saldo = saldos.get(r.id);
+        if (saldo !== undefined) r.remaining = saldo;
+      }
+
       // Último aviso automático de cada cuota vencida (migración 052).
       const last = new Map<string, string>();
-      const ids = all.map((r) => r.id);
       for (let i = 0; i < ids.length; i += CHUNK) {
         // Solo avisos que de verdad salieron (con canal y sin error).
         const { data } = await supabase
@@ -150,7 +172,25 @@ export default function CollectionsPage() {
           .maybeSingle();
         moraCuenta = settingsFromAccount(acc);
       }
+      // Aparte de la mora: antes de la 084 estas columnas no existen y no debe romper la lectura anterior.
+      let umbrales = { installments: 0, days: 0 };
+      if (accountId) {
+        const { data: r } = await supabase
+          .from("accounts")
+          .select("resolution_installments, resolution_days, late_fee_cap_days")
+          .eq("id", accountId)
+          .maybeSingle();
+        if (r) {
+          umbrales = { installments: Number(r.resolution_installments) || 0, days: Number(r.resolution_days) || 0 };
+          // El tope de días de mora (084) también es de esta lectura: sin él la
+          // mora estimada no tendría tope y no coincidiría con el estado de cuenta.
+          if (moraCuenta.type !== "ninguna") {
+            moraCuenta = { ...moraCuenta, capDays: Math.max(0, Number(r.late_fee_cap_days) || 0) };
+          }
+        }
+      }
       if (cancelled) return;
+      setCausal(umbrales);
       setMora(moraCuenta);
       setAcciones(acts);
       setGestionesOk(tablaOk && !otroError);
@@ -175,6 +215,7 @@ export default function CollectionsPage() {
   const moraPorCliente = useMemo(() => lateFeesByDebtor(rows, today, mora), [rows, today, mora]);
   const moraDe = (d: Debtor) => moraPorCliente.get(`${d.contactId}|${d.currency}`) ?? 0;
   const conMora = mora.type !== "ninguna";
+  const enCausal = (d: Debtor) => inResolution(d, causal);
 
   const ocultas = useMemo(() => hiddenOverdue(rows, today), [rows, today]);
 
@@ -229,6 +270,16 @@ export default function CollectionsPage() {
     URL.revokeObjectURL(url);
   }
 
+  // Sin acceso a Cobranzas (084): se dice, no se muestra una lista vacía
+  // que parezca "no hay morosos".
+  if (moduleAccess?.cobranzas === false) {
+    return (
+      <p className="py-16 text-center text-sm text-muted-foreground">
+        Sin acceso a Cobranzas. Pídele al dueño de la cuenta que te asigne el área.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -240,7 +291,13 @@ export default function CollectionsPage() {
             Clientes con cuotas vencidas al {fecha(today)}, del atraso más antiguo al más reciente.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+        <Link href="/collections/vouchers" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <FileText className="h-4 w-4" /> Vouchers
+        </Link>
+        <Link href="/collections/daily" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <CalendarDays className="h-4 w-4" /> Pagos del día
+        </Link>
         {esAdmin && accountId && (
           <Button variant="outline" size="sm" onClick={() => setMoraOpen(true)} disabled={loading}>
             <Percent className="h-4 w-4" /> {conMora ? "Mora" : "Configurar mora"}
@@ -271,7 +328,7 @@ export default function CollectionsPage() {
                 <p className="text-xl font-semibold text-rose-400">{formatCurrency(t.amount, cur)}</p>
                 <p className="text-xs text-muted-foreground">
                   {t.debtors} cliente{t.debtors === 1 ? "" : "s"}
-                  {conMora && t.mora > 0 ? ` · mora ${formatCurrency(t.mora, cur)}` : ""}
+                  {conMora && t.mora > 0 ? ` · mora estimada ${formatCurrency(t.mora, cur)}` : ""}
                 </p>
               </div>
             ))}
@@ -367,6 +424,7 @@ export default function CollectionsPage() {
                         <td className="px-3 py-2">
                           <button type="button" className="text-left hover:underline" onClick={() => setAbierto(d.contactId)}>
                             <span className="font-medium">{d.name}</span>
+                            {enCausal(d) && <CausalBadge />}
                             <span className="block text-xs text-muted-foreground">{d.phone ?? "Sin teléfono"}</span>
                           </button>
                         </td>
@@ -383,7 +441,7 @@ export default function CollectionsPage() {
                             </span>
                           )}
                           {conMora && moraDe(d) > 0 && (
-                            <span className="block text-xs text-amber-400">+ mora {formatCurrency(moraDe(d), d.currency)}</span>
+                            <span className="block text-xs text-amber-400">+ mora estimada {formatCurrency(moraDe(d), d.currency)}</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -417,6 +475,7 @@ export default function CollectionsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <button type="button" className="text-left" onClick={() => setAbierto(d.contactId)}>
                         <p className="font-medium">{d.name}</p>
+                        {enCausal(d) && <CausalBadge />}
                         <p className="text-xs text-muted-foreground">{d.units.join(", ") || "—"} · {d.projects.join(", ")}</p>
                       </button>
                       <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs", TRAMO_STYLE[d.tramo])}>{d.daysLate} días</span>
@@ -425,7 +484,7 @@ export default function CollectionsPage() {
                       <span className="font-semibold">{formatCurrency(d.overdueAmount, d.currency)}</span>
                       <span className="text-xs text-muted-foreground"> · {d.overdueCount} cuota{d.overdueCount === 1 ? "" : "s"}</span>
                       {conMora && moraDe(d) > 0 && (
-                        <span className="text-xs text-amber-400"> · + mora {formatCurrency(moraDe(d), d.currency)}</span>
+                        <span className="text-xs text-amber-400"> · + mora estimada {formatCurrency(moraDe(d), d.currency)}</span>
                       )}
                     </p>
                     <div className="mt-1 text-xs">
@@ -512,6 +571,14 @@ function Seguimiento({ accion, estado }: { accion?: CollectionAction; estado: Pr
           {estado === "vencida" ? "promesa vencida" : "promete"} {fecha(accion.promise_date)}
         </span>
       )}
+    </span>
+  );
+}
+
+function CausalBadge() {
+  return (
+    <span className="ml-1 rounded-full bg-red-600/15 px-1.5 py-0.5 text-[11px] font-medium text-red-400 md:ml-0 md:mt-0.5 md:inline-block">
+      En causal de resolución
     </span>
   );
 }

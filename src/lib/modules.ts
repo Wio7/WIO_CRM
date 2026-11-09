@@ -34,6 +34,8 @@ export interface ModuleDef {
   area: ModuleArea;
   /** Módulos que este necesita encendidos para funcionar. */
   requires?: readonly string[];
+  /** Llave de my_module_access() que hace falta para ver el módulo (084). */
+  accessKey?: "cobranzas" | "legal" | "ventas" | "cronograma";
 }
 
 /** Registro de módulos (mismo orden que el menú). */
@@ -48,8 +50,8 @@ export const MODULES: readonly ModuleDef[] = [
   { href: "/projects", label: "Proyectos", area: "ventas" },
   { href: "/reservations", label: "Separaciones", area: "ventas", requires: ["/projects"] },
   { href: "/coupons", label: "Cupones y referidos", area: "ventas" },
-  { href: "/payment-plans", label: "Cuotas", area: "finanzas" },
-  { href: "/collections", label: "Cobranzas", area: "finanzas", requires: ["/payment-plans"] },
+  { href: "/payment-plans", label: "Cuotas", area: "finanzas", accessKey: "cronograma" },
+  { href: "/collections", label: "Cobranzas", area: "finanzas", requires: ["/payment-plans"], accessKey: "cobranzas" },
   { href: "/caja", label: "Golden Caja", area: "finanzas" },
   { href: "/calendar", label: "Calendario", area: "agenda" },
   { href: "/automations", label: "Automatizaciones", area: "automatizacion" },
@@ -195,4 +197,20 @@ export function matchingTemplate(disabled: readonly string[] | undefined): strin
  */
 export function isSimpleAccount(disabled: readonly string[] | undefined): boolean {
   return Boolean(disabled?.includes("/pipelines"));
+}
+
+/**
+ * ¿Se muestra el módulo? Respeta los apagados de la cuenta y, si el módulo
+ * tiene `accessKey`, el acceso por área (my_module_access, migración 084).
+ * `moduleAccess` null = 084 sin aplicar (o aún cargando): no se oculta nada.
+ */
+export function isModuleVisible(
+  href: string,
+  disabled: readonly string[] | undefined,
+  moduleAccess: Readonly<Record<string, boolean>> | null | undefined,
+): boolean {
+  if (isModuleDisabled(href, disabled)) return false;
+  if (!moduleAccess) return true;
+  const key = MODULES.find((m) => href === m.href || href.startsWith(`${m.href}/`))?.accessKey;
+  return key ? moduleAccess[key] !== false : true;
 }

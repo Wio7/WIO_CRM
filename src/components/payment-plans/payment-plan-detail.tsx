@@ -9,23 +9,36 @@
 // and a small form beside it, never a separate page, because the advisor
 // is mid-call and loses the thread.
 //
-// Everything written here goes to `installments` (043) plus the payment
-// detail columns of 047. Balances are re-read from
-// `payment_plan_balances` after every write instead of being patched in
-// memory: the view is the only thing allowed to do that arithmetic.
+// Money is written only through the RPCs of migration 084 (see
+// `@/lib/payment-plans/rpc`): they validate amount, date, parts and
+// permissions, and keep the payment ledger. Balances are re-read from the
+// views after every write instead of being patched in memory: the views
+// are the only thing allowed to do that arithmetic.
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { useAuth } from "@/hooks/use-auth";
 import { useCan } from "@/hooks/use-can";
-import { CURRENCIES, formatCurrency } from "@/lib/currency";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  calendarioACuotas,
+  esFaltaDeObjeto,
+  sinAccesoCobranzas,
+  type FilaCalendario,
+} from "@/lib/payment-plans/acceso";
+import {
+  registerAdvance,
+  registerPayment,
+  voidPayment,
+  type RpcResult,
+} from "@/lib/payment-plans/rpc";
+import { validateAdvance } from "@/lib/advance-payments";
+import { formatCurrency } from "@/lib/currency";
 import {
   MEDIA_MAX_BYTES_BY_KIND,
   signedDocUrl,
   uploadAccountDoc,
 } from "@/lib/storage/upload-media";
-import { falta047 } from "@/lib/payment-plans/migration-047";
 import { PrepaymentDialog } from "./prepayment-dialog";
 import { hoyLima } from "@/lib/collections";
 import { cn } from "@/lib/utils";
@@ -33,7 +46,6 @@ import type {
   Installment,
   PaymentPlan,
   PaymentPlanBalance,
-  PaymentPlanStatus,
 } from "@/types";
 import {
   Sheet,
@@ -47,6 +59,7 @@ import { Label } from "@/components/ui/label";
 import { GatedButton } from "@/components/ui/gated-button";
 import {
   Check,
+  ChevronsRight,
   FileText,
   Loader2,
   Paperclip,
@@ -63,10 +76,36 @@ interface PaymentPlanDetailProps {
   onChanged: () => void;
 }
 
+/** Una fila del libro de pagos (084). */
+interface Pago {
+  id: string;
+  installment_id: string;
+  amount: number;
+  method: string | null;
+  reference: string | null;
+  voucher_path: string | null;
+  paid_on: string;
+  late_fee_at_payment: number | null;
+  voided_at: string | null;
+  void_reason: string | null;
+}
+
+/** Una fila de `installment_balances` (084). */
+interface SaldoCuota {
+  installment_id: string;
+  remaining: number;
+  paid_so_far: number;
+  parts: number;
+}
+
 const METODOS = ["Yape", "Plin", "Transferencia", "Depósito", "Efectivo"];
 
 // Día de Lima, igual que la vista de saldos (083) y Cobranzas.
 const hoy = () => hoyLima();
+
+// Dinero en centavos enteros: nunca se suma ni se resta con decimales.
+const aCents = (n: number | string | null | undefined) => Math.round(Number(n ?? 0) * 100);
+const centsAMonto = (c: number) => (c / 100).toFixed(2);
 
 const fecha = (iso: string | null | undefined) =>
   iso
@@ -87,13 +126,17 @@ export function PaymentPlanDetail({
   onChanged,
 }: PaymentPlanDetailProps) {
   const supabase = createClient();
-  const { profile } = useAuth();
   const canAct = useCan("send-messages");
+  const { moduleAccess } = useAuth();
+  // Sin acceso a cobranzas (084): solo el calendario, sin saldos ni pagos.
+  const sinCob = sinAccesoCobranzas(moduleAccess);
 
   const [plan, setPlan] = useState<PaymentPlan | null>(null);
   const [cuotas, setCuotas] = useState<Installment[]>([]);
   const [balance, setBalance] = useState<PaymentPlanBalance | null>(null);
   const [loading, setLoading] = useState(false);
+  // Una lectura falló (no es lo mismo que "no hay cuotas").
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
   const [soloPendientes, setSoloPendientes] = useState(true);
   const [cobrando, setCobrando] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -106,76 +149,110 @@ export function PaymentPlanDetail({
   const [voucher, setVoucher] = useState<string | null>(null);
   const [subiendo, setSubiendo] = useState(false);
   const [abonoOpen, setAbonoOpen] = useState(false);
-  // Se enciende la primera vez que la base rechaza las columnas de 047.
-  const sinDetalle = useRef(false);
-
-  /**
-   * Guarda una cuota con el detalle del pago y, si 047 todavía no está
-   * aplicada, la guarda sin él: cobrar no puede depender de una migración
-   * pendiente.
-   */
-  const guardarCuota = useCallback(
-    async (
-      id: string,
-      // Estado que debe tener la cuota para tocarla: con la pantalla vieja
-      // (otro asesor la cambió, o un abono la cubrió) no se pisa nada.
-      estadoActual: string,
-      base: Record<string, unknown>,
-      detalle: Record<string, unknown>,
-    ): Promise<{ message: string } | null> => {
-      const cambio = "La cuota cambió mientras la tenías abierta; se recargó.";
-      if (!sinDetalle.current) {
-        const { data, error } = await supabase
-          .from("installments")
-          .update({ ...base, ...detalle })
-          .eq("id", id)
-          .eq("status", estadoActual)
-          .select("id");
-        if (!error) return data && data.length > 0 ? null : { message: cambio };
-        if (!falta047(error)) return error;
-        sinDetalle.current = true;
-      }
-      const { data, error } = await supabase
-        .from("installments")
-        .update(base)
-        .eq("id", id)
-        .eq("status", estadoActual)
-        .select("id");
-      if (error) return error;
-      return data && data.length > 0 ? null : { message: cambio };
-    },
-    [supabase],
-  );
-
+  // Libro de pagos y saldos por cuota (084). Vacíos si 084 no está aplicada.
+  const [pagos, setPagos] = useState<Pago[]>([]);
+  const [saldos, setSaldos] = useState<Record<string, SaldoCuota>>({});
+  const [maxPartes, setMaxPartes] = useState<number | null>(null);
+  // Anular un pago: el que se está anulando y su motivo.
+  const [anulando, setAnulando] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState("");
+  // Adelantar cuotas: panel abierto y cuotas marcadas.
+  const [adelantando, setAdelantando] = useState(false);
+  const [marcadas, setMarcadas] = useState<string[]>([]);
   const cargar = useCallback(async () => {
     if (!planId) return;
-    const [{ data: p }, { data: cs }, { data: b }] = await Promise.all([
+    const nada = Promise.resolve({ data: null, error: null });
+    const [
+      { data: p, error: ep },
+      { data: cs, error: ecs },
+      { data: b, error: eb },
+      { data: pg },
+      { data: sd },
+    ] = await Promise.all([
       supabase
         .from("payment_plans")
         .select("*, contact:contacts(*), unit:real_estate_units(*)")
         .eq("id", planId)
         .maybeSingle(),
-      supabase
-        .from("installments")
-        .select("*")
-        .eq("plan_id", planId)
-        .order("number"),
-      supabase
-        .from("payment_plan_balances")
-        .select("*")
-        .eq("plan_id", planId)
-        .maybeSingle(),
+      // Sin acceso a cobranzas el calendario sale de la vista de 084.
+      sinCob
+        ? supabase
+            .from("installment_schedule")
+            .select("id, plan_id, account_id, number, amount, due_date, state")
+            .eq("plan_id", planId)
+            .order("number")
+        : supabase
+            .from("installments")
+            .select("*")
+            .eq("plan_id", planId)
+            .order("number"),
+      sinCob
+        ? nada
+        : supabase
+            .from("payment_plan_balances")
+            .select("*")
+            .eq("plan_id", planId)
+            .maybeSingle(),
+      // Antes de 084 estas dos no existen: el error se ignora y quedan vacías.
+      sinCob
+        ? nada
+        : supabase
+            .from("installment_payments")
+            .select("id, installment_id, amount, method, reference, voucher_path, paid_on, late_fee_at_payment, voided_at, void_reason")
+            .eq("plan_id", planId)
+            .order("paid_on")
+            .order("created_at"),
+      sinCob
+        ? nada
+        : supabase
+            .from("installment_balances")
+            .select("installment_id, remaining, paid_so_far, parts")
+            .eq("plan_id", planId),
     ]);
+    // Un error de lectura no es "no hay cuotas": se dice. Los objetos que 084
+    // aún no creó (tabla/vista inexistente) siguen con el comportamiento previo.
+    const fallo = [ep, ecs, eb].find((e) => e && !esFaltaDeObjeto(e));
+    if (fallo) {
+      console.error("[payment-plan] load:", fallo.message);
+      toast.error("No se pudo leer el plan. Revisa tu conexión e inténtalo de nuevo.");
+      setErrorCarga("No se pudo leer el plan o sus cuotas.");
+      return;
+    }
+    setErrorCarga(null);
     setPlan((p as PaymentPlan) ?? null);
-    setCuotas((cs as Installment[]) ?? []);
+    setCuotas(
+      sinCob
+        ? calendarioACuotas((cs as FilaCalendario[]) ?? [])
+        : ((cs as Installment[]) ?? []),
+    );
     setBalance((b as PaymentPlanBalance) ?? null);
-  }, [planId, supabase]);
+    setPagos((pg as Pago[]) ?? []);
+    setSaldos(
+      Object.fromEntries(((sd as SaldoCuota[]) ?? []).map((x) => [x.installment_id, x])),
+    );
+    // Máximo de partes del plan (o, si no lo tiene, el de la cuenta).
+    const terms = (p as { collection_terms?: { max_payment_parts?: number } | null } | null)
+      ?.collection_terms;
+    if (terms?.max_payment_parts) {
+      setMaxPartes(Number(terms.max_payment_parts));
+    } else if (p) {
+      const { data: acc } = await supabase
+        .from("accounts")
+        .select("max_payment_parts")
+        .eq("id", (p as PaymentPlan).account_id)
+        .maybeSingle();
+      setMaxPartes(acc?.max_payment_parts ? Number(acc.max_payment_parts) : null);
+    }
+  }, [planId, supabase, sinCob]);
 
   useEffect(() => {
     if (!planId) {
+      setErrorCarga(null);
       setPlan(null);
       setCuotas([]);
       setBalance(null);
+      setPagos([]);
+      setSaldos({});
       return;
     }
     let cancelled = false;
@@ -194,11 +271,21 @@ export function PaymentPlanDetail({
     [cuotas, soloPendientes],
   );
 
-  const faltantes = plan ? plan.installments_count - cuotas.length : 0;
+  // Con una lectura fallida o sin acceso a las cuotas no se sabe cuántas faltan.
+  const faltantes = plan && !errorCarga && !sinCob ? plan.installments_count - cuotas.length : 0;
+
+  // Cuotas que se pueden marcar para adelantar: pendientes, no vencidas.
+  const adelantables = useMemo(
+    () => cuotas.filter((x) => x.status === "pendiente" && x.due_date >= hoy()),
+    [cuotas],
+  );
 
   function abrirCobro(c: Installment) {
     setCobrando(c.id);
-    setMonto(String(c.amount));
+    setAdelantando(false);
+    setAnulando(null);
+    // Por defecto, lo que falta de la cuota (no el monto completo).
+    setMonto(centsAMonto(faltaCents(c)));
     setPagadoEl(hoy());
     setMetodo("");
     setOperacion("");
@@ -235,98 +322,92 @@ export function PaymentPlanDetail({
     window.open(url, "_blank", "noopener,noreferrer");
   }
 
-  /**
-   * Cierra el plan cuando ya no queda nada pendiente, y lo reabre si
-   * alguien deshace un pago. Lo decide el conteo real de cuotas, no el
-   * botón que se acaba de tocar.
-   */
-  const sincronizarEstado = useCallback(
-    async (planActual: PaymentPlan, restantes: number) => {
-      const deberia: PaymentPlanStatus =
-        restantes === 0
-          ? "pagado"
-          : planActual.status === "pagado"
-            ? "activo"
-            : planActual.status;
-      if (deberia === planActual.status) return;
-      await supabase.from("payment_plans").update({ status: deberia }).eq("id", planActual.id);
-    },
-    [supabase],
-  );
+  /** Lo que falta de una cuota, en centavos (lo dice la vista; sin ella, el monto). */
+  function faltaCents(c: Installment): number {
+    const sd = saldos[c.id];
+    return sd ? aCents(sd.remaining) : aCents(c.amount);
+  }
+
+  /** Muestra el resultado de un RPC y, si salió bien, recarga todo. */
+  async function terminar(res: RpcResult, exito: string): Promise<boolean> {
+    setGuardando(false);
+    if (!res.ok) {
+      // El mensaje de la base es la explicación (regla de 7 días, partes, monto).
+      toast.error(res.message);
+      // Que la pantalla no quede vieja si otro asesor cambió algo mientras tanto.
+      await cargar();
+      return false;
+    }
+    toast.success(exito);
+    await cargar();
+    onChanged();
+    return true;
+  }
 
   async function registrarPago(c: Installment) {
     if (!plan) return;
-    const importe = Number(monto);
-    if (!importe || importe <= 0) {
+    const cents = aCents(monto);
+    if (cents <= 0) {
       toast.error("Escribe cuánto pagó");
       return;
     }
     setGuardando(true);
-    const error = await guardarCuota(c.id, "pendiente", {
-      status: "pagada",
-      // Mediodía y no medianoche: la fecha que escribió el asesor es la
-      // que tiene que leerse después en Lima, no el día anterior.
-      paid_at: new Date(`${pagadoEl}T12:00:00-05:00`).toISOString(),
-      paid_amount: importe,
-    }, {
-      paid_method: metodo.trim() || null,
-      paid_reference: operacion.trim() || null,
-      voucher_path: voucher,
-      registered_by: profile?.id ?? null,
+    const res = await registerPayment(supabase, {
+      installmentId: c.id,
+      amount: cents / 100,
+      method: metodo.trim() || null,
+      reference: operacion.trim() || null,
+      voucherPath: voucher,
+      paidOn: pagadoEl,
     });
-
-    if (error) {
-      setGuardando(false);
-      toast.error(error.message.startsWith("La cuota cambió") ? error.message : "No se pudo registrar el pago");
-      if (error.message.startsWith("La cuota cambió")) await cargar();
-      console.error("[payment-plan] pay installment:", error.message);
-      return;
-    }
-    if (voucher && !error && sinDetalle.current) {
-      // El pago quedó guardado, pero el voucher no tiene dónde vivir.
-      toast.warning("El pago se registró. El voucher no se guardó: falta aplicar la migración 047.");
-    }
-
-    const restantes = cuotas.filter(
-      (x) => x.status === "pendiente" && x.id !== c.id,
-    ).length;
-    await sincronizarEstado(plan, restantes);
-
-    setGuardando(false);
-    setCobrando(null);
-    toast.success(`Cuota ${c.number} pagada`);
-    await cargar();
-    onChanged();
+    if (await terminar(res, `Pago registrado en la cuota ${c.number}`)) setCobrando(null);
   }
 
-  async function deshacerPago(c: Installment) {
-    if (!plan) return;
+  async function anularPago(pg: Pago) {
+    if (motivo.trim().length < 3) {
+      toast.error("Escribe el motivo de la anulación");
+      return;
+    }
     setGuardando(true);
-    const error = await guardarCuota(c.id, "pagada", {
-      status: "pendiente",
-      paid_at: null,
-      paid_amount: null,
-    }, {
-      paid_method: null,
-      paid_reference: null,
-      // Sin esto la cuota queda "con voucher en revisión" y bloquea abonos y avisos.
-      voucher_path: null,
-      registered_by: profile?.id ?? null,
-    });
-    if (error) {
-      setGuardando(false);
-      toast.error(error.message.startsWith("La cuota cambió") ? error.message : "No se pudo deshacer");
-      if (error.message.startsWith("La cuota cambió")) await cargar();
-      return;
+    const res = await voidPayment(supabase, { paymentId: pg.id, reason: motivo.trim() });
+    if (await terminar(res, "Pago anulado")) {
+      setAnulando(null);
+      setMotivo("");
     }
-    // Vuelve a haber algo pendiente: el plan ya no está pagado.
-    await sincronizarEstado(plan, 1);
-    setGuardando(false);
-    toast.success(`La cuota ${c.number} vuelve a estar pendiente`);
-    await cargar();
-    onChanged();
   }
 
+  function abrirAdelanto() {
+    setAdelantando(true);
+    setCobrando(null);
+    setAnulando(null);
+    setMarcadas([]);
+    setPagadoEl(hoy());
+    setMetodo("");
+    setOperacion("");
+    setVoucher(null);
+  }
+
+  async function adelantarCuotas() {
+    if (!plan) return;
+    const pendientes = cuotas
+      .filter((x) => x.status === "pendiente")
+      .map((x) => ({ id: x.id, number: x.number, due_date: x.due_date }));
+    const check = validateAdvance(pendientes, marcadas, hoy());
+    if (!check.ok) {
+      toast.error(check.error);
+      return;
+    }
+    setGuardando(true);
+    const res = await registerAdvance(supabase, {
+      planId: plan.id,
+      installmentIds: marcadas,
+      method: metodo.trim() || null,
+      reference: operacion.trim() || null,
+      voucherPath: voucher,
+      paidOn: pagadoEl,
+    });
+    if (await terminar(res, `${marcadas.length} cuotas adelantadas`)) setAdelantando(false);
+  }
   /**
    * Rellena las cuotas que falten. Existe porque el formulario de creación
    * puede guardar el plan y fallar al escribir su cronograma: sin esto ese
@@ -374,11 +455,24 @@ export function PaymentPlanDetail({
           </SheetTitle>
         </SheetHeader>
 
-        {loading || !plan ? (
+        {loading ? (
           <p className="py-16 text-center text-sm text-muted-foreground">Cargando…</p>
+        ) : !plan ? (
+          <p className="py-16 text-center text-sm text-muted-foreground">
+            {errorCarga ?? "No se encontró el plan."}
+          </p>
         ) : (
           <div className="mt-4 space-y-5">
             {/* Lo que pregunta el cliente, en el orden en que lo pregunta. */}
+            {sinCob ? (
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-sm font-medium text-foreground">Sin acceso a cobranzas</p>
+                <p className="text-xs text-muted-foreground">
+                  Tu área ve el calendario de cuotas, pero no los saldos ni los pagos. Que no se
+                  muestre un monto no significa que no haya deuda.
+                </p>
+              </div>
+            ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Resumen
                 titulo="Por cobrar"
@@ -395,43 +489,19 @@ export function PaymentPlanDetail({
                 valor={`${(balance?.paid_count ?? 0) + cuotas.filter((x) => x.status === "adelantada").length} de ${plan.installments_count}`}
               />
             </div>
+            )}
 
-            {/* Cambiar la moneda de un plan ya creado. Existe porque la
-                cuenta nació en dólares y los planes salieron en dólares
-                sin que nadie lo eligiera: sin esto, arreglarlo obligaba a
-                borrar el plan y volver a escribir las 70 cuotas. */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Moneda</span>
-              <select
-                value={plan.currency}
-                disabled={!canAct || guardando}
-                onChange={async (e) => {
-                  const moneda = e.target.value;
-                  setGuardando(true);
-                  const { error } = await supabase
-                    .from("payment_plans")
-                    .update({ currency: moneda })
-                    .eq("id", plan.id);
-                  setGuardando(false);
-                  if (error) {
-                    toast.error("No se pudo cambiar la moneda");
-                    return;
-                  }
-                  toast.success(`El plan queda en ${moneda}`);
-                  await cargar();
-                  onChanged();
-                }}
-                className="h-8 rounded-lg border border-border bg-muted px-2 text-xs text-foreground outline-none focus:border-primary"
-              >
-                {CURRENCIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.symbol} {c.code}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {errorCarga && (
+              <p className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300">
+                {errorCarga} Lo que ves puede estar desactualizado.
+              </p>
+            )}
 
-            {plan.status === "activo" && (balance?.pending_count ?? 0) > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Moneda: <span className="text-foreground">{plan.currency}</span>
+            </p>
+
+            {!sinCob && plan.status === "activo" && (balance?.pending_count ?? 0) > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">
                   {(balance?.prepaid_amount ?? 0) > 0
@@ -448,6 +518,116 @@ export function PaymentPlanDetail({
                   <PiggyBank className="mr-1.5 h-3.5 w-3.5" />
                   Abono a capital
                 </GatedButton>
+              </div>
+            )}
+
+            {!sinCob && plan.status === "activo" && adelantables.length > 0 && !adelantando && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  ¿El cliente paga cuotas por adelantado? Elige cuáles.
+                </p>
+                <GatedButton
+                  canAct={canAct}
+                  gateReason="adelantar cuotas"
+                  onClick={abrirAdelanto}
+                  disabled={guardando}
+                  className="h-8 bg-muted px-2.5 text-xs text-foreground hover:bg-muted/70"
+                >
+                  <ChevronsRight className="mr-1.5 h-3.5 w-3.5" />
+                  Adelantar cuotas
+                </GatedButton>
+              </div>
+            )}
+
+            {!sinCob && adelantando && (
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <p className="text-sm font-medium text-foreground">Adelantar cuotas</p>
+                <p className="text-xs text-muted-foreground">
+                  Marca las siguientes cuotas en orden, o las últimas. Cada una se paga por lo
+                  que le falta.
+                </p>
+                <ul className="max-h-48 space-y-1 overflow-y-auto">
+                  {adelantables.map((x) => (
+                    <li key={x.id}>
+                      <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={marcadas.includes(x.id)}
+                          onChange={(e) =>
+                            setMarcadas((m) =>
+                              e.target.checked ? [...m, x.id] : m.filter((id) => id !== x.id),
+                            )
+                          }
+                        />
+                        Cuota {x.number}
+                        <span className="tabular-nums text-muted-foreground">
+                          {formatCurrency(faltaCents(x) / 100, plan.currency)} · vence{" "}
+                          {fecha(x.due_date)}
+                        </span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="adel-fecha" className="text-xs">
+                      Fecha
+                    </Label>
+                    <Input
+                      id="adel-fecha"
+                      type="date"
+                      value={pagadoEl}
+                      onChange={(e) => setPagadoEl(e.target.value)}
+                      className="h-9 border-border bg-muted text-foreground"
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="adel-metodo" className="text-xs">
+                      Cómo pagó
+                    </Label>
+                    <Input
+                      id="adel-metodo"
+                      value={metodo}
+                      onChange={(e) => setMetodo(e.target.value)}
+                      placeholder="Yape, transferencia…"
+                      className="h-9 border-border bg-muted text-foreground"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="adel-op" className="text-xs">
+                    N° de operación
+                  </Label>
+                  <Input
+                    id="adel-op"
+                    value={operacion}
+                    onChange={(e) => setOperacion(e.target.value)}
+                    className="h-9 border-border bg-muted text-foreground"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => setAdelantando(false)}
+                    className="h-9 text-muted-foreground hover:text-foreground"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={adelantarCuotas}
+                    disabled={guardando || marcadas.length === 0}
+                    className="h-9 bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    {guardando ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Guardando…
+                      </>
+                    ) : (
+                      `Adelantar ${marcadas.length || ""} cuotas`
+                    )}
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -508,7 +688,9 @@ export function PaymentPlanDetail({
             <ul className="space-y-2 pb-8">
               {visibles.length === 0 && (
                 <li className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-                  {cuotas.length === 0
+                  {errorCarga
+                    ? "No se pudieron leer las cuotas."
+                    : cuotas.length === 0
                     ? "Este plan todavía no tiene cuotas."
                     : "No queda ninguna cuota pendiente."}
                 </li>
@@ -518,6 +700,21 @@ export function PaymentPlanDetail({
                 const vencida = estaVencida(c);
                 const enRevision = c.status === "pendiente" && !!c.voucher_path;
                 const abierto = cobrando === c.id;
+                const sd = saldos[c.id];
+                const partes = sd?.parts ?? 0;
+                const pagosCuota = pagos.filter((x) => x.installment_id === c.id);
+                const centsMonto = aCents(monto);
+                const centsFalta = faltaCents(c);
+                // La parte que se va a registrar es la número partes + 1.
+                const parteNueva = partes + 1;
+                const avisoPartes =
+                  maxPartes !== null && centsMonto > 0 && centsMonto < centsFalta
+                    ? parteNueva > maxPartes
+                      ? `Ya se pasó del máximo de ${maxPartes} partes: solo gerencia puede seguir partiendo esta cuota.`
+                      : parteNueva === maxPartes
+                        ? `Esta es la última parte permitida (${maxPartes}): tiene que completar la cuota (${formatCurrency(centsFalta / 100, plan.currency)}).`
+                        : null
+                    : null;
                 return (
                   <li
                     key={c.id}
@@ -539,7 +736,9 @@ export function PaymentPlanDetail({
                           </span>
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {c.status === "pagada"
+                          {sinCob && c.status === "pagada"
+                            ? "Cerrada"
+                            : c.status === "pagada"
                             ? `Pagada el ${fecha(c.paid_at)}${c.paid_method ? ` · ${c.paid_method}` : ""}${
                                 c.paid_reference ? ` · Op. ${c.paid_reference}` : ""
                               }`
@@ -551,6 +750,14 @@ export function PaymentPlanDetail({
                                   enRevision ? " · voucher en revisión" : ""
                                 }`}
                         </p>
+                        {c.status === "pendiente" && partes > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Pagado {formatCurrency(aCents(sd?.paid_so_far) / 100, plan.currency)}, falta{" "}
+                            {formatCurrency(centsFalta / 100, plan.currency)} ·{" "}
+                            {partes} {partes === 1 ? "parte pagada" : "partes pagadas"}
+                            {maxPartes !== null ? ` (máximo ${maxPartes})` : ""}
+                          </p>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-1.5">
@@ -564,18 +771,7 @@ export function PaymentPlanDetail({
                             Voucher
                           </Button>
                         )}
-                        {c.status === "pagada" ? (
-                          <GatedButton
-                            canAct={canAct}
-                            gateReason="deshacer pagos"
-                            onClick={() => deshacerPago(c)}
-                            disabled={guardando}
-                            className="h-8 bg-muted px-2 text-xs text-muted-foreground hover:text-foreground"
-                          >
-                            <Undo2 className="mr-1.5 h-3.5 w-3.5" />
-                            Deshacer
-                          </GatedButton>
-                        ) : c.status === "pendiente" && !abierto ? (
+                        {c.status === "pendiente" && !abierto && !sinCob ? (
                           <GatedButton
                             canAct={canAct}
                             gateReason="registrar pagos"
@@ -589,6 +785,76 @@ export function PaymentPlanDetail({
                       </div>
                     </div>
 
+                    {pagosCuota.length > 0 && (
+                      <ul className="mt-2 space-y-1 border-t border-border pt-2">
+                        {pagosCuota.map((pg) => (
+                          <li key={pg.id} className="text-xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span
+                                className={cn(
+                                  "tabular-nums",
+                                  pg.voided_at
+                                    ? "text-muted-foreground line-through"
+                                    : "text-foreground",
+                                )}
+                              >
+                                {formatCurrency(aCents(pg.amount) / 100, plan.currency)} ·{" "}
+                                {fecha(pg.paid_on)}
+                                {pg.method ? ` · ${pg.method}` : ""}
+                                {pg.reference ? ` · Op. ${pg.reference}` : ""}
+                                {!pg.voided_at && pg.late_fee_at_payment != null
+                                  ? ` · Mora estimada ${formatCurrency(aCents(pg.late_fee_at_payment) / 100, plan.currency)}`
+                                  : ""}
+                              </span>
+                              {pg.voided_at ? (
+                                <span className="text-muted-foreground">
+                                  Anulado: {pg.void_reason}
+                                </span>
+                              ) : anulando !== pg.id ? (
+                                <GatedButton
+                                  canAct={canAct}
+                                  gateReason="anular pagos"
+                                  onClick={() => {
+                                    setAnulando(pg.id);
+                                    setMotivo("");
+                                  }}
+                                  disabled={guardando}
+                                  className="h-7 bg-muted px-2 text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                  <Undo2 className="mr-1.5 h-3.5 w-3.5" />
+                                  Anular pago
+                                </GatedButton>
+                              ) : null}
+                            </div>
+                            {anulando === pg.id && (
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <Input
+                                  value={motivo}
+                                  onChange={(e) => setMotivo(e.target.value)}
+                                  placeholder="Motivo de la anulación"
+                                  className="h-8 flex-1 border-border bg-muted text-foreground"
+                                />
+                                <Button
+                                  variant="ghost"
+                                  onClick={() => setAnulando(null)}
+                                  className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                  Cancelar
+                                </Button>
+                                <Button
+                                  onClick={() => anularPago(pg)}
+                                  disabled={guardando}
+                                  className="h-8 bg-red-600 text-xs text-white hover:bg-red-600/90"
+                                >
+                                  {guardando ? "Anulando…" : "Anular"}
+                                </Button>
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
                     {abierto && (
                       <div className="mt-3 space-y-3 border-t border-border pt-3">
                         <div className="grid grid-cols-2 gap-3">
@@ -600,7 +866,7 @@ export function PaymentPlanDetail({
                               id={`m-${c.id}`}
                               type="number"
                               min="0"
-                              step="10"
+                              step="0.01"
                               value={monto}
                               onChange={(e) => setMonto(e.target.value)}
                               className="h-9 border-border bg-muted text-foreground"
@@ -619,6 +885,12 @@ export function PaymentPlanDetail({
                             />
                           </div>
                         </div>
+
+                        {avisoPartes && (
+                          <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+                            {avisoPartes}
+                          </p>
+                        )}
 
                         <div className="grid gap-1.5">
                           <Label className="text-xs">Cómo pagó</Label>

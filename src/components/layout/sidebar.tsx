@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
-import { MODULES, MODULE_AREAS, isModuleDisabled } from "@/lib/modules";
+import { MODULES, MODULE_AREAS, isModuleVisible } from "@/lib/modules";
 import { resolveAccountBrand } from "@/lib/account-brand";
 import { Ticket,
   Bell,
@@ -131,7 +131,7 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { profile, profileLoading, account, accountRole, signOut, isSuperAdmin } = useAuth();
+  const { profile, profileLoading, account, accountRole, signOut, isSuperAdmin, moduleAccess } = useAuth();
   const totalUnread = useTotalUnread();
   const brand = resolveAccountBrand(account);
   const unreadNotifications = useUnreadNotifications();
@@ -293,7 +293,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           </ul>
           {MODULE_AREAS.map((area) => {
             const items = MODULES.filter(
-              (m) => m.area === area.key && !isModuleDisabled(m.href, account?.disabled_modules),
+              (m) => m.area === area.key && isModuleVisible(m.href, account?.disabled_modules, moduleAccess),
             )
               .map((m) => navItems.find((n) => n.href === m.href))
               .filter((n): n is NavItem => Boolean(n));
