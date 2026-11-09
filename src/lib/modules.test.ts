@@ -106,6 +106,11 @@ describe('visibilidad por acceso de módulo (084)', () => {
   it('la muestra con acceso', () => {
     expect(isModuleVisible('/collections', [], { cobranzas: true })).toBe(true);
   });
+  it('oculta Cuotas sin cronograma y la muestra con él', () => {
+    expect(isModuleVisible('/payment-plans', [], { cronograma: false })).toBe(false);
+    expect(isModuleVisible('/payment-plans', [], { cronograma: true, cobranzas: false })).toBe(true);
+    expect(isModuleVisible('/payment-plans', [], null)).toBe(true);
+  });
   it('sin la migración 084 (null) no oculta nada', () => {
     expect(isModuleVisible('/collections', [], null)).toBe(true);
   });

@@ -13,6 +13,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useCan } from "@/hooks/use-can";
+import { useAuth } from "@/hooks/use-auth";
+import { sinAccesoCobranzas } from "@/lib/payment-plans/acceso";
 import { formatCurrency } from "@/lib/currency";
 import { cn } from "@/lib/utils";
 import type { Contact, PaymentPlan, PaymentPlanBalance } from "@/types";
@@ -51,6 +53,9 @@ const fecha = (iso: string | null | undefined) =>
 export default function PaymentPlansPage() {
   const supabase = createClient();
   const canCreate = useCan("send-messages");
+  const { moduleAccess } = useAuth();
+  // Sin acceso a cobranzas (084) no hay saldos: se dice "sin acceso", no "al día".
+  const sinCob = sinAccesoCobranzas(moduleAccess);
 
   const [planes, setPlanes] = useState<Fila[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,7 +72,9 @@ export default function PaymentPlansPage() {
         .from("payment_plans")
         .select("*, contact:contacts(*), unit:real_estate_units(*)")
         .order("created_at", { ascending: false }),
-      supabase.from("payment_plan_balances").select("*"),
+      sinCob
+        ? Promise.resolve({ data: null })
+        : supabase.from("payment_plan_balances").select("*"),
     ]);
 
     if (error) {
@@ -84,7 +91,7 @@ export default function PaymentPlansPage() {
         balance: porPlan.get((p as Fila).id),
       })),
     );
-  }, [supabase]);
+  }, [supabase, sinCob]);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,18 +142,18 @@ export default function PaymentPlansPage() {
             <p className="text-xs text-muted-foreground">Planes</p>
           </div>
           <div className="rounded-lg border border-border bg-card p-3">
-            <p className="text-xl font-bold text-red-400">{totales.conAtraso}</p>
+            <p className="text-xl font-bold text-red-400">{sinCob ? "—" : totales.conAtraso}</p>
             <p className="text-xs text-muted-foreground">Con atraso</p>
           </div>
           <div className="rounded-lg border border-border bg-card p-3">
             <p className="text-xl font-bold text-amber-400">
-              {formatCurrency(totales.atrasado, totales.moneda)}
+              {sinCob ? "—" : formatCurrency(totales.atrasado, totales.moneda)}
             </p>
             <p className="text-xs text-muted-foreground">Monto atrasado</p>
           </div>
           <div className="rounded-lg border border-border bg-card p-3">
             <p className="text-xl font-bold text-primary">
-              {formatCurrency(totales.pendiente, totales.moneda)}
+              {sinCob ? "—" : formatCurrency(totales.pendiente, totales.moneda)}
             </p>
             <p className="text-xs text-muted-foreground">Por cobrar</p>
           </div>
@@ -164,7 +171,7 @@ export default function PaymentPlansPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {FILTROS.map((f) => (
+        {(sinCob ? FILTROS.filter((f) => f.key === "todos") : FILTROS).map((f) => (
           <button
             key={f.key}
             type="button"
@@ -186,6 +193,13 @@ export default function PaymentPlansPage() {
           className="ml-auto w-full border-border bg-muted text-foreground sm:w-72"
         />
       </div>
+
+      {sinCob && (
+        <p className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+          Sin acceso a cobranzas: ves los planes, pero no los saldos ni los atrasos. Abre un plan
+          para ver su calendario de cuotas.
+        </p>
+      )}
 
       {loading ? (
         <p className="py-12 text-center text-sm text-muted-foreground">
@@ -244,13 +258,15 @@ export default function PaymentPlansPage() {
                       {formatCurrency(p.monthly_amount, p.currency)}
                     </TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">
-                      {b ? `${b.paid_count} de ${p.installments_count}` : "—"}
+                      {b && !sinCob ? `${b.paid_count} de ${p.installments_count}` : "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {fecha(b?.next_due_date)}
                     </TableCell>
                     <TableCell>
-                      {atraso > 0 ? (
+                      {sinCob ? (
+                        <span className="text-xs text-muted-foreground">Sin acceso</span>
+                      ) : atraso > 0 ? (
                         <span className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-0.5 text-xs text-red-400">
                           {atraso} {atraso === 1 ? "cuota" : "cuotas"}
                         </span>
@@ -259,7 +275,7 @@ export default function PaymentPlansPage() {
                       )}
                     </TableCell>
                     <TableCell className="tabular-nums">
-                      {formatCurrency(b?.pending_amount ?? 0, p.currency)}
+                      {sinCob ? "—" : formatCurrency(b?.pending_amount ?? 0, p.currency)}
                     </TableCell>
                   </TableRow>
                 );

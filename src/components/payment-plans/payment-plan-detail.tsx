@@ -19,6 +19,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useCan } from "@/hooks/use-can";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  calendarioACuotas,
+  esFaltaDeObjeto,
+  sinAccesoCobranzas,
+  type FilaCalendario,
+} from "@/lib/payment-plans/acceso";
 import {
   registerAdvance,
   registerPayment,
@@ -120,11 +127,16 @@ export function PaymentPlanDetail({
 }: PaymentPlanDetailProps) {
   const supabase = createClient();
   const canAct = useCan("send-messages");
+  const { moduleAccess } = useAuth();
+  // Sin acceso a cobranzas (084): solo el calendario, sin saldos ni pagos.
+  const sinCob = sinAccesoCobranzas(moduleAccess);
 
   const [plan, setPlan] = useState<PaymentPlan | null>(null);
   const [cuotas, setCuotas] = useState<Installment[]>([]);
   const [balance, setBalance] = useState<PaymentPlanBalance | null>(null);
   const [loading, setLoading] = useState(false);
+  // Una lectura falló (no es lo mismo que "no hay cuotas").
+  const [errorCarga, setErrorCarga] = useState<string | null>(null);
   const [soloPendientes, setSoloPendientes] = useState(true);
   const [cobrando, setCobrando] = useState<string | null>(null);
   const [guardando, setGuardando] = useState(false);
@@ -149,36 +161,70 @@ export function PaymentPlanDetail({
   const [marcadas, setMarcadas] = useState<string[]>([]);
   const cargar = useCallback(async () => {
     if (!planId) return;
-    const [{ data: p }, { data: cs }, { data: b }, { data: pg }, { data: sd }] = await Promise.all([
+    const nada = Promise.resolve({ data: null, error: null });
+    const [
+      { data: p, error: ep },
+      { data: cs, error: ecs },
+      { data: b, error: eb },
+      { data: pg },
+      { data: sd },
+    ] = await Promise.all([
       supabase
         .from("payment_plans")
         .select("*, contact:contacts(*), unit:real_estate_units(*)")
         .eq("id", planId)
         .maybeSingle(),
-      supabase
-        .from("installments")
-        .select("*")
-        .eq("plan_id", planId)
-        .order("number"),
-      supabase
-        .from("payment_plan_balances")
-        .select("*")
-        .eq("plan_id", planId)
-        .maybeSingle(),
+      // Sin acceso a cobranzas el calendario sale de la vista de 084.
+      sinCob
+        ? supabase
+            .from("installment_schedule")
+            .select("id, plan_id, account_id, number, amount, due_date, state")
+            .eq("plan_id", planId)
+            .order("number")
+        : supabase
+            .from("installments")
+            .select("*")
+            .eq("plan_id", planId)
+            .order("number"),
+      sinCob
+        ? nada
+        : supabase
+            .from("payment_plan_balances")
+            .select("*")
+            .eq("plan_id", planId)
+            .maybeSingle(),
       // Antes de 084 estas dos no existen: el error se ignora y quedan vacías.
-      supabase
-        .from("installment_payments")
-        .select("id, installment_id, amount, method, reference, voucher_path, paid_on, late_fee_at_payment, voided_at, void_reason")
-        .eq("plan_id", planId)
-        .order("paid_on")
-        .order("created_at"),
-      supabase
-        .from("installment_balances")
-        .select("installment_id, remaining, paid_so_far, parts")
-        .eq("plan_id", planId),
+      sinCob
+        ? nada
+        : supabase
+            .from("installment_payments")
+            .select("id, installment_id, amount, method, reference, voucher_path, paid_on, late_fee_at_payment, voided_at, void_reason")
+            .eq("plan_id", planId)
+            .order("paid_on")
+            .order("created_at"),
+      sinCob
+        ? nada
+        : supabase
+            .from("installment_balances")
+            .select("installment_id, remaining, paid_so_far, parts")
+            .eq("plan_id", planId),
     ]);
+    // Un error de lectura no es "no hay cuotas": se dice. Los objetos que 084
+    // aún no creó (tabla/vista inexistente) siguen con el comportamiento previo.
+    const fallo = [ep, ecs, eb].find((e) => e && !esFaltaDeObjeto(e));
+    if (fallo) {
+      console.error("[payment-plan] load:", fallo.message);
+      toast.error("No se pudo leer el plan. Revisa tu conexión e inténtalo de nuevo.");
+      setErrorCarga("No se pudo leer el plan o sus cuotas.");
+      return;
+    }
+    setErrorCarga(null);
     setPlan((p as PaymentPlan) ?? null);
-    setCuotas((cs as Installment[]) ?? []);
+    setCuotas(
+      sinCob
+        ? calendarioACuotas((cs as FilaCalendario[]) ?? [])
+        : ((cs as Installment[]) ?? []),
+    );
     setBalance((b as PaymentPlanBalance) ?? null);
     setPagos((pg as Pago[]) ?? []);
     setSaldos(
@@ -197,10 +243,11 @@ export function PaymentPlanDetail({
         .maybeSingle();
       setMaxPartes(acc?.max_payment_parts ? Number(acc.max_payment_parts) : null);
     }
-  }, [planId, supabase]);
+  }, [planId, supabase, sinCob]);
 
   useEffect(() => {
     if (!planId) {
+      setErrorCarga(null);
       setPlan(null);
       setCuotas([]);
       setBalance(null);
@@ -224,7 +271,8 @@ export function PaymentPlanDetail({
     [cuotas, soloPendientes],
   );
 
-  const faltantes = plan ? plan.installments_count - cuotas.length : 0;
+  // Con una lectura fallida o sin acceso a las cuotas no se sabe cuántas faltan.
+  const faltantes = plan && !errorCarga && !sinCob ? plan.installments_count - cuotas.length : 0;
 
   // Cuotas que se pueden marcar para adelantar: pendientes, no vencidas.
   const adelantables = useMemo(
@@ -407,11 +455,24 @@ export function PaymentPlanDetail({
           </SheetTitle>
         </SheetHeader>
 
-        {loading || !plan ? (
+        {loading ? (
           <p className="py-16 text-center text-sm text-muted-foreground">Cargando…</p>
+        ) : !plan ? (
+          <p className="py-16 text-center text-sm text-muted-foreground">
+            {errorCarga ?? "No se encontró el plan."}
+          </p>
         ) : (
           <div className="mt-4 space-y-5">
             {/* Lo que pregunta el cliente, en el orden en que lo pregunta. */}
+            {sinCob ? (
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-sm font-medium text-foreground">Sin acceso a cobranzas</p>
+                <p className="text-xs text-muted-foreground">
+                  Tu área ve el calendario de cuotas, pero no los saldos ni los pagos. Que no se
+                  muestre un monto no significa que no haya deuda.
+                </p>
+              </div>
+            ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Resumen
                 titulo="Por cobrar"
@@ -428,12 +489,19 @@ export function PaymentPlanDetail({
                 valor={`${(balance?.paid_count ?? 0) + cuotas.filter((x) => x.status === "adelantada").length} de ${plan.installments_count}`}
               />
             </div>
+            )}
+
+            {errorCarga && (
+              <p className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300">
+                {errorCarga} Lo que ves puede estar desactualizado.
+              </p>
+            )}
 
             <p className="text-xs text-muted-foreground">
               Moneda: <span className="text-foreground">{plan.currency}</span>
             </p>
 
-            {plan.status === "activo" && (balance?.pending_count ?? 0) > 0 && (
+            {!sinCob && plan.status === "activo" && (balance?.pending_count ?? 0) > 0 && (
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">
                   {(balance?.prepaid_amount ?? 0) > 0
@@ -453,7 +521,7 @@ export function PaymentPlanDetail({
               </div>
             )}
 
-            {plan.status === "activo" && adelantables.length > 0 && !adelantando && (
+            {!sinCob && plan.status === "activo" && adelantables.length > 0 && !adelantando && (
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">
                   ¿El cliente paga cuotas por adelantado? Elige cuáles.
@@ -471,7 +539,7 @@ export function PaymentPlanDetail({
               </div>
             )}
 
-            {adelantando && (
+            {!sinCob && adelantando && (
               <div className="space-y-3 rounded-lg border border-border p-3">
                 <p className="text-sm font-medium text-foreground">Adelantar cuotas</p>
                 <p className="text-xs text-muted-foreground">
@@ -620,7 +688,9 @@ export function PaymentPlanDetail({
             <ul className="space-y-2 pb-8">
               {visibles.length === 0 && (
                 <li className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-                  {cuotas.length === 0
+                  {errorCarga
+                    ? "No se pudieron leer las cuotas."
+                    : cuotas.length === 0
                     ? "Este plan todavía no tiene cuotas."
                     : "No queda ninguna cuota pendiente."}
                 </li>
@@ -666,7 +736,9 @@ export function PaymentPlanDetail({
                           </span>
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {c.status === "pagada"
+                          {sinCob && c.status === "pagada"
+                            ? "Cerrada"
+                            : c.status === "pagada"
                             ? `Pagada el ${fecha(c.paid_at)}${c.paid_method ? ` · ${c.paid_method}` : ""}${
                                 c.paid_reference ? ` · Op. ${c.paid_reference}` : ""
                               }`
@@ -699,7 +771,7 @@ export function PaymentPlanDetail({
                             Voucher
                           </Button>
                         )}
-                        {c.status === "pendiente" && !abierto ? (
+                        {c.status === "pendiente" && !abierto && !sinCob ? (
                           <GatedButton
                             canAct={canAct}
                             gateReason="registrar pagos"

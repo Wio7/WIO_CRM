@@ -35,7 +35,7 @@ export interface ModuleDef {
   /** Módulos que este necesita encendidos para funcionar. */
   requires?: readonly string[];
   /** Llave de my_module_access() que hace falta para ver el módulo (084). */
-  accessKey?: "cobranzas" | "legal" | "ventas";
+  accessKey?: "cobranzas" | "legal" | "ventas" | "cronograma";
 }
 
 /** Registro de módulos (mismo orden que el menú). */
@@ -50,7 +50,7 @@ export const MODULES: readonly ModuleDef[] = [
   { href: "/projects", label: "Proyectos", area: "ventas" },
   { href: "/reservations", label: "Separaciones", area: "ventas", requires: ["/projects"] },
   { href: "/coupons", label: "Cupones y referidos", area: "ventas" },
-  { href: "/payment-plans", label: "Cuotas", area: "finanzas" },
+  { href: "/payment-plans", label: "Cuotas", area: "finanzas", accessKey: "cronograma" },
   { href: "/collections", label: "Cobranzas", area: "finanzas", requires: ["/payment-plans"], accessKey: "cobranzas" },
   { href: "/caja", label: "Golden Caja", area: "finanzas" },
   { href: "/calendar", label: "Calendario", area: "agenda" },

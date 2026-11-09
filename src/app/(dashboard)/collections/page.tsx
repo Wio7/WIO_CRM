@@ -177,10 +177,17 @@ export default function CollectionsPage() {
       if (accountId) {
         const { data: r } = await supabase
           .from("accounts")
-          .select("resolution_installments, resolution_days")
+          .select("resolution_installments, resolution_days, late_fee_cap_days")
           .eq("id", accountId)
           .maybeSingle();
-        if (r) umbrales = { installments: Number(r.resolution_installments) || 0, days: Number(r.resolution_days) || 0 };
+        if (r) {
+          umbrales = { installments: Number(r.resolution_installments) || 0, days: Number(r.resolution_days) || 0 };
+          // El tope de días de mora (084) también es de esta lectura: sin él la
+          // mora estimada no tendría tope y no coincidiría con el estado de cuenta.
+          if (moraCuenta.type !== "ninguna") {
+            moraCuenta = { ...moraCuenta, capDays: Math.max(0, Number(r.late_fee_cap_days) || 0) };
+          }
+        }
       }
       if (cancelled) return;
       setCausal(umbrales);

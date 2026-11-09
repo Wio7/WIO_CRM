@@ -18,6 +18,7 @@ import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
 import { fechaLima } from "@/lib/collections";
 import { registerPayment, rejectVoucher, type RpcResult } from "@/lib/payment-plans/rpc";
+import { chunk } from "@/lib/payment-plans/acceso";
 import { signedDocUrl } from "@/lib/storage/upload-media";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -71,14 +72,21 @@ export default function VouchersPage() {
     const list = (data ?? []) as unknown as VoucherRow[];
     const sd: Record<string, number> = {};
     if (list.length) {
-      const { data: bal, error: errBal } = await supabase
-        .from("installment_balances")
-        .select("installment_id, remaining")
-        .in("installment_id", list.map((r) => r.id));
-      // Sin la vista (084 sin aplicar) no hay saldos ni forma de registrar pagos.
-      if (errBal) setFalta084(true);
-      for (const b of (bal ?? []) as { installment_id: string; remaining: number | string }[]) {
-        sd[b.installment_id] = Number(b.remaining);
+      // Por tandas: 500 UUID en un solo .in() pasan el largo de URL y darían un
+      // error que se confundiría con "falta 084".
+      for (const ids of chunk(list.map((r) => r.id), 200)) {
+        const { data: bal, error: errBal } = await supabase
+          .from("installment_balances")
+          .select("installment_id, remaining")
+          .in("installment_id", ids);
+        // Sin la vista (084 sin aplicar) no hay saldos ni forma de registrar pagos.
+        if (errBal) {
+          setFalta084(true);
+          break;
+        }
+        for (const b of (bal ?? []) as { installment_id: string; remaining: number | string }[]) {
+          sd[b.installment_id] = Number(b.remaining);
+        }
       }
     }
     setError(null);

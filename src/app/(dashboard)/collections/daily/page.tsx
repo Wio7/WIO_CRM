@@ -68,6 +68,7 @@ export default function DailyPaymentsPage() {
           .lte("paid_on", hasta)
           .order("paid_on", { ascending: true })
           .order("created_at", { ascending: true })
+          .order("id", { ascending: true })
           .range(from, from + PAGE - 1);
         if (e) {
           // 42P01 / PGRST205: la tabla no existe = 084 sin aplicar.
