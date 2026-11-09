@@ -9,12 +9,14 @@
 // schedule in front of the advisor before saving — a plan that saves
 // silently and turns out wrong is a collections problem for years.
 //
-// Saving writes the plan, then its instalments (migration 043).
+// Saving calls create_payment_plan (migration 084): plan and instalments
+// in one transaction.
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { createPlan } from "@/lib/payment-plans/rpc";
 import { CURRENCIES, formatCurrency } from "@/lib/currency";
 import type { Contact, RealEstateUnit } from "@/types";
 import {
@@ -55,7 +57,7 @@ export function PaymentPlanForm({
   onSaved,
 }: PaymentPlanFormProps) {
   const supabase = createClient();
-  const { accountId, profile, defaultCurrency } = useAuth();
+  const { accountId, defaultCurrency } = useAuth();
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [units, setUnits] = useState<RealEstateUnit[]>([]);
@@ -148,49 +150,25 @@ export function PaymentPlanForm({
     }
 
     setSaving(true);
-    const { data: plan, error } = await supabase
-      .from("payment_plans")
-      .insert({
-        account_id: accountId,
-        contact_id: contactId,
-        unit_id: unitId || null,
-        currency,
-        total_amount: Number(total) || 0,
-        down_payment: Number(down) || 0,
-        installments_count: schedule.monthsNum,
-        monthly_amount: schedule.monthly,
-        due_day: schedule.day,
-        first_due_date: firstDue,
-        notes: notes.trim() || null,
-        created_by: profile?.id ?? null,
-      })
-      .select("id")
-      .single();
-
-    if (error || !plan) {
-      setSaving(false);
-      toast.error("No se pudo crear el plan");
-      console.error("[payment-plan] insert plan:", error?.message);
-      return;
-    }
-
-    const { error: errCuotas } = await supabase.from("installments").insert(
-      schedule.rows.map((r) => ({
-        plan_id: plan.id,
-        account_id: accountId,
-        number: r.number,
-        amount: r.amount,
-        due_date: r.due_date,
-      })),
-    );
+    // Todo en una transacción de la base (084): el plan y sus cuotas se
+    // crean juntos o no se crea nada.
+    const res = await createPlan(supabase, {
+      contact_id: contactId,
+      unit_id: unitId || null,
+      currency,
+      total_amount: Number(total) || 0,
+      down_payment: Number(down) || 0,
+      installments_count: schedule.monthsNum,
+      monthly_amount: schedule.monthly,
+      due_day: schedule.day,
+      first_due_date: firstDue,
+      notes: notes.trim() || null,
+      installments: schedule.rows,
+    });
     setSaving(false);
 
-    if (errCuotas) {
-      // The plan exists but has no schedule: say so plainly instead of a
-      // vague failure, because the advisor has to fix it, not retry blind.
-      toast.error("El plan se creó pero sus cuotas no. Ábrelo y vuelve a generarlas.");
-      console.error("[payment-plan] insert installments:", errCuotas.message);
-      onSaved();
+    if (!res.ok) {
+      toast.error(res.missing084 ? res.message : `No se pudo crear el plan: ${res.message}`);
       return;
     }
 
@@ -206,7 +184,6 @@ export function PaymentPlanForm({
     notes,
     onOpenChange,
     onSaved,
-    profile,
     schedule,
     supabase,
     total,
