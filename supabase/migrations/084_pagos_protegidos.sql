@@ -461,6 +461,34 @@ CREATE TRIGGER installment_payments_immutable
   BEFORE UPDATE OR DELETE ON public.installment_payments
   FOR EACH ROW EXECUTE FUNCTION public.guard_installment_payment_immutable();
 
+-- Abonos a capital (083): también son dinero recibido. Mismo criterio que
+-- el libro de pagos: la cuenta entera los borra en cascada; un plan con
+-- abonos en una cuenta viva no se borra (NO ACTION), y un abono suelto
+-- no se borra ni con service role. No hay "deshacer abono" todavía.
+DO $$
+BEGIN
+  ALTER TABLE public.plan_prepayments DROP CONSTRAINT IF EXISTS plan_prepayments_plan_id_fkey;
+  ALTER TABLE public.plan_prepayments
+    ADD CONSTRAINT plan_prepayments_plan_id_fkey
+      FOREIGN KEY (plan_id) REFERENCES public.payment_plans(id) ON DELETE NO ACTION;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.guard_plan_prepayment_delete()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.accounts WHERE id = OLD.account_id) THEN
+    RETURN OLD;
+  END IF;
+  RAISE EXCEPTION 'Un abono a capital no se borra' USING ERRCODE = '42501';
+END;
+$$;
+ALTER FUNCTION public.guard_plan_prepayment_delete() OWNER TO postgres;
+DROP TRIGGER IF EXISTS plan_prepayments_no_delete ON public.plan_prepayments;
+CREATE TRIGGER plan_prepayments_no_delete
+  BEFORE DELETE ON public.plan_prepayments
+  FOR EACH ROW EXECUTE FUNCTION public.guard_plan_prepayment_delete();
+
 -- Copia histórica: una fila legacy por cuota 'pagada' (adelantada y
 -- condonada no se copian). Idempotente: no toca cuotas que ya tienen
 -- alguna fila en el libro. registered_by de 047 es profiles.id; aquí va

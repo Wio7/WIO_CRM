@@ -616,9 +616,39 @@ BEGIN
     RAISE EXCEPTION 'FALLO libro: postgres borró pagos de una cuenta viva (mensaje: %)', v_msg;
   END IF;
 
+  -- Un plan con un abono a capital y sin pagos de cuota: tampoco se
+  -- borra, ni su abono suelto (el abono es dinero recibido).
+  INSERT INTO public.payment_plans (id, account_id, contact_id, currency, total_amount, down_payment,
+                                    installments_count, monthly_amount, due_day, first_due_date, status)
+  VALUES ('0840c000-0000-4000-8000-000000000102', v_acc, '0840c000-0000-4000-8000-000000000301',
+          'PEN', 1000, 0, 2, 500, NULL, current_date + 5, 'activo');
+  INSERT INTO public.plan_prepayments (account_id, plan_id, amount, mode)
+  VALUES (v_acc, '0840c000-0000-4000-8000-000000000102', 100, 'reducir_cuota');
+
+  v_msg := NULL;
+  BEGIN
+    DELETE FROM public.payment_plans WHERE id = '0840c000-0000-4000-8000-000000000102';
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL THEN
+    RAISE EXCEPTION 'FALLO borrar plan con abono: se borró el plan y su abono';
+  END IF;
+
+  v_msg := NULL;
+  BEGIN
+    DELETE FROM public.plan_prepayments WHERE plan_id = '0840c000-0000-4000-8000-000000000102';
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL OR v_msg NOT ILIKE '%no se borra%' THEN
+    RAISE EXCEPTION 'FALLO abonos: postgres borró un abono de una cuenta viva (mensaje: %)', v_msg;
+  END IF;
+
   DELETE FROM public.accounts WHERE id = v_acc;
   IF EXISTS (SELECT 1 FROM public.installment_payments WHERE account_id = v_acc) THEN
     RAISE EXCEPTION 'FALLO borrar cuenta: quedaron pagos';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.plan_prepayments WHERE account_id = v_acc) THEN
+    RAISE EXCEPTION 'FALLO borrar cuenta: quedaron abonos';
   END IF;
 END $$;
 
