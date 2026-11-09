@@ -36,14 +36,32 @@ aprueba abonos, condonaciones y reprogramaciones sin registro.
 
 ### 3.1 Cola "Vouchers por revisar" (ya diseñada en Fase A §5, no construida)
 Es la vía más barata para bajar la semana de espera. Se construye tal como
-dice la Fase A, con un cambio: **quien aprueba es configurable por cuenta**
-(en Golden, gerencia). Aprobar no se hace solo mirando la imagen del voucher:
+dice la Fase A, con un cambio: **quien aprueba depende del banco destino**
+(configurable por cuenta). En Golden: vouchers de Caja Ica los confirma
+cobranzas/contabilidad; vouchers de otros bancos, gerencia (§5.2). Aprobar no se hace solo mirando la imagen del voucher:
 la cola muestra banco, fecha, monto y número de operación declarados, y el
 aprobador marca que lo vio en el estado de cuenta (si no, un voucher falso
 pasa con un toque).
 
 ### 3.2 Importar el reporte de abonos de Caja Ica (fase B)
 Solo importación; la exportación al Excel de carga queda diferida (§4).
+
+Lo que se sabe de los archivos (muestras de Golden, 2026-11-09):
+- **Estado de cuenta de la cuenta de ahorros** (PDF, por mes): fecha, hora,
+  descripción, abono, cargo, saldo, canal. Tipos: "CONVENIOS (ABONO AHO) APP
+  MOVIL" con su cargo de comisión S/ 1.00, y "DEPÓSITO CONV. COBRANZA" en
+  agencia con cargo S/ 1.50. **No trae el código del cliente**: sirve para
+  comprobar que el dinero llegó (totales por día), no para emparejar cuotas.
+  Las comisiones son gasto de la empresa, no se restan del pago del cliente.
+- **Excel de carga de la plataforma** (por convenio; columnas: Cod. Convenio,
+  Cod. Institucion, Fecha Pago, Numero Registros, Cod. Cliente, Apellidos y
+  Nombres, Relacion, Cod. Relacion, Concepto Pago, Monto, Moneda, Mora, Fecha
+  Vencimiento, Prioridad, Cod. Cuenta, Direccion, MontoTotal, Exonerado). El
+  **Cod. Cliente** es la clave que se guarda en el plan.
+- Falta una muestra del **reporte de abonos de la plataforma** (el que se
+  baja por fechas con el detalle por cliente): es la fuente de la
+  importación. Sin esa muestra no se escribe el adaptador.
+
 - **Tabla de staging** `bank_import_rows` por cuenta, con clave única
   (cuenta, origen, convenio, número de operación). Re-importar un rango que
   se solapa no crea filas nuevas: no hay pago doble.
@@ -116,8 +134,14 @@ Solo importación; la exportación al Excel de carga queda diferida (§4).
      para cobranzas entre importaciones, rotulado así en pantalla (decisión
      de Aurex, a confirmar). Si el reporte de Caja Ica no trae la mora por
      separado, esas filas van a "por revisar".
-2. **Quién confirma los pagos importados y aprueba transferencias:**
-   cobranzas, contabilidad o gerencia (hoy los documentos dicen las tres).
+2. **Quién confirma (decidido 2026-11-09, audios de Golden):**
+   - Pagos que llegan a **Caja Ica** (por código de convenio, app o agencia):
+     se ven en el estado de cuenta de Caja Ica, así que los confirma el
+     área que usa esa plataforma (cobranzas y contabilidad) **sin pasar por
+     gerencia**.
+   - Transferencias a **otros bancos** (Interbank, BCP, BBVA): solo
+     **gerencia**, porque esas cuentas reciben también otros ingresos y
+     solo gerencia ve su estado de cuenta. Estas van a la cola de 3.1.
 3. Contrato en el portal: PDF sin firma o solo escaneado firmado.
 
 ## 6. Revisión EGM (2026-11-09)
