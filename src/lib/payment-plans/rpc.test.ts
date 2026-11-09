@@ -5,6 +5,7 @@ import {
   isMissing084,
   registerAdvance,
   registerPayment,
+  rejectVoucher,
   voidPayment,
 } from './rpc';
 
@@ -73,6 +74,15 @@ describe('rpc wrappers', () => {
     expect(f.calls[0]).toEqual({
       fn: 'void_installment_payment',
       args: { p_payment_id: 'x', p_reason: 'error de monto' },
+    });
+  });
+
+  it('rejectVoucher', async () => {
+    const f = fakeClient({});
+    expect(await rejectVoucher(f.client, { installmentId: 'i1', reason: 'borroso' })).toEqual({ ok: true });
+    expect(f.calls[0]).toEqual({
+      fn: 'reject_client_voucher',
+      args: { p_installment_id: 'i1', p_reason: 'borroso' },
     });
   });
 

@@ -103,3 +103,13 @@ export function createPlan(
 ): Promise<RpcResult> {
   return llamar(client, "create_payment_plan", { p: payload });
 }
+
+export function rejectVoucher(
+  client: RpcClient,
+  a: { installmentId: string; reason: string },
+): Promise<RpcResult> {
+  return llamar(client, "reject_client_voucher", {
+    p_installment_id: a.installmentId,
+    p_reason: a.reason,
+  });
+}

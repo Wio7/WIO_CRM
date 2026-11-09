@@ -9,8 +9,9 @@
 // vive en src/lib/collections.ts (con pruebas).
 // ============================================================
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ClipboardList, Download, Percent, HandCoins, Loader2, MessageCircle } from "lucide-react";
+import { CalendarDays, ClipboardList, Download, FileText, Percent, HandCoins, Loader2, MessageCircle } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
@@ -23,12 +24,13 @@ import {
   fechaLima,
   hiddenOverdue,
   hoyLima,
+  inResolution,
   whatsappLink,
   type Debtor,
   type OverdueInstallment,
   type Tramo,
 } from "@/lib/collections";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ContactDetailView } from "@/components/contacts/contact-detail-view";
 import { CollectionActionDialog } from "@/components/collections/collection-action-dialog";
@@ -77,6 +79,8 @@ export default function CollectionsPage() {
   const esAdmin = accountRole === "admin" || accountRole === "owner";
   const [mora, setMora] = useState<LateFeeSettings>(NO_LATE_FEE);
   const [moraOpen, setMoraOpen] = useState(false);
+  // Umbrales de causal de resolución de la cuenta (084). 0 = sin badge.
+  const [causal, setCausal] = useState({ installments: 0, days: 0 });
   // Un agente solo ve sus propios clientes (contacts RLS): la pantalla lo dice.
   const soloMisClientes = accountRole === "agent";
   const today = useMemo(() => hoyLima(), []);
@@ -168,7 +172,18 @@ export default function CollectionsPage() {
           .maybeSingle();
         moraCuenta = settingsFromAccount(acc);
       }
+      // Aparte de la mora: antes de la 084 estas columnas no existen y no debe romper la lectura anterior.
+      let umbrales = { installments: 0, days: 0 };
+      if (accountId) {
+        const { data: r } = await supabase
+          .from("accounts")
+          .select("resolution_installments, resolution_days")
+          .eq("id", accountId)
+          .maybeSingle();
+        if (r) umbrales = { installments: Number(r.resolution_installments) || 0, days: Number(r.resolution_days) || 0 };
+      }
       if (cancelled) return;
+      setCausal(umbrales);
       setMora(moraCuenta);
       setAcciones(acts);
       setGestionesOk(tablaOk && !otroError);
@@ -193,6 +208,7 @@ export default function CollectionsPage() {
   const moraPorCliente = useMemo(() => lateFeesByDebtor(rows, today, mora), [rows, today, mora]);
   const moraDe = (d: Debtor) => moraPorCliente.get(`${d.contactId}|${d.currency}`) ?? 0;
   const conMora = mora.type !== "ninguna";
+  const enCausal = (d: Debtor) => inResolution(d, causal);
 
   const ocultas = useMemo(() => hiddenOverdue(rows, today), [rows, today]);
 
@@ -268,7 +284,13 @@ export default function CollectionsPage() {
             Clientes con cuotas vencidas al {fecha(today)}, del atraso más antiguo al más reciente.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+        <Link href="/collections/vouchers" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <FileText className="h-4 w-4" /> Vouchers
+        </Link>
+        <Link href="/collections/daily" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <CalendarDays className="h-4 w-4" /> Pagos del día
+        </Link>
         {esAdmin && accountId && (
           <Button variant="outline" size="sm" onClick={() => setMoraOpen(true)} disabled={loading}>
             <Percent className="h-4 w-4" /> {conMora ? "Mora" : "Configurar mora"}
@@ -395,6 +417,7 @@ export default function CollectionsPage() {
                         <td className="px-3 py-2">
                           <button type="button" className="text-left hover:underline" onClick={() => setAbierto(d.contactId)}>
                             <span className="font-medium">{d.name}</span>
+                            {enCausal(d) && <CausalBadge />}
                             <span className="block text-xs text-muted-foreground">{d.phone ?? "Sin teléfono"}</span>
                           </button>
                         </td>
@@ -445,6 +468,7 @@ export default function CollectionsPage() {
                     <div className="flex items-start justify-between gap-2">
                       <button type="button" className="text-left" onClick={() => setAbierto(d.contactId)}>
                         <p className="font-medium">{d.name}</p>
+                        {enCausal(d) && <CausalBadge />}
                         <p className="text-xs text-muted-foreground">{d.units.join(", ") || "—"} · {d.projects.join(", ")}</p>
                       </button>
                       <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs", TRAMO_STYLE[d.tramo])}>{d.daysLate} días</span>
@@ -540,6 +564,14 @@ function Seguimiento({ accion, estado }: { accion?: CollectionAction; estado: Pr
           {estado === "vencida" ? "promesa vencida" : "promete"} {fecha(accion.promise_date)}
         </span>
       )}
+    </span>
+  );
+}
+
+function CausalBadge() {
+  return (
+    <span className="ml-1 rounded-full bg-red-600/15 px-1.5 py-0.5 text-[11px] font-medium text-red-400 md:ml-0 md:mt-0.5 md:inline-block">
+      En causal de resolución
     </span>
   );
 }

@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { AccountStatement } from "@/components/collections/account-statement";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
@@ -63,6 +64,7 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
   const [balances, setBalances] = useState<PlanBalanceRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const { moduleAccess } = useAuth();
+  const [statement, setStatement] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,6 +182,16 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
           <Link href="/payment-plans" className="text-xs text-primary hover:underline">
             Ver en Cuotas
           </Link>
+          <div className="pt-1">
+            <button type="button" onClick={() => setStatement((v) => !v)} className="text-xs text-primary hover:underline">
+              {statement ? "Ocultar estado de cuenta" : "Estado de cuenta (imprimible)"}
+            </button>
+            {statement && (
+              <div className="mt-2">
+                <AccountStatement contactId={contactId} />
+              </div>
+            )}
+          </div>
         </section>
       )}
 

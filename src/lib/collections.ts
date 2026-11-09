@@ -282,14 +282,17 @@ export function whatsappLink(d: Debtor, monto: string): string | null {
   return `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 }
 
+/** Celda de CSV (punto y coma): neutraliza fórmulas y protege separadores. */
+export function csvCell(v: string | number | null | undefined): string {
+  let s = v == null ? "" : String(v);
+  // Excel ejecuta como fórmula lo que empieza con = + - @ (nombres de WhatsApp).
+  if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
 /** CSV (separado por punto y coma, para Excel en español). */
 export function debtorsCsv(list: readonly Debtor[]): string {
-  const esc = (v: string | number | null) => {
-    let s = v == null ? "" : String(v);
-    // Excel ejecuta como fórmula lo que empieza con = + - @ (nombres de WhatsApp).
-    if (typeof v === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
+  const esc = csvCell;
   const head = ["Cliente", "DNI", "Teléfono", "Proyecto", "Lotes", "Cuotas vencidas", "Monto vencido", "Moneda", "Vence desde", "Días de atraso", "Tramo", "Último aviso", "En revisión"];
   const lines = list.map((d) =>
     [d.name, d.dni, d.phone, d.projects.join(", "), d.units.join(", "), d.overdueCount, d.overdueAmount.toFixed(2), d.currency, d.oldestDue, d.daysLate, d.tramo, d.lastReminder ? fechaLima(d.lastReminder) : "", d.inReviewAmount ? d.inReviewAmount.toFixed(2) : ""]
