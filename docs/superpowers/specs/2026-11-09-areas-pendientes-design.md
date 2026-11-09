@@ -8,6 +8,19 @@ cuenta; todo se construye genérico: lo propio de Golden (formato de Caja Ica,
 días de visita, minivan) va como **configuración por cuenta o adaptador de
 importación**, nunca escrito en el código.
 
+## 0. Regla de arquitectura (dueño, 2026-11-07, reafirmada 2026-11-09)
+- **Cada área tiene su propia app**, simple e intuitiva como Golden Legal, la
+  app de ventas y la caja chica, con **sus tareas** y **botones para
+  delegar** a otras áreas (traspasos de la fase F). Todas leen la misma base.
+- El **ERP web** sigue existiendo: es la vista completa (gerencia) y el lugar
+  de las pantallas de administración. Las piezas de este documento se
+  construyen en la base y en el ERP primero, y cada app de área muestra solo
+  su parte.
+- **Postventa no tiene app propia:** es una **vista nueva dentro de la app de
+  ventas** (repo `golden 3d`), porque en Golden la persona de postventa
+  también es asesor.
+- **La caja chica se mejora** (ver 3.6): deja de estar diferida.
+
 ## 1. Por qué
 
 Cada área de Golden trabaja con WhatsApp, Excel y cuadernos. El dolor más
@@ -94,7 +107,9 @@ Lo que se sabe de los archivos (muestras de Golden, 2026-11-09):
   registro de la decisión; si la mora oficial es la de Caja Ica, la
   exoneración se hace allá (decisión 1).
 
-### 3.4 Postventa (fase E)
+### 3.4 Postventa (fase E) — vista nueva en la app de ventas
+- Vive en la app de ventas (repo `golden 3d`) como una pestaña "Postventa"
+  para quien tenga esa área; no en el ERP web ni en una app aparte.
 - **Agenda sobre la existente** (`049_agenda.sql`: `staff_availability`,
   citas tipo visita, recordatorios). Lunes/sábado, anticipación mínima y
   "un cliente por franja" son reglas de disponibilidad de la cuenta.
@@ -111,13 +126,24 @@ Lo que se sabe de los archivos (muestras de Golden, 2026-11-09):
   en la Fase A. Se agrega la descarga del contrato reutilizando
   `legal_documents.pdf_url` (`033_legal_documents.sql`) si legal ya lo sube ahí.
 
+### 3.6 Caja chica mejorada (app de caja, repo `GOLDEN CAJA`)
+Pedido de gerencia (entrevista de compras/caja, 2026-11-09): ver cuánto
+cuesta cada proyecto y cada negocio.
+- Cada gasto lleva **proyecto** y **rubro** (personal, marketing, obra,
+  combi, proveedores, otros); se pueden registrar por WhatsApp como hoy y la
+  app propone proyecto y rubro a partir del texto.
+- **Varias cajas** por cuenta (la general que entrega el gerente general y
+  las de otros negocios del dueño), cada una con su responsable.
+- **Panel de gerencia:** gasto por proyecto, por rubro y por mes, y por caja.
+- Requiere migración en la caja: `cash_entries` hoy no tiene proyecto ni
+  rubro (`063_golden_caja.sql`).
+- Cotizaciones de proveedores (3-4 por compra): fuera por ahora.
+
 ## 4. Diferido o fuera
 - Exportar el Excel de carga de Caja Ica (falta el formato por proyecto).
 - Respuestas rápidas por partes para asesores (existe `message_templates`;
   revisar si basta), calificación previa, marketing con tablero de tareas
-  (mejor una herramienta lista que código propio), gastos por proyecto en
-  Golden Caja (`cash_entries` no tiene proyecto ni rubro; es cambio en otra
-  app), fotos de avance de obra, respuestas oficiales (legal aún no las
+  (mejor una herramienta lista que código propio), fotos de avance de obra, respuestas oficiales (legal aún no las
   definió), cotizaciones de proveedores.
 - Boletas SUNAT (fase 4), reemplazar Caja Ica, comisiones visibles, renders 3D.
 - Menor: `src/lib/modules.ts` rotula `/caja` como "Golden Caja"; debe ser genérico.
