@@ -334,6 +334,23 @@ const cuandoLima = (iso: string) =>
 
 const esJefe = (rol: string) => rol === "owner" || rol === "admin";
 
+const SIN_ACCESO_COBRANZAS = "Sin acceso a cobranzas: esa información es del área de Cobranzas, Contabilidad y Gerencia.";
+
+/**
+ * ¿Esta persona NO tiene acceso a cobranzas? (my_module_access, migración 084).
+ * Solo es true cuando la base lo dice; sin la 084 (o ante cualquier error)
+ * es false y el asistente responde como antes.
+ */
+async function sinAccesoCobranzas(ctx: ContextoAsistente): Promise<boolean> {
+  try {
+    const { data, error } = await ctx.db.rpc("my_module_access");
+    if (error || !data || typeof data !== "object") return false;
+    return (data as Record<string, unknown>).cobranzas === false;
+  } catch {
+    return false;
+  }
+}
+
 interface ContactoEncontrado {
   id: string;
   name: string | null;
@@ -410,6 +427,7 @@ async function resumenDelDia(ctx: ContextoAsistente): Promise<Resultado> {
   // El asesor, lo suyo; el dueño y los administradores, todo.
   if (!esJefe(ctx.rol)) sinLeerQ.eq("assigned_agent_id", ctx.userId);
 
+  const sinCobranzas = await sinAccesoCobranzas(ctx);
   const [sinLeer, citas, atrasadas, vouchers] = await Promise.all([
     sinLeerQ
       .order("last_message_at", { ascending: false })
@@ -453,8 +471,8 @@ async function resumenDelDia(ctx: ContextoAsistente): Promise<Resultado> {
             tipo: nombreDeCita(c.kind),
             cliente: nombre(c),
           })),
-      cuotas_atrasadas_en_la_cuenta: atrasadas.count ?? 0,
-      vouchers_por_revisar: vouchers.error ? 0 : vouchers.count ?? 0,
+      cuotas_atrasadas_en_la_cuenta: sinCobranzas ? SIN_ACCESO_COBRANZAS : atrasadas.count ?? 0,
+      vouchers_por_revisar: sinCobranzas ? SIN_ACCESO_COBRANZAS : vouchers.error ? 0 : vouchers.count ?? 0,
     },
   };
 }
@@ -667,14 +685,30 @@ async function resumenCliente(ctx: ContextoAsistente, args: { buscar: string }):
   let saldo: Record<string, unknown> | null = null;
   let proximas: unknown[] = [];
   let vouchers = 0;
-  if (plan.data) {
+  const sinCobranzas = await sinAccesoCobranzas(ctx);
+  if (plan.data && !sinCobranzas) {
     const [b, p, v] = await Promise.all([
       ctx.db.from("payment_plan_balances").select("*").eq("plan_id", plan.data.id).maybeSingle(),
-      ctx.db.from("installments").select("number, amount, due_date").eq("plan_id", plan.data.id).eq("status", "pendiente").order("due_date").limit(3),
+      ctx.db.from("installments").select("id, number, amount, due_date").eq("plan_id", plan.data.id).eq("status", "pendiente").order("due_date").limit(3),
       ctx.db.from("installments").select("id", { count: "exact", head: true }).eq("plan_id", plan.data.id).eq("status", "pendiente").not("voucher_path", "is", null),
     ]);
     saldo = b.data;
-    proximas = p.data ?? [];
+    // Saldo real de cada próxima cuota (084): lo que falta, no el monto original.
+    const filasProximas = (p.data ?? []) as { id: string; number: number; amount: number | string; due_date: string }[];
+    const { data: faltan, error: errFaltan } = filasProximas.length
+      ? await ctx.db
+          .from("installment_balances")
+          .select("installment_id, remaining")
+          .in("installment_id", filasProximas.map((c) => c.id))
+      : { data: [], error: null };
+    const restante = new Map<string, number>(
+      errFaltan ? [] : (faltan ?? []).map((x) => [x.installment_id as string, Number(x.remaining)] as [string, number]),
+    );
+    proximas = filasProximas.map((c) => ({
+      number: c.number,
+      amount: restante.get(c.id) ?? c.amount,
+      due_date: c.due_date,
+    }));
     vouchers = v.error ? 0 : v.count ?? 0;
   }
 
@@ -706,7 +740,13 @@ async function resumenCliente(ctx: ContextoAsistente, args: { buscar: string }):
       cliente: { nombre: uno.name, telefono: uno.phone, dni: uno.dni ?? null, correo: uno.email ?? null, origen: uno.lead_source ?? null },
       lo_atiende: atiende,
       canal: conv.data?.channel ?? "whatsapp",
-      compro: plan.data
+      compro: plan.data && sinCobranzas
+        ? {
+            inmueble: [unidad?.code, unidad?.project?.name].filter(Boolean).join(" · ") || null,
+            estado: plan.data.status,
+            cobranza: SIN_ACCESO_COBRANZAS,
+          }
+        : plan.data
         ? {
             inmueble: [unidad?.code, unidad?.project?.name].filter(Boolean).join(" · ") || null,
             moneda: plan.data.currency,
@@ -1129,6 +1169,7 @@ async function embudo(ctx: ContextoAsistente, args: { dias?: number }): Promise<
   const dias = Math.min(Math.max(Number(args.dias) || 30, 1), 365);
   const desde = new Date(Date.now() - dias * 864e5).toISOString();
 
+  const sinCobranzas = await sinAccesoCobranzas(ctx);
   const [contactos, convs, citas, planes, saldos] = await Promise.all([
     ctx.db.from("contacts").select("id", { count: "exact", head: true }).eq("account_id", ctx.accountId).gte("created_at", desde),
     ctx.db.from("conversations").select("id, status").eq("account_id", ctx.accountId).gte("created_at", desde),
@@ -1152,10 +1193,14 @@ async function embudo(ctx: ContextoAsistente, args: { dias?: number }): Promise<
       citas_canceladas: citasFilas.filter((c) => c.status === "cancelada").length,
       clientes_con_plan_de_pago: planesFilas.filter((p) => p.status === "activo").length,
       planes_ya_pagados: planesFilas.filter((p) => p.status === "pagado").length,
-      por_cobrar_total: suma("pending_amount").toFixed(2),
-      atrasado_total: suma("overdue_amount").toFixed(2),
-      moneda: saldosFilas[0]?.currency ?? "PEN",
-      nota: "Las cifras de cobranza son del total vigente, no sólo del periodo.",
+      ...(sinCobranzas
+        ? { cobranza: SIN_ACCESO_COBRANZAS }
+        : {
+            por_cobrar_total: suma("pending_amount").toFixed(2),
+            atrasado_total: suma("overdue_amount").toFixed(2),
+            moneda: saldosFilas[0]?.currency ?? "PEN",
+            nota: "Las cifras de cobranza son del total vigente, no sólo del periodo.",
+          }),
     },
   };
 }
@@ -1444,15 +1489,24 @@ async function agendarCita(ctx: ContextoAsistente, args: ArgsCita): Promise<Resu
 }
 
 async function cuotasAtrasadas(ctx: ContextoAsistente): Promise<Resultado> {
+  if (await sinAccesoCobranzas(ctx)) return { datos: { error: SIN_ACCESO_COBRANZAS } };
   const { data, error } = await ctx.db
     .from("installments")
-    .select("number, amount, due_date, plan:payment_plans(currency, contact:contacts(name, phone))")
+    .select("id, number, amount, due_date, plan:payment_plans(currency, contact:contacts(name, phone))")
     .eq("account_id", ctx.accountId)
     .eq("status", "pendiente")
     .lt("due_date", hoyLima())
     .order("due_date")
     .limit(30);
   if (error) return { datos: { error: error.message } };
+  // Saldo real por cuota (084); sin la vista queda el monto.
+  const ids = (data ?? []).map((c) => c.id as string);
+  const { data: faltan, error: errFaltan } = ids.length
+    ? await ctx.db.from("installment_balances").select("installment_id, remaining").in("installment_id", ids)
+    : { data: [], error: null };
+  const restante = new Map<string, number>(
+    errFaltan ? [] : (faltan ?? []).map((x) => [x.installment_id as string, Number(x.remaining)] as [string, number]),
+  );
   return {
     datos: {
       total: (data ?? []).length,
@@ -1461,7 +1515,7 @@ async function cuotasAtrasadas(ctx: ContextoAsistente): Promise<Resultado> {
         return {
           cliente: plan?.contact?.name || plan?.contact?.phone || "Cliente",
           cuota: c.number,
-          monto: `${plan?.currency ?? ""} ${Number(c.amount).toFixed(2)}`,
+          monto: `${plan?.currency ?? ""} ${(restante.get(c.id as string) ?? Number(c.amount)).toFixed(2)}`,
           vencio: c.due_date,
         };
       }),

@@ -21,6 +21,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
+import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import type { PaymentPlan, PaymentPlanBalance } from "@/types";
 import { Home, ArrowUpRight, FileClock } from "lucide-react";
@@ -39,6 +40,8 @@ const fecha = (iso: string | null | undefined) =>
 
 export function ClientSummary({ contactId }: ClientSummaryProps) {
   const supabase = createClient();
+  const { moduleAccess } = useAuth();
+  const sinAcceso = moduleAccess?.cobranzas === false;
   const [plan, setPlan] = useState<(PaymentPlan & { unit?: { code: string | null } }) | null>(null);
   const [balance, setBalance] = useState<PaymentPlanBalance | null>(null);
   const [vouchers, setVouchers] = useState(0);
@@ -124,6 +127,12 @@ export function ClientSummary({ contactId }: ClientSummaryProps) {
         </p>
       )}
 
+      {sinAcceso ? (
+        <p className="text-xs text-muted-foreground">
+          Sin acceso a cobranzas: saldos y cuotas son del área de Cobranzas.
+        </p>
+      ) : (
+      <>
       <div className="grid grid-cols-2 gap-2">
         <Dato
           titulo="Por cobrar"
@@ -157,6 +166,8 @@ export function ClientSummary({ contactId }: ClientSummaryProps) {
         Ver sus cuotas
         <ArrowUpRight className="h-3 w-3" />
       </Link>
+      </>
+      )}
     </div>
   );
 }

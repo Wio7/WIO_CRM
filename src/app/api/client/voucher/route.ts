@@ -118,17 +118,27 @@ export async function POST(request: Request) {
   const operacion = String(form?.get("operacion") ?? "").trim().slice(0, 60);
   const monto = Number(form?.get("monto") ?? 0) || null;
 
-  const { data: actualizadas, error: errCuota } = await db
-    .from("installments")
-    .update({
-      voucher_path: ruta,
-      paid_method: metodo || null,
-      paid_reference: operacion || null,
-    })
-    .eq("id", cuota.id)
-    // Si en el medio la cuota se pagó o la cubrió un abono, no se le pega el voucher.
-    .eq("status", "pendiente")
-    .select("id");
+  // El monto que dice el cliente se guarda como declarado (084): cobranzas
+  // lo ve al revisar, pero NO baja el saldo; eso lo hace el RPC al confirmar.
+  const cambios: Record<string, unknown> = {
+    voucher_path: ruta,
+    paid_method: metodo || null,
+    paid_reference: operacion || null,
+  };
+  const intento = (valores: Record<string, unknown>) =>
+    db
+      .from("installments")
+      .update(valores)
+      .eq("id", cuota.id)
+      // Si en el medio la cuota se pagó o la cubrió un abono, no se le pega el voucher.
+      .eq("status", "pendiente")
+      .select("id");
+
+  let { data: actualizadas, error: errCuota } = await intento({ ...cambios, declared_amount: monto });
+  // Sin la 084 no existe declared_amount: se guarda el voucher sin él.
+  if (errCuota && /declared_amount/.test(errCuota.message)) {
+    ({ data: actualizadas, error: errCuota } = await intento(cambios));
+  }
 
   if (!errCuota && (!actualizadas || actualizadas.length === 0)) {
     await db.storage.from("client-docs").remove([ruta]).catch(() => {});

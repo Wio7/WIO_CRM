@@ -11,6 +11,7 @@ import { Loader2 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
+import { useAuth } from "@/hooks/use-auth";
 import {
   planHealth,
   summarizeClientAccount,
@@ -61,6 +62,7 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
   const [plans, setPlans] = useState<PlanRow[]>([]);
   const [balances, setBalances] = useState<PlanBalanceRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { moduleAccess } = useAuth();
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +94,15 @@ export function ContactAccountTab({ contactId }: { contactId: string }) {
       cancelled = true;
     };
   }, [contactId]);
+
+  // Sin acceso a cobranzas (084): "sin acceso" no es "no debe nada".
+  if (moduleAccess?.cobranzas === false) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        Sin acceso a cobranzas. La cuenta del cliente la ve el área de Cobranzas, Contabilidad o Gerencia.
+      </p>
+    );
+  }
 
   if (loading) {
     return (

@@ -59,9 +59,22 @@ export interface Account {
  * avatar + role only.
  */
 /** Areas of the firm (migration 046). Null for someone with no area yet. */
-export type MemberArea = "marketing" | "legal" | "cobranzas" | "ventas";
+export type MemberArea =
+  | "marketing"
+  | "legal"
+  | "cobranzas"
+  | "ventas"
+  | "gerencia"
+  | "contabilidad";
 
-export const MEMBER_AREAS: MemberArea[] = ["marketing", "legal", "cobranzas", "ventas"];
+export const MEMBER_AREAS: MemberArea[] = [
+  "marketing",
+  "legal",
+  "cobranzas",
+  "ventas",
+  "gerencia",
+  "contabilidad",
+];
 
 export interface AccountMember {
   user_id: string;

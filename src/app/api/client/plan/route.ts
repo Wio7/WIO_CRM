@@ -130,6 +130,22 @@ export async function GET(request: Request) {
     cuotas = reintento.data as CuotaFila[] | null;
   }
 
+  // Saldo real por cuota (084): lo que falta y lo ya abonado (pagos en
+  // partes). Si la vista no existe todavía, se muestra el monto completo.
+  const saldos = new Map<string, { remaining: number; paid: number }>();
+  const { data: filasSaldo, error: errSaldo } = await db
+    .from("installment_balances")
+    .select("installment_id, remaining, paid_so_far")
+    .eq("plan_id", plan.id);
+  if (!errSaldo) {
+    for (const s of filasSaldo ?? []) {
+      saldos.set(s.installment_id as string, {
+        remaining: Number(s.remaining),
+        paid: Number(s.paid_so_far),
+      });
+    }
+  }
+
   const hoy = hoyEnLima();
   const unidad = plan.unit as unknown as
     | { code: string | null; manzana: string | null; project: { name: string } | null }
@@ -161,24 +177,33 @@ export async function GET(request: Request) {
           proxima_fecha: balance?.next_due_date ?? null,
         },
       },
-      cuotas: (cuotas ?? []).map((c) => ({
-        // El id viaja porque el cliente lo necesita para mandar el voucher
-        // de ESA cuota. Es suyo: la ruta que lo recibe vuelve a comprobar
-        // que la cuota sea de su plan.
-        id: c.id,
-        numero: c.number,
-        monto: Number(c.amount),
-        vence: c.due_date,
-        estado: c.status,
-        atrasada: c.status === "pendiente" && c.due_date < hoy,
-        // Subió su voucher y todavía nadie lo aprueba. Sigue debiendo:
-        // el saldo no baja hasta que alguien de cobranzas lo confirma.
-        en_revision: c.status === "pendiente" && !!c.voucher_path,
-        pagada_el: c.paid_at ?? null,
-        pagado: c.paid_amount === null || c.paid_amount === undefined ? null : Number(c.paid_amount),
-        metodo: c.paid_method ?? null,
-        operacion: c.paid_reference ?? null,
-      })),
+      cuotas: (cuotas ?? []).map((c) => {
+        const saldo = saldos.get(c.id);
+        // Pendiente con saldo: `monto` es lo que falta y `pagado` lo abonado.
+        const parcial = c.status === "pendiente" && saldo !== undefined;
+        return {
+          // El id viaja porque el cliente lo necesita para mandar el voucher
+          // de ESA cuota. Es suyo: la ruta que lo recibe vuelve a comprobar
+          // que la cuota sea de su plan.
+          id: c.id,
+          numero: c.number,
+          monto: parcial ? saldo.remaining : Number(c.amount),
+          vence: c.due_date,
+          estado: c.status,
+          atrasada: c.status === "pendiente" && c.due_date < hoy,
+          // Subió su voucher y todavía nadie lo aprueba. Sigue debiendo:
+          // el saldo no baja hasta que alguien de cobranzas lo confirma.
+          en_revision: c.status === "pendiente" && !!c.voucher_path,
+          pagada_el: c.paid_at ?? null,
+          pagado: parcial
+            ? saldo.paid
+            : c.paid_amount === null || c.paid_amount === undefined
+              ? null
+              : Number(c.paid_amount),
+          metodo: c.paid_method ?? null,
+          operacion: c.paid_reference ?? null,
+        };
+      }),
     }),
   );
 }

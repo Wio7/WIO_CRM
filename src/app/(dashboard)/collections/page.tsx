@@ -73,7 +73,7 @@ export default function CollectionsPage() {
   const [gestion, setGestion] = useState<{ id: string; name: string } | null>(null);
   const [soloPromesasVencidas, setSoloPromesasVencidas] = useState(false);
   const [gestionesError, setGestionesError] = useState<string | null>(null);
-  const { accountRole, accountId } = useAuth();
+  const { accountRole, accountId, moduleAccess } = useAuth();
   const esAdmin = accountRole === "admin" || accountRole === "owner";
   const [mora, setMora] = useState<LateFeeSettings>(NO_LATE_FEE);
   const [moraOpen, setMoraOpen] = useState(false);
@@ -107,9 +107,27 @@ export default function CollectionsPage() {
         if (!data || data.length < PAGE) break;
       }
 
+      const ids = all.map((r) => r.id);
+      // Saldo real por cuota (084): con pagos en partes se cobra lo que falta,
+      // no el monto original. Sin la vista se queda el monto (comportamiento previo).
+      const saldos = new Map<string, number>();
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const { data, error: errSaldo } = await supabase
+          .from("installment_balances")
+          .select("installment_id, remaining")
+          .in("installment_id", ids.slice(i, i + CHUNK));
+        if (errSaldo) break;
+        for (const s of (data ?? []) as { installment_id: string; remaining: number | string }[]) {
+          saldos.set(s.installment_id, Number(s.remaining));
+        }
+      }
+      for (const r of all) {
+        const saldo = saldos.get(r.id);
+        if (saldo !== undefined) r.remaining = saldo;
+      }
+
       // Último aviso automático de cada cuota vencida (migración 052).
       const last = new Map<string, string>();
-      const ids = all.map((r) => r.id);
       for (let i = 0; i < ids.length; i += CHUNK) {
         // Solo avisos que de verdad salieron (con canal y sin error).
         const { data } = await supabase
@@ -229,6 +247,16 @@ export default function CollectionsPage() {
     URL.revokeObjectURL(url);
   }
 
+  // Sin acceso a Cobranzas (084): se dice, no se muestra una lista vacía
+  // que parezca "no hay morosos".
+  if (moduleAccess?.cobranzas === false) {
+    return (
+      <p className="py-16 text-center text-sm text-muted-foreground">
+        Sin acceso a Cobranzas. Pídele al dueño de la cuenta que te asigne el área.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -271,7 +299,7 @@ export default function CollectionsPage() {
                 <p className="text-xl font-semibold text-rose-400">{formatCurrency(t.amount, cur)}</p>
                 <p className="text-xs text-muted-foreground">
                   {t.debtors} cliente{t.debtors === 1 ? "" : "s"}
-                  {conMora && t.mora > 0 ? ` · mora ${formatCurrency(t.mora, cur)}` : ""}
+                  {conMora && t.mora > 0 ? ` · mora estimada ${formatCurrency(t.mora, cur)}` : ""}
                 </p>
               </div>
             ))}
@@ -383,7 +411,7 @@ export default function CollectionsPage() {
                             </span>
                           )}
                           {conMora && moraDe(d) > 0 && (
-                            <span className="block text-xs text-amber-400">+ mora {formatCurrency(moraDe(d), d.currency)}</span>
+                            <span className="block text-xs text-amber-400">+ mora estimada {formatCurrency(moraDe(d), d.currency)}</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -425,7 +453,7 @@ export default function CollectionsPage() {
                       <span className="font-semibold">{formatCurrency(d.overdueAmount, d.currency)}</span>
                       <span className="text-xs text-muted-foreground"> · {d.overdueCount} cuota{d.overdueCount === 1 ? "" : "s"}</span>
                       {conMora && moraDe(d) > 0 && (
-                        <span className="text-xs text-amber-400"> · + mora {formatCurrency(moraDe(d), d.currency)}</span>
+                        <span className="text-xs text-amber-400"> · + mora estimada {formatCurrency(moraDe(d), d.currency)}</span>
                       )}
                     </p>
                     <div className="mt-1 text-xs">
