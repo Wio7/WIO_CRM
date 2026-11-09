@@ -745,12 +745,10 @@ async function resumenCliente(ctx: ContextoAsistente, args: { buscar: string }):
       cliente: { nombre: uno.name, telefono: uno.phone, dni: uno.dni ?? null, correo: uno.email ?? null, origen: uno.lead_source ?? null },
       lo_atiende: atiende,
       canal: conv.data?.channel ?? "whatsapp",
-      compro: plan.data && sinCobranzas
-        ? {
-            inmueble: [unidad?.code, unidad?.project?.name].filter(Boolean).join(" · ") || null,
-            estado: plan.data.status,
-            cobranza: SIN_ACCESO_COBRANZAS,
-          }
+      // Sin acceso (084) el plan ni siquiera es visible por RLS: se dice
+      // "sin acceso", nunca "todavía no compró".
+      compro: sinCobranzas
+        ? { cobranza: SIN_ACCESO_COBRANZAS }
         : plan.data
         ? {
             inmueble: [unidad?.code, unidad?.project?.name].filter(Boolean).join(" · ") || null,

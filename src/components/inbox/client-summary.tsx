@@ -22,6 +22,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
 import { useAuth } from "@/hooks/use-auth";
+import { estadoResumen } from "@/lib/client-summary-state";
 import { cn } from "@/lib/utils";
 import type { PaymentPlan, PaymentPlanBalance } from "@/types";
 import { Home, ArrowUpRight, FileClock } from "lucide-react";
@@ -102,6 +103,23 @@ export function ClientSummary({ contactId }: ClientSummaryProps) {
     };
   }, [contactId, supabase]);
 
+  const estado = estadoResumen({ contactId, hayPlan: Boolean(plan), sinAcceso });
+  if (estado === "oculto") return null;
+  if (estado === "sin-acceso") {
+    return (
+      <div className="rounded-lg border border-border bg-card p-3">
+        <div className="mb-2 flex items-center gap-2">
+          <Home className="h-3.5 w-3.5 text-primary" />
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Cliente
+          </h4>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Sin acceso a cobranzas: saldos y cuotas son del área de Cobranzas.
+        </p>
+      </div>
+    );
+  }
   if (!plan) return null;
 
   const unidad = plan.unit as unknown as
