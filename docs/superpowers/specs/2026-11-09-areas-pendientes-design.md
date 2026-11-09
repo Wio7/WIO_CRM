@@ -142,7 +142,19 @@ Lo que se sabe de los archivos (muestras de Golden, 2026-11-09):
    - Transferencias a **otros bancos** (Interbank, BCP, BBVA): solo
      **gerencia**, porque esas cuentas reciben también otros ingresos y
      solo gerencia ve su estado de cuenta. Estas van a la cola de 3.1.
-3. Contrato en el portal: PDF sin firma o solo escaneado firmado.
+3. **Contrato en el portal (decidido 2026-11-09):** se muestra el
+   **escaneado firmado**, gratis, **desde que se firma**. Solo la copia
+   legalizada en papel se cobra (S/ 35). El PDF sin firmas como "copia
+   informativa" queda por decidir; adendas y cesiones, por confirmar con
+   legal. La **carta de no adeudo** por ahora solo se entrega en oficina
+   (no va al portal).
+   Formato actual de la carta ("Constancia de cancelación"): texto de no
+   deuda sobre el compromiso de arras por manzana/lote/proyecto, tabla de
+   montos, firmas del gerente general y de la jefa de cobranzas, y una hoja
+   "Detalle de abonos" con fecha, número de operación y monto de cada pago,
+   más un correlativo. El ERP puede generarla desde el plan pagado y el
+   libro de pagos (la referencia externa de 3.2 da el número de operación);
+   la firma sigue en oficina.
 
 ## 6. Revisión EGM (2026-11-09)
 Revisores: `egm-design` y `egm-zoom-out`. Críticos de v1 corregidos aquí:
