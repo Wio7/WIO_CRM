@@ -12,8 +12,8 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import {
   CHANNELS,
-  RESULTS,
   channelLabel,
+  manualResults,
   resultLabel,
   actionPayload,
   validateAction,
@@ -40,6 +40,8 @@ interface Props {
   contactName: string;
   today: string;
   onSaved: (action: CollectionAction) => void;
+  /** 085 aplicada: "Pase a legal" se hace con el botón del traspaso, no aquí. */
+  conTraspasos?: boolean;
 }
 
 const fechaHora = (iso: string) =>
@@ -59,7 +61,15 @@ const fecha = (iso: string) => {
 
 const selectClass = "h-9 w-full rounded-md border border-border bg-background px-2 text-sm";
 
-export function CollectionActionDialog({ open, onOpenChange, contactId, contactName, today, onSaved }: Props) {
+export function CollectionActionDialog({
+  open,
+  onOpenChange,
+  contactId,
+  contactName,
+  today,
+  onSaved,
+  conTraspasos = false,
+}: Props) {
   const { accountId } = useAuth();
   const [history, setHistory] = useState<CollectionAction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -155,7 +165,7 @@ export function CollectionActionDialog({ open, onOpenChange, contactId, contactN
           <label className="space-y-1 text-xs text-muted-foreground">
             Resultado
             <select className={selectClass} value={result} onChange={(e) => setResult(e.target.value as ActionResult)}>
-              {RESULTS.map((r) => (
+              {manualResults(conTraspasos).map((r) => (
                 <option key={r.key} value={r.key}>{r.label}</option>
               ))}
             </select>

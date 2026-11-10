@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { safeNextPath } from '@/lib/app-paths'
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -63,17 +64,19 @@ export async function middleware(request: NextRequest) {
       url.pathname = `/join/${encodeURIComponent(inviteToken)}`
       url.search = ''
     } else {
-      url.pathname = request.nextUrl.searchParams.get('next') === '/caja' ? '/caja' : '/dashboard'
+      url.pathname = safeNextPath(request.nextUrl.searchParams.get('next'))
       url.search = ''
     }
     return withRefreshedCookies(NextResponse.redirect(url))
   }
 
   // Protected pages - redirect to login if not authenticated
-  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings']
+  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings', '/caja', '/collections']
   if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
+    url.search = ''
+    url.searchParams.set('next', request.nextUrl.pathname)
     return withRefreshedCookies(NextResponse.redirect(url))
   }
 

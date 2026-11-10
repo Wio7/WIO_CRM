@@ -20,6 +20,14 @@ importación**, nunca escrito en el código.
   ventas** (repo `golden 3d`), porque en Golden la persona de postventa
   también es asesor.
 - **La caja chica se mejora** (ver 3.6): deja de estar diferida.
+- **Cobranzas tiene app propia** (dueño, 2026-11-09), simple como Golden
+  Legal: cuotas, cola de vouchers, gestiones y bandeja de traspasos. Las
+  pantallas de Cobranzas del ERP web quedan para gerencia.
+- **Contabilidad tiene app propia** (dueño, 2026-11-09): pagos por validar,
+  conciliación con Caja Ica, boletas y carta de no adeudo. Golden Caja
+  queda solo para la caja chica y los gastos.
+- Cada app: solo entra la gente de su área; vista de laptop y vista de
+  celular separadas (como Golden Legal).
 
 ## 1. Por qué
 
@@ -126,7 +134,7 @@ Lo que se sabe de los archivos (muestras de Golden, 2026-11-09):
   en la Fase A. Se agrega la descarga del contrato reutilizando
   `legal_documents.pdf_url` (`033_legal_documents.sql`) si legal ya lo sube ahí.
 
-### 3.6 Caja chica mejorada (app de caja, repo `GOLDEN CAJA`)
+### 3.6 Caja chica mejorada (app de caja: ruta `/caja` del ERP, la que está en producción; varias cajas ya existen en `065_cash_companies.sql`)
 Pedido de gerencia (entrevista de compras/caja, 2026-11-09): ver cuánto
 cuesta cada proyecto y cada negocio.
 - Cada gasto lleva **proyecto** y **rubro** (personal, marketing, obra,
