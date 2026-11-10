@@ -46,7 +46,7 @@ export function normalizar(texto: string): string {
 const REGLAS: { rubro: Exclude<Rubro, 'otros'>; reglas: RegExp[] }[] = [
   {
     rubro: 'combi',
-    reglas: [/\bcombi/, /\bminivan/, /\bgasolina/, /\bcombustible/, /\bpetroleo/, /\bgrifo\b/, /\bpeaje/, /\bmovilidad\b/],
+    reglas: [/\bcombi/, /\bminivan/, /\bgasolina/, /\bcombustible/, /\bpetroleo/, /\bgrifo\b/, /\bpeaje/],
   },
   {
     rubro: 'marketing',
