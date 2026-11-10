@@ -20,6 +20,14 @@ importación**, nunca escrito en el código.
   ventas** (repo `golden 3d`), porque en Golden la persona de postventa
   también es asesor.
 - **La caja chica se mejora** (ver 3.6): deja de estar diferida.
+- **Cobranzas tiene app propia** (dueño, 2026-11-09), simple como Golden
+  Legal: cuotas, cola de vouchers, gestiones y bandeja de traspasos. Las
+  pantallas de Cobranzas del ERP web quedan para gerencia.
+- **Contabilidad tiene app propia** (dueño, 2026-11-09): pagos por validar,
+  conciliación con Caja Ica, boletas y carta de no adeudo. Golden Caja
+  queda solo para la caja chica y los gastos.
+- Cada app: solo entra la gente de su área; vista de laptop y vista de
+  celular separadas (como Golden Legal).
 
 ## 1. Por qué
 
