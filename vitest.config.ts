@@ -37,6 +37,9 @@ export default defineConfig({
           include: DATABASE_TESTS,
           testTimeout: 60_000,
           hookTimeout: 120_000,
+          // Cada archivo arranca su propio Postgres en memoria (PGlite):
+          // en paralelo compiten por CPU y a veces se pasan del tiempo.
+          fileParallelism: false,
         },
       },
     ],
