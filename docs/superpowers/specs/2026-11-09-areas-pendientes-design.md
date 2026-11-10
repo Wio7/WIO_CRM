@@ -134,7 +134,7 @@ Lo que se sabe de los archivos (muestras de Golden, 2026-11-09):
   en la Fase A. Se agrega la descarga del contrato reutilizando
   `legal_documents.pdf_url` (`033_legal_documents.sql`) si legal ya lo sube ahí.
 
-### 3.6 Caja chica mejorada (app de caja, repo `GOLDEN CAJA`)
+### 3.6 Caja chica mejorada (app de caja: ruta `/caja` del ERP, la que está en producción; varias cajas ya existen en `065_cash_companies.sql`)
 Pedido de gerencia (entrevista de compras/caja, 2026-11-09): ver cuánto
 cuesta cada proyecto y cada negocio.
 - Cada gasto lleva **proyecto** y **rubro** (personal, marketing, obra,
