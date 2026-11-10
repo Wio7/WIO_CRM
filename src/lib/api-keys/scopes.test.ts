@@ -61,3 +61,14 @@ describe('SCOPE_DESCRIPTIONS', () => {
     }
   });
 });
+
+describe('store scopes', () => {
+  it('declares store:read and store:write', () => {
+    expect(isApiScope('store:read')).toBe(true);
+    expect(isApiScope('store:write')).toBe(true);
+    expect(normalizeScopes(['store:read', 'store:write'])).toEqual([
+      'store:read',
+      'store:write',
+    ]);
+  });
+});
