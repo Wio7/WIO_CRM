@@ -29,3 +29,8 @@ export const TOPIC_LABELS: Record<HandoffTopic, string> = {
 export function kindsFrom(module: HandoffModule): HandoffKind[] {
   return (Object.keys(HANDOFF_KINDS) as HandoffKind[]).filter((k) => HANDOFF_KINDS[k].from === module);
 }
+
+/** Traspasos que un área puede recibir, en el orden del catálogo. */
+export function kindsTo(module: HandoffModule): HandoffKind[] {
+  return (Object.keys(HANDOFF_KINDS) as HandoffKind[]).filter((k) => HANDOFF_KINDS[k].to === module);
+}

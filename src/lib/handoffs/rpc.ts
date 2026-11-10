@@ -21,6 +21,8 @@ export interface HandoffSummary {
   // pase_legal
   plan_id?: string | null;
   deuda_total?: number | null;
+  /** payment_plans.currency (ISO-4217, p. ej. "PEN" o "USD"). */
+  moneda?: string | null;
   cuotas_vencidas?: number | null;
   gestiones?: { fecha: string; resultado: string | null; nota: string | null }[];
   // postventa_*
@@ -90,6 +92,24 @@ export function listHandoffs(client: RpcClient, module: HandoffModule, box: Hand
   return llamar(client, "my_handoffs", { p_module: module, p_box: box }, (d) =>
     ((d as HandoffRow[] | null) ?? []),
   );
+}
+
+/** Días que un caso devuelto sigue sumando en el aviso del área que lo envió. */
+export const DEVUELTO_DIAS = 30;
+
+/**
+ * Número del aviso de la bandeja: lo pendiente que llegó más lo que el
+ * área envió y le devolvieron en los últimos DEVUELTO_DIAS días (spec §5:
+ * devolver vuelve el caso al origen).
+ */
+export function inboxBadgeCount(recibidos: HandoffRow[], enviados: HandoffRow[], now: number = Date.now()): number {
+  const desde = now - DEVUELTO_DIAS * 24 * 60 * 60 * 1000;
+  const devueltos = enviados.filter((h) => {
+    if (h.status !== "devuelto") return false;
+    const t = Date.parse(h.handled_at ?? h.created_at);
+    return Number.isFinite(t) && t >= desde;
+  });
+  return recibidos.filter((h) => h.status === "pendiente").length + devueltos.length;
 }
 
 export function destinationReady(client: RpcClient, kind: HandoffKind) {

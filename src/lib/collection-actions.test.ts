@@ -4,6 +4,7 @@ import {
   actionPayload,
   isMissingTable,
   latestByContact,
+  manualResults,
   promiseState,
   resultLabel,
   validateAction,
@@ -84,5 +85,16 @@ describe('correcciones de la revisión (gestiones)', () => {
     expect(isMissingTable({ code: 'PGRST205', message: "Could not find the table 'public.collection_actions'" })).toBe(true);
     expect(isMissingTable({ code: '08006', message: 'network' })).toBe(false);
     expect(isMissingTable(null)).toBe(false);
+  });
+});
+
+describe('manualResults', () => {
+  it('sin 085 se puede registrar "Pase a legal" a mano', () => {
+    expect(manualResults(false).map((r) => r.key)).toContain('pase_legal');
+  });
+  it('con 085 "Pase a legal" sale del diálogo (lo crea el traspaso)', () => {
+    const keys = manualResults(true).map((r) => r.key);
+    expect(keys).not.toContain('pase_legal');
+    expect(keys).toContain('ultimatum');
   });
 });

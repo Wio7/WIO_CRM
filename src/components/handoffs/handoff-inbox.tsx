@@ -9,7 +9,7 @@ import { Loader2 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
-import { HANDOFF_KINDS, TOPIC_LABELS, type HandoffModule } from "@/lib/handoffs/kinds";
+import { HANDOFF_KINDS, TOPIC_LABELS, kindsTo, type HandoffModule } from "@/lib/handoffs/kinds";
 import {
   acceptHandoff,
   listHandoffs,
@@ -55,7 +55,8 @@ function resumen(h: HandoffRow): string {
   if (s.lote) partes.push(s.lote);
   if (s.proyecto) partes.push(s.proyecto);
   if (h.kind === "pase_legal") {
-    if (s.deuda_total != null) partes.push(`Deuda ${formatCurrency(Number(s.deuda_total), "PEN")}`);
+    // La moneda es la del plan; sin ella, el default de payment_plans.currency (043).
+    if (s.deuda_total != null) partes.push(`Deuda ${formatCurrency(Number(s.deuda_total), s.moneda || "PEN")}`);
     const n = s.cuotas_vencidas;
     if (n != null) partes.push(`${n} cuota${n === 1 ? "" : "s"} vencida${n === 1 ? "" : "s"}`);
   }
@@ -89,7 +90,9 @@ function Detalle({ h, box }: { h: HandoffRow; box: HandoffBox }) {
 }
 
 export function HandoffInbox({ module }: { module: HandoffModule }) {
-  const [box, setBox] = useState<HandoffBox>("recibidos");
+  // Un área que no recibe ningún tipo (cobranzas en F1) abre en "Enviados":
+  // ahí ve lo que le devolvieron.
+  const [box, setBox] = useState<HandoffBox>(() => (kindsTo(module).length === 0 ? "enviados" : "recibidos"));
   const [rows, setRows] = useState<HandoffRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

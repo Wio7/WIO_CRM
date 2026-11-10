@@ -45,6 +45,15 @@ export const RESULTS: ReadonlyArray<{ key: ActionResult; label: string }> = [
   { key: "pase_legal", label: "Pase a legal" },
 ];
 
+/**
+ * Resultados que se ofrecen al registrar una gestión a mano. Con los
+ * traspasos (085) aplicados, "Pase a legal" sale de la lista: lo crea
+ * solo el botón "Pasar a legal" (send_handoff), que además avisa a legal.
+ */
+export function manualResults(conTraspasos: boolean): ReadonlyArray<{ key: ActionResult; label: string }> {
+  return conTraspasos ? RESULTS.filter((r) => r.key !== "pase_legal") : RESULTS;
+}
+
 export const resultLabel = (r: ActionResult) => RESULTS.find((x) => x.key === r)?.label ?? r;
 export const channelLabel = (c: ActionChannel) => CHANNELS.find((x) => x.key === c)?.label ?? c;
 

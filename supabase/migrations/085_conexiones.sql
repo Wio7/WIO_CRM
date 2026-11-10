@@ -178,15 +178,49 @@ REVOKE ALL ON public.module_handoffs FROM anon;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.module_handoffs FROM authenticated;
 GRANT SELECT ON public.module_handoffs TO authenticated;
 
--- Lee la fila quien tiene el módulo origen o el destino.
-DROP POLICY IF EXISTS module_handoffs_select ON public.module_handoffs;
-CREATE POLICY module_handoffs_select ON public.module_handoffs FOR SELECT
-  USING (public.can_access_module(account_id, from_module)
-      OR public.can_access_module(account_id, to_module));
-
 -- ============================================================
 -- 3. Ayudantes internos (solo los llaman los RPC de abajo)
 -- ============================================================
+-- ¿El usuario actual tiene el módulo? can_access_module (084) y, para
+-- legal, también una fila en legal_members (Golden Legal 067 la admite
+-- aunque no tenga área ni fila de módulo). legal_members es de otro repo:
+-- si la tabla no existe, solo cuenta can_access_module. Solo para los
+-- traspasos; can_access_module no cambia.
+CREATE OR REPLACE FUNCTION public.handoff_has_module(p_account uuid, p_module text)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_found boolean := false;
+BEGIN
+  IF public.can_access_module(p_account, p_module) THEN
+    RETURN true;
+  END IF;
+  IF p_module IS DISTINCT FROM 'legal' OR auth.uid() IS NULL OR p_account IS NULL
+     OR to_regclass('public.legal_members') IS NULL
+     OR NOT public.is_account_member(p_account, 'viewer') THEN
+    RETURN false;
+  END IF;
+  EXECUTE 'SELECT EXISTS (SELECT 1 FROM public.legal_members m WHERE m.account_id = $1 AND m.user_id = $2)'
+     INTO v_found USING p_account, auth.uid();
+  RETURN COALESCE(v_found, false);
+END;
+$$;
+
+ALTER FUNCTION public.handoff_has_module(uuid, text) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.handoff_has_module(uuid, text) FROM PUBLIC, anon;
+-- La usa la política de lectura de abajo (corre como el usuario).
+GRANT EXECUTE ON FUNCTION public.handoff_has_module(uuid, text) TO authenticated;
+
+-- Lee la fila quien tiene el módulo origen o el destino.
+DROP POLICY IF EXISTS module_handoffs_select ON public.module_handoffs;
+CREATE POLICY module_handoffs_select ON public.module_handoffs FOR SELECT
+  USING (public.handoff_has_module(account_id, from_module)
+      OR public.handoff_has_module(account_id, to_module));
+
 -- Ruta de cada tipo. Un tipo desconocido devuelve una fila de NULLs.
 CREATE OR REPLACE FUNCTION public.handoff_route(
   p_kind text,
@@ -220,6 +254,7 @@ AS $$
                'cliente',         c.name,
                'telefono',        c.phone,
                'deuda_total',     b.pending_amount,
+               'moneda',          p.currency,
                'cuotas_vencidas', b.overdue_count,
                'gestiones', COALESCE((
                  SELECT jsonb_agg(jsonb_build_object('fecha', g.created_at, 'resultado', g.result, 'nota', g.note)
@@ -299,7 +334,7 @@ BEGIN
   END IF;
 
   SELECT account_id INTO v_account FROM profiles WHERE user_id = auth.uid();
-  IF v_account IS NULL OR NOT public.can_access_module(v_account, v_route.from_module) THEN
+  IF v_account IS NULL OR NOT public.handoff_has_module(v_account, v_route.from_module) THEN
     RAISE EXCEPTION 'No tienes acceso al módulo %', v_route.from_module USING ERRCODE = '42501';
   END IF;
 
@@ -379,7 +414,7 @@ BEGIN
 
   SELECT account_id INTO v_account FROM profiles WHERE user_id = auth.uid();
   SELECT * INTO v_h FROM module_handoffs WHERE id = p_id AND account_id = v_account FOR UPDATE;
-  IF NOT FOUND OR NOT public.can_access_module(v_h.account_id, v_h.to_module) THEN
+  IF NOT FOUND OR NOT public.handoff_has_module(v_h.account_id, v_h.to_module) THEN
     RAISE EXCEPTION 'Traspaso no encontrado' USING ERRCODE = '42501';
   END IF;
 
@@ -418,7 +453,7 @@ BEGIN
 
   SELECT account_id INTO v_account FROM profiles WHERE user_id = auth.uid();
   SELECT * INTO v_h FROM module_handoffs WHERE id = p_id AND account_id = v_account FOR UPDATE;
-  IF NOT FOUND OR NOT public.can_access_module(v_h.account_id, v_h.to_module) THEN
+  IF NOT FOUND OR NOT public.handoff_has_module(v_h.account_id, v_h.to_module) THEN
     RAISE EXCEPTION 'Traspaso no encontrado' USING ERRCODE = '42501';
   END IF;
 
@@ -455,7 +490,7 @@ BEGIN
   END IF;
 
   SELECT account_id INTO v_account FROM profiles WHERE user_id = auth.uid();
-  IF v_account IS NULL OR p_module IS NULL OR NOT public.can_access_module(v_account, p_module) THEN
+  IF v_account IS NULL OR p_module IS NULL OR NOT public.handoff_has_module(v_account, p_module) THEN
     RETURN;
   END IF;
 
@@ -485,8 +520,9 @@ $$;
 -- ------------------------------------------------------------
 -- handoff_destination_ready — ¿hay alguien en el área destino? Cuenta
 -- solo personas (agente o admin) con fila explícita del módulo destino
--- y, para legal, también el área 'legal'. El dueño y el super admin no
--- cuentan (entran a todo; si contaran, siempre sería true).
+-- y, para legal, también el área 'legal' o una fila en legal_members
+-- (como handoff_has_module). El dueño y el super admin no cuentan
+-- (entran a todo; si contaran, siempre sería true).
 -- ------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.handoff_destination_ready(p_kind text)
 RETURNS boolean
@@ -498,6 +534,7 @@ AS $$
 DECLARE
   v_account uuid;
   v_to      text;
+  v_found   boolean := false;
 BEGIN
   IF auth.uid() IS NULL THEN
     RETURN false;
@@ -508,7 +545,7 @@ BEGIN
     RETURN false;
   END IF;
 
-  RETURN EXISTS (
+  IF EXISTS (
     SELECT 1 FROM profiles p
      WHERE p.account_id = v_account
        AND p.account_role IN ('admin', 'agent')
@@ -517,7 +554,21 @@ BEGIN
                      WHERE m.account_id = v_account
                        AND m.user_id = p.user_id
                        AND m.module_key = v_to)
-            OR (v_to = 'legal' AND p.area = 'legal')));
+            OR (v_to = 'legal' AND p.area = 'legal'))) THEN
+    RETURN true;
+  END IF;
+
+  -- Equipo de Golden Legal (tabla de otro repo; puede no existir).
+  IF v_to = 'legal' AND to_regclass('public.legal_members') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS (
+               SELECT 1 FROM public.legal_members m
+                 JOIN public.profiles p ON p.user_id = m.user_id AND p.account_id = m.account_id
+                WHERE m.account_id = $1
+                  AND p.account_role IN (''admin'', ''agent'', ''viewer'')
+                  AND NOT EXISTS (SELECT 1 FROM public.platform_admins pa WHERE pa.user_id = p.user_id))'
+       INTO v_found USING v_account;
+  END IF;
+  RETURN COALESCE(v_found, false);
 END;
 $$;
 

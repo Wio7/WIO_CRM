@@ -47,6 +47,10 @@ beforeAll(async () => {
     CREATE TABLE reservations(id uuid PRIMARY KEY, account_id uuid REFERENCES accounts ON DELETE CASCADE);
     CREATE TABLE reservation_payments(id uuid PRIMARY KEY, account_id uuid REFERENCES accounts ON DELETE CASCADE);
     CREATE TABLE platform_admins(user_id uuid PRIMARY KEY);
+    -- Golden Legal 064 (otro repo): 085 cuenta sus filas como equipo legal.
+    CREATE TABLE legal_members(account_id uuid NOT NULL REFERENCES accounts ON DELETE CASCADE,
+      user_id uuid NOT NULL REFERENCES auth.users ON DELETE CASCADE, role text NOT NULL,
+      PRIMARY KEY (account_id, user_id));
     CREATE FUNCTION public.is_super_admin() RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER
       SET search_path = public
       AS $$ SELECT EXISTS (SELECT 1 FROM public.platform_admins WHERE user_id = auth.uid()); $$;

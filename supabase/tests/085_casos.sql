@@ -32,7 +32,10 @@ DECLARE
   v_marketing uuid := '0850c000-0000-4000-8000-000000000006';
   v_postventa uuid := '0850c000-0000-4000-8000-000000000007';
   v_tecnico   uuid := '0850c000-0000-4000-8000-000000000008';
+  v_legal3    uuid := '0850c000-0000-4000-8000-000000000009';  -- solo legal_members
+  v_otro      uuid := '0850c000-0000-4000-8000-000000000010';  -- dueño de otra cuenta
   v_acc       uuid;
+  v_otra      uuid;
   v_today     date := (now() AT TIME ZONE 'America/Lima')::date;
   r           record;
 BEGIN
@@ -45,7 +48,9 @@ BEGIN
       (v_legal2,    't085-legal2@example.test'),
       (v_marketing, 't085-marketing@example.test'),
       (v_postventa, 't085-postventa@example.test'),
-      (v_tecnico,   't085-tecnico@example.test')
+      (v_tecnico,   't085-tecnico@example.test'),
+      (v_legal3,    't085-legal3@example.test'),
+      (v_otro,      't085-otro@example.test')
     ) AS u(id, email)
   LOOP
     INSERT INTO auth.users (id, instance_id, aud, role, email, raw_user_meta_data, created_at, updated_at)
@@ -71,7 +76,8 @@ BEGIN
       (v_legal2,    'agent'::account_role_enum, 'legal',     'Legal Dos 085'),
       (v_marketing, 'agent'::account_role_enum, 'marketing', 'Marketing 085'),
       (v_postventa, 'agent'::account_role_enum, 'ventas',    'Postventa 085'),
-      (v_tecnico,   'agent'::account_role_enum, NULL,        'Técnico 085')
+      (v_tecnico,   'agent'::account_role_enum, NULL,        'Técnico 085'),
+      (v_legal3,    'agent'::account_role_enum, 'marketing', 'Legal Tres 085')
     ) AS m(id, role, area, full_name)
   LOOP
     UPDATE public.profiles SET account_id = v_acc, account_role = r.role, area = r.area, full_name = r.full_name
@@ -106,6 +112,20 @@ BEGIN
   INSERT INTO public.collection_actions (account_id, contact_id, plan_id, channel, result, note, created_by)
   VALUES (v_acc, '0850c000-0000-4000-8000-000000000301', '0850c000-0000-4000-8000-000000000101',
           'llamada', 'no_contesta', 'Llamada sin respuesta', v_cobr);
+
+  -- Otra cuenta con su propio cliente y plan (frontera entre cuentas).
+  SELECT account_id INTO v_otra FROM public.profiles WHERE user_id = v_otro;
+  IF v_otra IS NULL THEN
+    INSERT INTO public.accounts (name, owner_user_id) VALUES ('Otra 085', v_otro) RETURNING id INTO v_otra;
+    INSERT INTO public.profiles (user_id, full_name, email, account_id, account_role)
+    VALUES (v_otro, 'Otro 085', 't085-otro@example.test', v_otra, 'owner');
+  END IF;
+  INSERT INTO public.contacts (id, account_id, user_id, phone, name)
+  VALUES ('0850c000-0000-4000-8000-000000000302', v_otra, v_otro, '+51900085086', 'Cliente Otra 085');
+  INSERT INTO public.payment_plans (id, account_id, contact_id, currency, total_amount, down_payment,
+                                    installments_count, monthly_amount, due_day, first_due_date, status)
+  VALUES ('0850c000-0000-4000-8000-000000000102', v_otra, '0850c000-0000-4000-8000-000000000302',
+          'PEN', 900, 0, 3, 300, NULL, v_today - 40, 'activo');
 
   PERFORM set_config('t085.acc', v_acc::text, true);
 END $$;
@@ -167,6 +187,7 @@ BEGIN
      OR v_row->>'sent_by_name' IS DISTINCT FROM 'Cobranzas 085'
      OR v_row->>'note' IS DISTINCT FROM 'Cliente en causal'
      OR (v_row->'summary'->>'deuda_total')::numeric <> 1500
+     OR v_row->'summary'->>'moneda' IS DISTINCT FROM 'PEN'
      OR (v_row->'summary'->>'cuotas_vencidas')::int <> 2
      OR v_row->'summary'->>'cliente' IS DISTINCT FROM 'Cliente 085'
      OR v_row->'summary'->>'telefono' IS DISTINCT FROM '+51900085085'
@@ -226,6 +247,25 @@ BEGIN
   END;
   IF v_msg IS NULL OR v_msg NOT ILIKE '%no encontrado%' THEN
     RAISE EXCEPTION 'FALLO entidad: pase_legal con un contacto no falló (mensaje: %)', v_msg;
+  END IF;
+
+  -- Un plan o un cliente de OTRA cuenta se rechaza.
+  v_msg := NULL;
+  BEGIN
+    PERFORM public.send_handoff('pase_legal', '0850c000-0000-4000-8000-000000000102', NULL, NULL);
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL OR v_msg NOT ILIKE '%no encontrado%' THEN
+    RAISE EXCEPTION 'FALLO otra cuenta: pase_legal con un plan ajeno no falló (mensaje: %)', v_msg;
+  END IF;
+
+  v_msg := NULL;
+  BEGIN
+    PERFORM public.send_handoff('postventa_desde_cobranzas', '0850c000-0000-4000-8000-000000000302', NULL, 'entrega');
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL OR v_msg NOT ILIKE '%no encontrado%' THEN
+    RAISE EXCEPTION 'FALLO otra cuenta: postventa con un cliente ajeno no falló (mensaje: %)', v_msg;
   END IF;
 
   v_msg := NULL;
@@ -298,6 +338,11 @@ BEGIN
   END IF;
   INSERT INTO public.account_module_members (account_id, user_id, module_key)
   VALUES (current_setting('t085.acc')::uuid, '0850c000-0000-4000-8000-000000000007', 'postventa');
+  -- Los envíos con entidades de otra cuenta no dejaron nada.
+  IF EXISTS (SELECT 1 FROM public.module_handoffs
+              WHERE entity_id IN ('0850c000-0000-4000-8000-000000000102', '0850c000-0000-4000-8000-000000000302')) THEN
+    RAISE EXCEPTION 'FALLO otra cuenta: quedó un traspaso con una entidad ajena';
+  END IF;
 END $$;
 
 -- ------------------------------------------------------------
@@ -486,9 +531,86 @@ BEGIN
   IF v_msg IS NULL THEN
     RAISE EXCEPTION 'FALLO cobranzas: aceptó un caso de postventa sin el módulo';
   END IF;
+
+  -- Devolver también exige el módulo destino (el origen no se lo devuelve a sí mismo).
+  v_msg := NULL;
+  BEGIN
+    PERFORM public.return_handoff(current_setting('t085.pv_cobr')::uuid, 'Me lo devuelvo');
+  EXCEPTION WHEN OTHERS THEN v_msg := SQLERRM;
+  END;
+  IF v_msg IS NULL OR v_msg NOT ILIKE '%no encontrado%' THEN
+    RAISE EXCEPTION 'FALLO cobranzas: devolvió un caso de postventa sin el módulo (mensaje: %)', v_msg;
+  END IF;
+  IF (SELECT r->>'status' FROM public.my_handoffs('cobranzas', 'enviados') r
+       WHERE r->>'id' = current_setting('t085.pv_cobr')) IS DISTINCT FROM 'pendiente' THEN
+    RAISE EXCEPTION 'FALLO cobranzas: el caso de postventa ya no está pendiente tras un devolver rechazado';
+  END IF;
 END $$;
 
 RESET ROLE;
+
+-- ------------------------------------------------------------
+-- Legal Tres: está solo en legal_members (Golden Legal), sin área ni
+-- fila de módulo → ve los recibidos de legal y acepta. Si la tabla no
+-- existe (BD sin Golden Legal), el caso se salta.
+-- ------------------------------------------------------------
+DO $$
+DECLARE
+  v_acc  uuid := current_setting('t085.acc')::uuid;
+  v_user uuid := '0850c000-0000-4000-8000-000000000009';
+  v_n    bigint;
+  v_id   uuid;
+  v_h    record;
+BEGIN
+  IF to_regclass('public.legal_members') IS NULL THEN
+    RAISE NOTICE '085: no existe legal_members; se salta el caso de Legal Tres';
+    RETURN;
+  END IF;
+  EXECUTE 'INSERT INTO public.legal_members (account_id, user_id, role) VALUES ($1, $2, ''reviewer'')'
+    USING v_acc, v_user;
+
+  PERFORM set_config('request.jwt.claim.sub', v_user::text, true),
+          set_config('request.jwt.claims', jsonb_build_object('sub', v_user, 'role', 'authenticated')::text, true);
+  SET LOCAL ROLE authenticated;
+
+  IF public.can_access_module(v_acc, 'legal') THEN
+    RAISE EXCEPTION 'FALLO legal tres: can_access_module(legal) debía seguir en false';
+  END IF;
+  IF NOT public.handoff_has_module(v_acc, 'legal') THEN
+    RAISE EXCEPTION 'FALLO legal tres: handoff_has_module(legal) debía ser true por legal_members';
+  END IF;
+  IF public.handoff_has_module(v_acc, 'cobranzas') THEN
+    RAISE EXCEPTION 'FALLO legal tres: legal_members no abre cobranzas';
+  END IF;
+  -- El primer pase (aceptado) y el segundo (pendiente).
+  SELECT count(*) INTO v_n FROM public.my_handoffs('legal', 'recibidos');
+  IF v_n <> 2 THEN
+    RAISE EXCEPTION 'FALLO legal tres: % recibidos (esperado 2)', v_n;
+  END IF;
+  SELECT (r->>'id')::uuid INTO v_id FROM public.my_handoffs('legal', 'recibidos') r
+   WHERE r->>'status' = 'pendiente';
+  PERFORM public.accept_handoff(v_id);
+  SELECT * INTO v_h FROM public.module_handoffs WHERE id = v_id;
+  IF v_h.status IS DISTINCT FROM 'aceptado'
+     OR v_h.handled_by IS DISTINCT FROM v_user THEN
+    RAISE EXCEPTION 'FALLO legal tres: estado=% atendido_por=%', v_h.status, v_h.handled_by;
+  END IF;
+  RESET ROLE;
+
+  -- Sin Legal Uno ni Dos en el área, legal_members basta para que
+  -- cobranzas vea "hay alguien en Legal".
+  UPDATE public.profiles SET area = 'marketing'
+   WHERE user_id IN ('0850c000-0000-4000-8000-000000000004', '0850c000-0000-4000-8000-000000000005');
+  PERFORM set_config('request.jwt.claim.sub', '0850c000-0000-4000-8000-000000000002', true),
+          set_config('request.jwt.claims', '{"sub":"0850c000-0000-4000-8000-000000000002","role":"authenticated"}', true);
+  SET LOCAL ROLE authenticated;
+  IF NOT public.handoff_destination_ready('pase_legal') THEN
+    RAISE EXCEPTION 'FALLO destino: solo con legal_members debía ser true';
+  END IF;
+  RESET ROLE;
+  UPDATE public.profiles SET area = 'legal'
+   WHERE user_id IN ('0850c000-0000-4000-8000-000000000004', '0850c000-0000-4000-8000-000000000005');
+END $$;
 
 -- ------------------------------------------------------------
 -- Postventa: recibe dos casos con lote y proyecto; devolver exige motivo

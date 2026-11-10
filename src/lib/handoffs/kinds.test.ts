@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { HANDOFF_KINDS, TOPIC_LABELS, kindsFrom } from './kinds';
+import { HANDOFF_KINDS, TOPIC_LABELS, kindsFrom, kindsTo } from './kinds';
 
 describe('kindsFrom', () => {
   it('cobranzas puede pasar a legal o enviar a postventa', () => {
@@ -11,6 +11,18 @@ describe('kindsFrom', () => {
   });
   it('postventa no envía a nadie', () => {
     expect(kindsFrom('postventa')).toEqual([]);
+  });
+});
+
+describe('kindsTo', () => {
+  it('cobranzas no recibe nada (en F1)', () => {
+    expect(kindsTo('cobranzas')).toEqual([]);
+  });
+  it('legal recibe el pase de cobranzas', () => {
+    expect(kindsTo('legal')).toEqual(['pase_legal']);
+  });
+  it('postventa recibe de cobranzas y de legal', () => {
+    expect(kindsTo('postventa')).toEqual(['postventa_desde_cobranzas', 'postventa_desde_legal']);
   });
 });
 

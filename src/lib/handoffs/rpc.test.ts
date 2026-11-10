@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   acceptHandoff,
   destinationReady,
+  inboxBadgeCount,
   listHandoffs,
   returnHandoff,
   sendHandoff,
+  type HandoffRow,
 } from './rpc';
 
 type Call = { fn: string; args: Record<string, unknown> };
@@ -90,5 +92,28 @@ describe('listHandoffs y destinationReady', () => {
     const { client, calls } = fakeClient({ data: true });
     expect(await destinationReady(client, 'pase_legal')).toEqual({ ok: true, data: true });
     expect(calls[0]).toEqual({ fn: 'handoff_destination_ready', args: { p_kind: 'pase_legal' } });
+  });
+});
+
+describe('inboxBadgeCount', () => {
+  const now = Date.parse('2026-11-10T12:00:00Z');
+  const row = (status: string, handled_at: string | null, created_at = '2026-11-01T12:00:00Z') =>
+    ({ id: status + (handled_at ?? ''), kind: 'pase_legal', status, topic: null, note: null, return_reason: null,
+       sent_by_name: null, handled_by_name: null, created_at, handled_at, summary: null }) as HandoffRow;
+
+  it('suma los pendientes recibidos y los devueltos recientes de enviados', () => {
+    const recibidos = [row('pendiente', null), row('aceptado', '2026-11-09T12:00:00Z')];
+    const enviados = [
+      row('devuelto', '2026-11-09T12:00:00Z'),
+      row('devuelto', '2026-10-01T12:00:00Z'), // más de 30 días: ya no cuenta
+      row('pendiente', null),
+      row('aceptado', '2026-11-09T12:00:00Z'),
+    ];
+    expect(inboxBadgeCount(recibidos, enviados, now)).toBe(2);
+  });
+
+  it('cobranzas en F1: sin recibidos, solo cuentan los devueltos', () => {
+    expect(inboxBadgeCount([], [row('devuelto', '2026-11-10T08:00:00Z')], now)).toBe(1);
+    expect(inboxBadgeCount([], [], now)).toBe(0);
   });
 });

@@ -36,7 +36,7 @@ import { ContactDetailView } from "@/components/contacts/contact-detail-view";
 import { CollectionActionDialog } from "@/components/collections/collection-action-dialog";
 import { useAuth } from "@/hooks/use-auth";
 import { SendHandoffButton } from "@/components/handoffs/send-handoff-button";
-import { listHandoffs } from "@/lib/handoffs/rpc";
+import { inboxBadgeCount, listHandoffs } from "@/lib/handoffs/rpc";
 import { LateFeeSettingsDialog } from "@/components/collections/late-fee-settings-dialog";
 import { NO_LATE_FEE, lateFeesByDebtor, settingsFromAccount, type LateFeeSettings } from "@/lib/late-fees";
 import {
@@ -87,12 +87,16 @@ export default function CollectionsPage() {
   const soloMisClientes = accountRole === "agent";
   const today = useMemo(() => hoyLima(), []);
   // Traspasos (085): null = la migración no está aplicada, sin enlace ni botones.
+  // El número suma lo pendiente que llegó y lo que cobranzas envió y le
+  // devolvieron hace poco (en F1 nadie le envía casos a cobranzas).
   const [bandeja, setBandeja] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
-    listHandoffs(createClient(), "cobranzas", "recibidos")
-      .then((r) => {
-        if (!cancelled && r.ok) setBandeja(r.data.filter((h) => h.status === "pendiente").length);
+    const supabase = createClient();
+    Promise.all([listHandoffs(supabase, "cobranzas", "recibidos"), listHandoffs(supabase, "cobranzas", "enviados")])
+      .then(([recibidos, enviados]) => {
+        if (cancelled || !recibidos.ok) return;
+        setBandeja(inboxBadgeCount(recibidos.data, enviados.ok ? enviados.data : []));
       })
       .catch(() => {});
     return () => {
@@ -575,6 +579,7 @@ export default function CollectionsPage() {
           contactName={gestion.name}
           today={today}
           onSaved={(a) => setAcciones((prev) => [a, ...prev])}
+          conTraspasos={bandeja !== null}
         />
       )}
     </div>
