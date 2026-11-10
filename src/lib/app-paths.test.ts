@@ -7,6 +7,10 @@ describe("safeNextPath", () => {
     expect(safeNextPath("/caja")).toBe("/caja");
     expect(safeNextPath("/caja/demo")).toBe("/caja/demo");
   });
+  it("vuelve a cobranzas", () => {
+    expect(safeNextPath("/collections/bandeja")).toBe("/collections/bandeja");
+    expect(safeNextPath("/collectionsevil")).toBe("/dashboard");
+  });
   it("rechaza prefijos parecidos y destinos externos", () => {
     expect(safeNextPath("/cajaevil")).toBe("/dashboard");
     expect(safeNextPath("https://evil.com")).toBe("/dashboard");
