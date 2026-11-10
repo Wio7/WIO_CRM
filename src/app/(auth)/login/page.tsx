@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { safeNextPath } from "@/lib/app-paths";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -92,7 +93,7 @@ function LoginPageInner() {
       }
       const destination = admin
         ? (admin.visiting_account_id === null ? "/saas-owner" : "/dashboard")
-        : (searchParams.get("next") === "/caja" ? "/caja" : "/dashboard");
+        : safeNextPath(searchParams.get("next"));
       window.location.assign(destination);
     }
   };

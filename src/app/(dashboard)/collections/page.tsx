@@ -11,7 +11,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ClipboardList, Download, FileText, Percent, HandCoins, Loader2, MessageCircle } from "lucide-react";
+import { CalendarDays, ClipboardList, Download, FileText, Inbox, Percent, HandCoins, Loader2, MessageCircle } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { formatCurrency } from "@/lib/currency";
@@ -35,6 +35,8 @@ import { Input } from "@/components/ui/input";
 import { ContactDetailView } from "@/components/contacts/contact-detail-view";
 import { CollectionActionDialog } from "@/components/collections/collection-action-dialog";
 import { useAuth } from "@/hooks/use-auth";
+import { SendHandoffButton } from "@/components/handoffs/send-handoff-button";
+import { listHandoffs } from "@/lib/handoffs/rpc";
 import { LateFeeSettingsDialog } from "@/components/collections/late-fee-settings-dialog";
 import { NO_LATE_FEE, lateFeesByDebtor, settingsFromAccount, type LateFeeSettings } from "@/lib/late-fees";
 import {
@@ -84,6 +86,19 @@ export default function CollectionsPage() {
   // Un agente solo ve sus propios clientes (contacts RLS): la pantalla lo dice.
   const soloMisClientes = accountRole === "agent";
   const today = useMemo(() => hoyLima(), []);
+  // Traspasos (085): null = la migración no está aplicada, sin enlace ni botones.
+  const [bandeja, setBandeja] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    listHandoffs(createClient(), "cobranzas", "recibidos")
+      .then((r) => {
+        if (!cancelled && r.ok) setBandeja(r.data.filter((h) => h.status === "pendiente").length);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -292,6 +307,14 @@ export default function CollectionsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+        {bandeja !== null && (
+          <Link href="/collections/bandeja" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <Inbox className="h-4 w-4" /> Bandeja
+            {bandeja > 0 && (
+              <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{bandeja}</span>
+            )}
+          </Link>
+        )}
         <Link href="/collections/vouchers" className={buttonVariants({ variant: "outline", size: "sm" })}>
           <FileText className="h-4 w-4" /> Vouchers
         </Link>
@@ -459,6 +482,7 @@ export default function CollectionsPage() {
                                 <ClipboardList className="h-3.5 w-3.5" /> Gestión
                               </Button>
                             )}
+                            {bandeja !== null && <HandoffButtons d={d} legal={enCausal(d)} />}
                             {d.overdueCount > 0 ? <CobrarButton d={d} /> : <EnRevision d={d} />}
                           </div>
                         </td>
@@ -490,12 +514,13 @@ export default function CollectionsPage() {
                     <div className="mt-1 text-xs">
                       <Seguimiento accion={ultimas.get(d.contactId)} estado={promesa(d.contactId)} />
                     </div>
-                    <div className="mt-2 flex justify-end gap-1.5">
+                    <div className="mt-2 flex flex-wrap justify-end gap-1.5">
                       {gestionesOk && (
                         <Button size="sm" variant="outline" onClick={() => setGestion({ id: d.contactId, name: d.name })}>
                           <ClipboardList className="h-3.5 w-3.5" /> Gestión
                         </Button>
                       )}
+                      {bandeja !== null && <HandoffButtons d={d} legal={enCausal(d)} />}
                       {d.overdueCount > 0 ? <CobrarButton d={d} /> : <EnRevision d={d} />}
                     </div>
                   </li>
@@ -572,6 +597,15 @@ function Seguimiento({ accion, estado }: { accion?: CollectionAction; estado: Pr
         </span>
       )}
     </span>
+  );
+}
+
+function HandoffButtons({ d, legal }: { d: Debtor; legal: boolean }) {
+  return (
+    <>
+      {legal && d.worstPlan && <SendHandoffButton kind="pase_legal" entityId={d.worstPlan.planId} />}
+      <SendHandoffButton kind="postventa_desde_cobranzas" entityId={d.contactId} />
+    </>
   );
 }
 
