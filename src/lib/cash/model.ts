@@ -1,3 +1,5 @@
+import { esRubro, type Rubro } from './clasificar';
+
 export type CashRole = 'owner' | 'cashier' | 'reader';
 export interface CashCompany { id: string; name: string; role: CashRole }
 export interface CashEntry {
@@ -11,6 +13,10 @@ export interface CashEntry {
   budget_id: string | null;
   reversal_of: string | null;
   reversed: boolean;
+  /** 087: proyecto (real_estate_projects), gasto general y rubro. Nulos = sin asignar. */
+  project_id?: string | null;
+  project_general?: boolean;
+  rubro?: Rubro | null;
   actor_name: string;
   created_at: string;
   updated_at?: string;
@@ -45,6 +51,32 @@ export interface CashSnapshot {
   members: { user_id: string; name: string; role: CashRole | 'none' }[];
   boxes?: { userId: string; name: string; income: number; expense: number; entryCount: number }[];
   audit?: CashAudit[];
+}
+/** Datos del formulario y del encabezado de una caja (cash_form_options, 087). */
+export interface CashFormOptions {
+  rubros: Rubro[];
+  projects: { id: string; name: string }[];
+  responsible: { userId: string; name: string } | null;
+  canPanel: boolean;
+  canSetResponsible: boolean;
+  people: { userId: string; name: string }[];
+}
+export interface PanelRow { key?: string; id?: string | null; name?: string; rubro?: string; cents: number; count: number }
+export interface CashPanel {
+  month: string | null;
+  companyId: string | null;
+  totalCents: number;
+  count: number;
+  unassigned: { count: number; cents: number };
+  byProject: (PanelRow & { key: string; name: string })[];
+  byRubro: (PanelRow & { rubro: string })[];
+  byCompany: (PanelRow & { id: string; name: string; responsible: string | null })[];
+  byMonth: { month: string; cents: number }[];
+  companies: { id: string; name: string; responsible: string | null }[];
+  pending: {
+    id: string; companyId: string; companyName: string; date: string; concept: string;
+    counterparty: string; amountCents: number; rubro: Rubro | null; projectId: string | null; projectGeneral: boolean;
+  }[];
 }
 export function money(cents: number) {
   return new Intl.NumberFormat('es-PE', {
@@ -129,6 +161,16 @@ export function validateCommand(body: unknown): Record<string, unknown> {
     throw new Error('Operación no válida.');
   text('concept', 1, 200);
   text('counterparty', 1, 160);
+  // Un gasto nuevo desde la app lleva rubro y proyecto (o gasto general).
+  // WhatsApp los deja opcionales y no pasa por aquí; editar no los pide.
+  if (c.action === 'entry' && c.kind === 'expense') {
+    if (!esRubro(c.rubro)) throw new Error('Elige el rubro del gasto.');
+    if (c.projectGeneral !== undefined && typeof c.projectGeneral !== 'boolean')
+      throw new Error('Gasto general no válido.');
+    if ((c.projectGeneral === true) === Boolean(c.projectId))
+      throw new Error('Elige el proyecto del gasto, o márcalo como gasto general.');
+    if (c.projectId) id('projectId');
+  }
   if (
     typeof c.date !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}$/.test(c.date) ||
