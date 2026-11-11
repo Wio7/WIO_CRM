@@ -19,6 +19,7 @@ import { paymentsCsv, summarizePayments, type PaymentReportRow } from "@/lib/pay
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useCollectionsPaths } from "@/components/collections/base-path";
 
 interface LedgerRow {
   id: string;
@@ -40,6 +41,7 @@ interface LedgerRow {
 const PAGE = 1000;
 
 export default function DailyPaymentsPage() {
+  const paths = useCollectionsPaths();
   const { moduleAccess } = useAuth();
   const [desde, setDesde] = useState(() => hoyLima());
   const [hasta, setHasta] = useState(() => hoyLima());
@@ -154,7 +156,7 @@ export default function DailyPaymentsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link href="/collections" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+          <Link href={paths.base} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
             <ArrowLeft className="h-3 w-3" /> Cobranzas
           </Link>
           <h1 className="flex items-center gap-2 text-2xl font-semibold">

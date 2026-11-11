@@ -121,3 +121,49 @@ describe("middleware — refreshed auth cookies survive redirects", () => {
     expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
   });
 });
+
+describe("middleware — app de Cobranzas", () => {
+  it("sin sesión, una ruta de la app va al login de la app con next", async () => {
+    mockUser = null;
+    const res = await middleware(new NextRequest("https://app.test/cobranzas/vouchers"));
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/cobranzas/login");
+    expect(loc.searchParams.get("next")).toBe("/cobranzas/vouchers");
+  });
+  it("sin sesión, el login y el manifiesto de la app se abren", async () => {
+    mockUser = null;
+    for (const p of ["/cobranzas/login", "/cobranzas/manifest.webmanifest"]) {
+      const res = await middleware(new NextRequest("https://app.test" + p));
+      expect(res.headers.get("location")).toBeNull();
+    }
+  });
+  it("con sesión, el login de la app vuelve a la ruta pedida", async () => {
+    mockUser = { id: "user-1" };
+    const res = await middleware(new NextRequest("https://app.test/cobranzas/login?next=/cobranzas/gestiones"));
+    expect(res.headers.get("location")).toBe("https://app.test/cobranzas/gestiones");
+  });
+  it("con sesión y sin next, el login de la app va a la app (no al ERP)", async () => {
+    mockUser = { id: "user-1" };
+    const res = await middleware(new NextRequest("https://app.test/cobranzas/login"));
+    expect(res.headers.get("location")).toBe("https://app.test/cobranzas");
+  });
+  it("el login de la app no acepta un destino externo ni a sí mismo", async () => {
+    mockUser = { id: "user-1" };
+    for (const next of ["https://evil.test", "/cobranzas/login"]) {
+      const res = await middleware(new NextRequest("https://app.test/cobranzas/login?next=" + encodeURIComponent(next)));
+      expect(res.headers.get("location")).toBe("https://app.test/cobranzas");
+    }
+  });
+  it("Caja sigue yendo al /login de siempre", async () => {
+    mockUser = null;
+    const res = await middleware(new NextRequest("https://app.test/caja"));
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/login");
+    expect(loc.searchParams.get("next")).toBe("/caja");
+  });
+  it("el /login general sigue mandando a /dashboard sin next", async () => {
+    mockUser = { id: "user-1" };
+    const res = await middleware(new NextRequest("https://app.test/login"));
+    expect(res.headers.get("location")).toBe("https://app.test/dashboard");
+  });
+});

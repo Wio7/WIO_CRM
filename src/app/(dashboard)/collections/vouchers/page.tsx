@@ -23,6 +23,7 @@ import { signedDocUrl } from "@/lib/storage/upload-media";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useCollectionsPaths } from "@/components/collections/base-path";
 
 interface VoucherRow {
   id: string;
@@ -44,6 +45,7 @@ const SELECT =
   "id, number, amount, due_date, voucher_path, declared_amount, paid_method, paid_reference, plan:payment_plans(currency, contact:contacts(name, phone), unit:real_estate_units(code))";
 
 export default function VouchersPage() {
+  const paths = useCollectionsPaths();
   const { moduleAccess } = useAuth();
   const supabase = useMemo(() => createClient(), []);
   const [loading, setLoading] = useState(true);
@@ -165,7 +167,7 @@ export default function VouchersPage() {
   return (
     <div className="space-y-6">
       <div>
-        <Link href="/collections" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+        <Link href={paths.base} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-3 w-3" /> Cobranzas
         </Link>
         <h1 className="flex items-center gap-2 text-2xl font-semibold">
