@@ -10,6 +10,8 @@ import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import { MODULES, MODULE_AREAS, isModuleVisible } from "@/lib/modules";
 import { resolveAccountBrand } from "@/lib/account-brand";
 import { cajaMenuLabel } from "@/lib/cash/menu";
+import { useMyArea } from "@/hooks/use-my-area";
+import { puedeVerCuentas } from "@/lib/areas/destinos";
 import { Ticket,
   Bell,
   Bot,
@@ -22,6 +24,7 @@ import { Ticket,
   LayoutDashboard,
   LogOut,
   MessageSquare,
+  Network,
   PhoneCall,
   PhoneIncoming,
   Radio,
@@ -135,6 +138,7 @@ interface SidebarProps {
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { profile, profileLoading, account, accountRole, signOut, isSuperAdmin, moduleAccess } = useAuth();
+  const { area: miArea } = useMyArea();
   const totalUnread = useTotalUnread();
   const brand = resolveAccountBrand(account);
   const unreadNotifications = useUnreadNotifications();
@@ -291,7 +295,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <ul className="flex flex-col gap-1">
             {(isSuperAdmin
               ? [navItems[0], { href: "/saas-owner", label: "Cuentas", icon: Building2 }]
-              : [navItems[0]]
+              : puedeVerCuentas({ role: accountRole, area: miArea })
+                ? // Dueño o Gerencia: el árbol por áreas de su propio negocio.
+                  [navItems[0], { href: "/cuentas", label: "Cuentas", icon: Network }]
+                : [navItems[0]]
             ).map(renderNavItem)}
           </ul>
           {MODULE_AREAS.map((area) => {

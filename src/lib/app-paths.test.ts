@@ -59,7 +59,7 @@ describe("isAppPublicPath", () => {
 
 describe("isProtectedPath", () => {
   it("incluye las rutas de las apps", () => {
-    for (const p of ["/dashboard", "/caja", "/collections", "/cobranzas", "/cobranzas/gestiones"]) {
+    for (const p of ["/dashboard", "/caja", "/collections", "/cobranzas", "/cobranzas/gestiones", "/cuentas"]) {
       expect(isProtectedPath(p)).toBe(true);
     }
   });

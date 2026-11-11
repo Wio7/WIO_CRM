@@ -16,7 +16,7 @@ const APP_PUBLIC_DIRS = ["/cobranzas/icono/"];
 /** Rutas que piden sesión (se compara por prefijo, como siempre). */
 const PROTECTED_PREFIXES = [
   "/dashboard", "/inbox", "/contacts", "/pipelines", "/broadcasts", "/automations", "/settings",
-  "/caja", "/collections", "/cobranzas",
+  "/caja", "/collections", "/cobranzas", "/cuentas",
 ];
 
 const dentroDe = (path: string, base: string) => path === base || path.startsWith(base + "/");
