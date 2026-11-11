@@ -7,6 +7,7 @@
 // "accept" button, no second login.
 //
 //   GET  — public. What the join form needs to render: account, role,
+//          area (migration 091: 'promueve' for the external advisors),
 //          expiry, and the email/name the inviter typed (the token
 //          holder is the person being invited, so echoing them back is
 //          fine; the plaintext token never touches the DB).
@@ -30,6 +31,10 @@
 //               any cookie session in this browser, so the Golden App
 //               owns its refresh token and nobody else rotates it.
 //
+// A Promueve invite (area = 'promueve') goes through the same steps: the
+// redeem RPC leaves the profile as agent / promueve, and the form also
+// asks for a mobile number, saved in profiles.contact_phone (optional).
+//
 // Rate limits reuse the peek/redeem buckets (per IP). Supabase also
 // throttles password sign-ins on its side.
 // ============================================================
@@ -39,6 +44,7 @@ import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { hashInviteToken } from "@/lib/auth/invitations";
+import { normalizarCelular } from "@/lib/promueve/registro";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -52,6 +58,7 @@ const MAX_NAME_LEN = 80;
 interface InviteRow {
   id: string;
   role: "owner" | "admin" | "agent" | "viewer";
+  area?: string | null;
   email: string | null;
   label: string | null;
   expires_at: string;
@@ -73,15 +80,19 @@ function fail(reason: string, status: number, extra: Record<string, unknown> = {
 }
 
 async function loadInvite(token: string): Promise<InviteRow | null> {
-  const { data, error } = await supabaseAdmin()
-    .from("account_invitations")
-    .select(
-      "id, role, email, label, expires_at, accepted_at, accepted_by_user_id, accounts(name)",
-    )
-    .eq("token_hash", hashInviteToken(token))
-    .maybeSingle();
+  const consulta = (columnas: string) =>
+    supabaseAdmin()
+      .from("account_invitations")
+      .select(columnas)
+      .eq("token_hash", hashInviteToken(token))
+      .maybeSingle();
+  const base = "id, role, email, label, expires_at, accepted_at, accepted_by_user_id, accounts(name)";
+  // Con la migración 091 la invitación trae el área; sin ella (42703) se
+  // sigue sirviendo el enlace como hasta ahora.
+  let { data, error } = await consulta(`${base}, area`);
+  if (error?.code === "42703") ({ data, error } = await consulta(base));
   if (error) throw error;
-  return data as InviteRow | null;
+  return data as unknown as InviteRow | null;
 }
 
 function isAlreadyRegistered(error: { message?: string; status?: number; code?: string }) {
@@ -109,6 +120,7 @@ export async function GET(
       ok: true,
       account_name: inv.accounts?.name ?? "tu equipo",
       role: inv.role,
+      area: inv.area ?? null,
       expires_at: inv.expires_at,
       email: inv.email,
       name: inv.label,
@@ -132,6 +144,7 @@ export async function POST(
     email?: unknown;
     password?: unknown;
     full_name?: unknown;
+    phone?: unknown;
   } | null;
 
   const mode = body?.mode === "login" ? "login" : "create";
@@ -151,6 +164,13 @@ export async function POST(
   if (!inv) return fail("not_found", 404);
   if (new Date(inv.expires_at) <= new Date() && !inv.accepted_at) {
     return fail("expired", 400);
+  }
+
+  // Celular (solo Promueve): opcional, pero si se escribe tiene que ser válido.
+  let phone: string | null = null;
+  if (inv.area === "promueve" && typeof body?.phone === "string" && body.phone.trim() !== "") {
+    phone = normalizarCelular(body.phone);
+    if (!phone) return fail("invalid_phone", 400);
   }
 
   // An email invite fixes the address; a link typed-in one is checked here.
@@ -259,6 +279,16 @@ export async function POST(
       console.error("[enter] redeem failed:", redeemError);
       return fail("server_error", 500);
     }
+  }
+
+  // Celular de contacto de un Promueve (089). Si falla no se corta el
+  // ingreso: ya está dentro y puede completarlo después.
+  if (phone && !inv.accepted_at) {
+    const { error: phoneError } = await admin
+      .from("profiles")
+      .update({ contact_phone: phone })
+      .eq("user_id", session.user.id);
+    if (phoneError) console.error("[enter] could not save contact_phone:", phoneError.message);
   }
 
   return NextResponse.json({

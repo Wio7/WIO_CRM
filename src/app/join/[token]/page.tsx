@@ -59,6 +59,8 @@ interface InviteOk {
   ok: true;
   account_name: string;
   role: Role;
+  /** 'promueve' = asesor externo (migración 091). */
+  area?: string | null;
   expires_at: string;
   email: string | null;
   name: string | null;
@@ -73,6 +75,11 @@ const ROLE_LABEL: Record<Role, string> = {
   agent: 'Asesor inmobiliario',
   viewer: 'Solo lectura',
 };
+
+/** Lo que ve quien abre el enlace como cargo. */
+function cargoDeInvitacion(invite: InviteOk): string {
+  return invite.area === 'promueve' ? 'Asesor Promueve (externo)' : ROLE_LABEL[invite.role];
+}
 
 const FAIL_COPY: Record<FailReason, { title: string; body: string }> = {
   not_found: {
@@ -98,6 +105,7 @@ const ERROR_COPY: Record<string, string> = {
   missing_name: 'Escribe tu nombre.',
   missing_password: 'Escribe tu contraseña.',
   invalid_email: 'Revisa el correo: parece incompleto.',
+  invalid_phone: 'Escribe un celular de 9 dígitos que empiece con 9, o déjalo vacío.',
   wrong_password: 'La contraseña no es correcta.',
   other_account:
     'Este correo ya pertenece a otro equipo del CRM. Usa otro correo para unirte.',
@@ -147,6 +155,7 @@ export default function JoinPage() {
   const [modo, setModo] = useState<Modo>('crear');
   const [nombre, setNombre] = useState('');
   const [correo, setCorreo] = useState('');
+  const [celular, setCelular] = useState('');
   const [clave, setClave] = useState('');
   const [verClave, setVerClave] = useState(false);
   // WhatsApp links: the typed email is shown back before creating.
@@ -224,7 +233,13 @@ export default function JoinPage() {
     const res = await fetch(`/api/invitations/${encodeURIComponent(token!)}/enter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode, email: correo, password: clave, full_name: nombre }),
+      body: JSON.stringify({
+        mode,
+        email: correo,
+        password: clave,
+        full_name: nombre,
+        phone: celular.trim() || undefined,
+      }),
     });
     const body = (await res.json().catch(() => ({}))) as {
       ok?: boolean;
@@ -375,7 +390,7 @@ export default function JoinPage() {
           Entrarás como{' '}
           <span className="inline-flex items-center gap-1 text-foreground">
             <ShieldCheck className="size-3.5 text-primary" />
-            {ROLE_LABEL[invite.role]}
+            {cargoDeInvitacion(invite)}
           </span>
           . {titulo}.
         </CardDescription>
@@ -430,6 +445,23 @@ export default function JoinPage() {
                   maxLength={80}
                   onChange={(e) => setNombre(e.target.value)}
                   placeholder="Ej. Carlos Merino"
+                  className="h-11 text-base"
+                />
+              </div>
+            )}
+
+            {invite.area === 'promueve' && modo === 'crear' && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="celular">Tu celular (opcional)</Label>
+                <Input
+                  id="celular"
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={celular}
+                  maxLength={20}
+                  onChange={(e) => setCelular(e.target.value)}
+                  placeholder="9XX XXX XXX"
                   className="h-11 text-base"
                 />
               </div>

@@ -1,8 +1,14 @@
 // ============================================================
 // /api/account/invitations
 //
-//   GET  — list outstanding (un-redeemed, non-expired) invites.
+//   GET  — list outstanding (un-redeemed, non-expired) invites. With
+//          ?todas=1 also the accepted and expired ones of the last 60 days,
+//          each with an `estado` (pendiente | aceptada | vencida).
 //   POST — create an invite and, when an email is given, send it.
+//
+// A body may carry `area: 'promueve'` (only with role 'agent', migration
+// 091): the external Promueve advisors join through the very same link as
+// the team and land with the restricted view.
 //
 // Both admin+. Only owners may invite with role 'owner' (migration 040
 // enforces the same rule in the database). The Members tab and the
@@ -29,6 +35,7 @@ import {
 } from "@/lib/auth/invitations";
 import { isAccountRole } from "@/lib/auth/roles";
 import { corsPreflight, withCors } from "@/lib/cors";
+import { areaDeInvitacion, estadoInvitacion } from "@/lib/promueve/invitacion";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -40,7 +47,8 @@ const MAX_NAME_LEN = 80;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function GET(request: Request) {
-  return withCors(request, await listInvitations());
+  const todas = new URL(request.url).searchParams.get("todas") === "1";
+  return withCors(request, await listInvitations(todas));
 }
 
 export async function POST(request: Request) {
@@ -51,19 +59,33 @@ export function OPTIONS(request: Request) {
   return corsPreflight(request);
 }
 
-async function listInvitations(): Promise<Response> {
+const LIST_COLUMNS =
+  "id, role, email, label, created_by_user_id, created_at, expires_at, accepted_at, accepted_by_user_id";
+const DIAS_HISTORIAL = 60;
+
+async function listInvitations(todas = false): Promise<Response> {
   try {
     const ctx = await requireRole("admin");
 
-    const { data, error } = await ctx.supabase
-      .from("account_invitations")
-      .select(
-        "id, role, email, label, created_by_user_id, created_at, expires_at, accepted_at, accepted_by_user_id",
-      )
-      .eq("account_id", ctx.accountId)
-      .is("accepted_at", null)
-      .gt("expires_at", new Date().toISOString())
-      .order("created_at", { ascending: false });
+    const consulta = (columnas: string) => {
+      let q = ctx.supabase
+        .from("account_invitations")
+        .select(columnas)
+        .eq("account_id", ctx.accountId)
+        .order("created_at", { ascending: false });
+      if (todas) {
+        const desde = new Date(Date.now() - DIAS_HISTORIAL * 86_400_000);
+        q = q.gt("created_at", desde.toISOString()).limit(100);
+      } else {
+        q = q.is("accepted_at", null).gt("expires_at", new Date().toISOString());
+      }
+      return q;
+    };
+
+    // Con la migración 091 la lista trae el área. Mientras no esté aplicada
+    // (42703: la columna no existe) se sirve igual, sin ella.
+    let { data, error } = await consulta(`${LIST_COLUMNS}, area`);
+    if (error?.code === "42703") ({ data, error } = await consulta(LIST_COLUMNS));
 
     if (error) {
       console.error("[GET /api/account/invitations] fetch error:", error);
@@ -73,7 +95,15 @@ async function listInvitations(): Promise<Response> {
       );
     }
 
-    return NextResponse.json({ invitations: data ?? [] });
+    const filas = (data ?? []) as unknown as Array<{
+      accepted_at: string | null;
+      expires_at: string;
+    }>;
+    return NextResponse.json({
+      invitations: todas
+        ? filas.map((f) => ({ ...f, estado: estadoInvitacion(f) }))
+        : filas,
+    });
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -100,6 +130,7 @@ async function createInvitation(request: Request): Promise<Response> {
           label?: unknown;
           email?: unknown;
           full_name?: unknown;
+          area?: unknown;
         }
       | null;
 
@@ -125,6 +156,16 @@ async function createInvitation(request: Request): Promise<Response> {
         { status: 403 },
       );
     }
+
+    // Promueve (migración 091): solo con rol 'agent'. Un administrador puede
+    // invitar agentes, así que también puede invitar Promueve. El área solo
+    // la recibe quien canjea el enlace siendo un invitado nuevo; la RPC
+    // redeem_invitation rechaza a quien ya es miembro o tiene datos.
+    const areaCheck = areaDeInvitacion(body?.area, role);
+    if (!areaCheck.ok) {
+      return NextResponse.json({ error: areaCheck.error }, { status: 400 });
+    }
+    const area = areaCheck.area;
 
     const expiresInDaysRaw = body?.expiresInDays;
     // `clampExpiryDays` tolerates undefined / NaN / negatives by
@@ -179,8 +220,15 @@ async function createInvitation(request: Request): Promise<Response> {
         created_by_user_id: ctx.userId,
         label,
         expires_at: expiresAt.toISOString(),
+        // Sin área no se manda la columna: así la creación sigue andando
+        // aunque la 091 todavía no esté aplicada.
+        ...(area ? { area } : {}),
       })
-      .select("id, role, email, label, expires_at, created_at")
+      .select(
+        area
+          ? "id, role, area, email, label, expires_at, created_at"
+          : "id, role, email, label, expires_at, created_at",
+      )
       .single();
 
     if (error || !data) {
