@@ -19,6 +19,19 @@ describe("cambio de cuenta", () => {
     expect(assign).toHaveBeenCalledWith(id === null ? "/saas-owner" : "/dashboard");
   });
 
+  it.each([
+    ["/collections", "/collections"],
+    ["//evil.com", "/dashboard"],
+    ["https://evil.com", "/dashboard"],
+  ])("tras entrar a una cuenta va al destino %s solo si es una ruta propia", async (destino, esperado) => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", { location: { assign } });
+    vi.stubGlobal("localStorage", { setItem: vi.fn() });
+    const rpc = vi.fn().mockResolvedValue({ error: null });
+    await switchPlatformAccount({ rpc } as unknown as SupabaseClient, "client", destino);
+    expect(assign).toHaveBeenCalledWith(esperado);
+  });
+
   it("conserva la pantalla y no avisa a otras pestañas si falla el RPC", async () => {
     const assign = vi.fn();
     const setItem = vi.fn();
