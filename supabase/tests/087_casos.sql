@@ -328,6 +328,7 @@ BEGIN
      OR (v_panel->'byMonth'->>0) IS NULL THEN
     RAISE EXCEPTION 'FALLO panel por mes: %', v_panel->'byMonth';
   END IF;
+  IF jsonb_array_length(v_panel->'projects') <> 2 THEN RAISE EXCEPTION 'FALLO panel proyectos: %', v_panel->'projects'; END IF;
   IF jsonb_array_length(v_panel->'pending') <> 2 THEN RAISE EXCEPTION 'FALLO panel pendientes: %', v_panel->'pending'; END IF;
 
   -- Filtro por caja y por otro mes.

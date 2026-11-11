@@ -339,6 +339,8 @@ BEGIN
       'companies', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name,
                   'responsible', (SELECT COALESCE(NULLIF(u.full_name, ''), u.email) FROM public.profiles u WHERE u.user_id = c.responsible_user_id))
                   ORDER BY c.name) FROM public.cash_companies c WHERE c.account_id = a), '[]'::jsonb),
+      'projects', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', p.id, 'name', p.name) ORDER BY p.name)
+                  FROM public.real_estate_projects p WHERE p.account_id = a), '[]'::jsonb),
       'pending', COALESCE((SELECT jsonb_agg(jsonb_build_object('id', t.id, 'companyId', t.company_id, 'companyName', c.name,
                   'date', t.occurred_on, 'concept', t.concept, 'counterparty', t.counterparty, 'amountCents', t.amount_cents,
                   'rubro', t.rubro, 'projectId', t.project_id, 'projectGeneral', t.project_general)

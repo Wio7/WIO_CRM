@@ -73,6 +73,7 @@ export interface CashPanel {
   byCompany: (PanelRow & { id: string; name: string; responsible: string | null })[];
   byMonth: { month: string; cents: number }[];
   companies: { id: string; name: string; responsible: string | null }[];
+  projects: { id: string; name: string }[];
   pending: {
     id: string; companyId: string; companyName: string; date: string; concept: string;
     counterparty: string; amountCents: number; rubro: Rubro | null; projectId: string | null; projectGeneral: boolean;
