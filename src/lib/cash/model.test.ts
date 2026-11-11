@@ -28,6 +28,8 @@ describe('cash amounts and commands', () => {
     concept: 'Taxi',
     counterparty: 'Proveedor',
     date: '2026-01-05',
+    rubro: 'otros',
+    projectGeneral: true,
   };
   it('accepts valid entries and rejects fractional cents or invalid dates', () => {
     expect(validateCommand(entry)).toEqual(entry);
