@@ -22,6 +22,7 @@ import {
   Pencil,
   Mic,
   Building2,
+  BarChart3,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -31,9 +32,13 @@ import {
   type CashEntry,
   type CashCompany,
   type CashSnapshot,
+  type CashFormOptions,
 } from '@/lib/cash/model';
+import { proponerClasificacion } from '@/lib/cash/clasificar';
+import { CamposClasificacion, Clasificacion, leerProyecto } from './clasificacion';
+import { PanelGerencia } from './panel-gerencia';
 
-type Panel = 'overview' | 'movements' | 'budgets' | 'access' | 'audit';
+type Panel = 'overview' | 'movements' | 'budgets' | 'access' | 'audit' | 'gerencia';
 type Modal = 'income' | 'expense' | 'budget' | 'edit' | CashEntry | null;
 const demoCompanies: CashCompany[] = [
   { id: 'demo', name: 'Golden Habitat · Inmobiliaria', role: 'owner' },
@@ -61,6 +66,9 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [uncertain, setUncertain] = useState(false);
+  const [options, setOptions] = useState<CashFormOptions | null>(null);
+  const [accessPanel, setAccessPanel] = useState(false);
+  const [soloPanel, setSoloPanel] = useState(false);
   const pending = useRef<Record<string, unknown> | null>(null);
   const sequence = useRef(0);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -203,6 +211,49 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
     if (modal) dialog.current?.showModal();
     else dialog.current?.close();
   }, [modal]);
+  const loadOptions = useCallback(async () => {
+    if (demo || !selectedCompanyId) {
+      setOptions(null);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/caja/opciones?companyId=${encodeURIComponent(selectedCompanyId)}`, { cache: 'no-store' });
+      if (res.ok) setOptions(await res.json());
+    } catch {
+      // Las opciones son un complemento: sin ellas el formulario sigue funcionando.
+    }
+  }, [demo, selectedCompanyId]);
+  useEffect(() => {
+    void loadOptions();
+  }, [loadOptions]);
+  useEffect(() => {
+    if (demo) return;
+    fetch('/api/caja/opciones', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => setAccessPanel(Boolean(b?.canPanel)))
+      .catch(() => undefined);
+  }, [demo]);
+  // Propone rubro y proyecto a partir del concepto, solo si siguen sin elegir.
+  function suggest(text: string) {
+    const rubro = dialog.current?.querySelector<HTMLSelectElement>('[name="rubro"]');
+    const project = dialog.current?.querySelector<HTMLSelectElement>('[name="projectChoice"]');
+    if (!rubro || !project) return;
+    const p = proponerClasificacion(text, options?.projects ?? []);
+    if (!rubro.value && p.rubro) rubro.value = p.rubro;
+    if (!project.value && p.projectId) project.value = p.projectId;
+  }
+  async function changeResponsible(userId: string) {
+    if (!selectedCompanyId) return;
+    const res = await fetch('/api/caja/opciones', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ companyId: selectedCompanyId, userId: userId || null }),
+    });
+    if (res.ok) {
+      setNotice('Responsable actualizado.');
+      await loadOptions();
+    } else setError((await res.json().catch(() => ({}))).error || 'No se pudo cambiar al responsable.');
+  }
   function open(next: Modal) {
     pending.current = null;
     setUncertain(false);
@@ -272,6 +323,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
                   date: values.get('date'),
                   budgetId:
                     modal === 'expense' || (modal === 'edit' && editing?.kind === 'expense') ? values.get('budgetId') || null : null,
+                  ...(modal === 'expense' ? { rubro: values.get('rubro'), ...leerProyecto(values.get('projectChoice')) } : {}),
                 };
       }
       setSaving(true);
@@ -346,6 +398,15 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
           .toLocaleLowerCase('es')
           .includes(query.toLocaleLowerCase('es'))
     ) ?? [];
+  if (!selectedCompanyId && !demo && (soloPanel || (accessPanel && !loading && companies.length === 0))) return (
+    <div className="cash-company-screen">
+      <header className="cash-company-header"><span className="cash-company-logo"><Wallet size={24} /> Panel de gerencia</span><Link href="/dashboard">Ir a Wio CRM <ArrowUpRight size={15} /></Link></header>
+      <main className="cash-company-main">
+        {companies.length > 0 && <button className="cash-button secondary" onClick={() => setSoloPanel(false)}>Volver a las cajas</button>}
+        <PanelGerencia />
+      </main>
+    </div>
+  );
   if (!selectedCompanyId && !loading) return (
     <div className="cash-company-screen">
       <header className="cash-company-header"><span className="cash-company-logo"><Wallet size={24} /> Golden Caja</span><Link href="/dashboard">Ir a Wio CRM <ArrowUpRight size={15} /></Link></header>
@@ -360,6 +421,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
           <span className="cash-company-card-copy"><strong>{company.name}</strong><small>{company.role === 'owner' ? 'Acceso de propietario' : 'Mi caja'}</small></span>
           <ArrowRight size={19} />
         </button>)}</div>
+        {accessPanel && !demo && companies.length > 0 && <button className="cash-button primary" onClick={() => setSoloPanel(true)}><BarChart3 size={17} /> Panel de gerencia</button>}
         {!companies.length && <div className="cash-card cash-empty"><Building2 size={30} /><h2>No hay empresas habilitadas</h2><p>El propietario debe asignarte acceso a una caja.</p></div>}
         {companies.some((c) => c.role === 'owner') && !demo && <form className="cash-company-create" onSubmit={addCompany}><label htmlFor="cash-company-name">Agregar otra empresa</label><div><input id="cash-company-name" value={newCompanyName} onChange={(e) => setNewCompanyName(e.target.value)} maxLength={100} placeholder="Nombre de la empresa" required /><button className="cash-button primary" disabled={saving} type="submit"><Plus size={17} /> Crear empresa</button></div></form>}
       </main>
@@ -369,6 +431,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
     { id: 'overview' as const, label: 'Resumen', icon: LayoutGrid },
     { id: 'movements' as const, label: 'Movimientos', icon: List },
     { id: 'budgets' as const, label: 'Presupuestos', icon: ChartPie },
+    ...(options?.canPanel ? [{ id: 'gerencia' as const, label: 'Gerencia', icon: BarChart3 }] : []),
     ...(data?.role === 'owner'
       ? [{ id: 'audit' as const, label: 'Historial', icon: History }, { id: 'access' as const, label: 'Accesos', icon: Users }]
       : []),
@@ -414,6 +477,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
             <span className="cash-divider">/</span> Caja principal
           </span>
           <button className="cash-switch-company" onClick={leaveCompany}><Building2 size={16} /> Cambiar empresa</button>
+          {options?.responsible && <span className="cash-responsible">Responsable de la caja: <strong>{options.responsible.name}</strong></span>}
           <span className="cash-currency">{data?.role === 'owner' ? 'Todas las cajas' : 'Mi caja'} · PEN</span>
         </header>
         <main className="cash-main">
@@ -436,7 +500,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
                     ? 'Cada movimiento cuenta.'
                     : panel === 'budgets'
                       ? 'Un plan para cada gasto.'
-                      : panel === 'audit' ? 'Cada cambio, a la vista.' : 'Las personas correctas.'}
+                      : panel === 'audit' ? 'Cada cambio, a la vista.' : panel === 'gerencia' ? 'Cuánto cuesta cada proyecto.' : 'Las personas correctas.'}
               </h1>
               <p>
                 {panel === 'overview'
@@ -445,7 +509,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
                     ? 'Consulta los registros y quién los realizó.'
                     : panel === 'budgets'
                       ? 'Asignar un presupuesto no descuenta dinero de tu caja.'
-                      : panel === 'audit' ? 'Consulta quién cambió qué, cuándo y por qué.' : 'El acceso a ventas no concede acceso a caja.'}
+                      : panel === 'audit' ? 'Consulta quién cambió qué, cuándo y por qué.' : panel === 'gerencia' ? 'Gasto por proyecto, rubro, mes y caja.' : 'El acceso a ventas no concede acceso a caja.'}
               </p>
             </div>
             <div className="cash-heading-tools">{!demo && companyId && <a className="cash-button secondary" href={`/api/caja/export?companyId=${encodeURIComponent(companyId)}`}><Download size={16} /> Descargar Excel</a>}<button className="cash-icon-button" onClick={() => void refresh()} aria-label="Actualizar caja"><RefreshCw size={18} /></button></div>
@@ -660,6 +724,17 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
                                     <small className="cash-compact-meta">
                                       {e.occurred_on} · {e.actor_name}
                                     </small>
+                                    {e.kind === 'expense' && !e.reversed && !e.reversal_of && (
+                                      <Clasificacion
+                                        entryId={e.id}
+                                        rubro={e.rubro}
+                                        projectId={e.project_id}
+                                        projectGeneral={e.project_general}
+                                        projects={options?.projects ?? []}
+                                        canEdit={!demo && (Boolean(options?.canPanel) || (canWrite && (data.role === 'owner' || e.created_by === data.viewerId)))}
+                                        onDone={() => void refresh()}
+                                      />
+                                    )}
                                   </span>
                                 </div>
                               </td>
@@ -809,6 +884,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
                   )}
                 </section>
               )}
+              {panel === 'gerencia' && options?.canPanel && <PanelGerencia />}
               {panel === 'access' && data.role === 'owner' && (
                 <section className="cash-card">
                   <div className="cash-section-head">
@@ -820,6 +896,15 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
                       </p>
                     </div>
                   </div>
+                  {options?.canSetResponsible && (
+                    <div className="cash-responsible">
+                      Responsable de la caja
+                      <select aria-label="Responsable de la caja" value={options.responsible?.userId ?? ''} onChange={(ev) => void changeResponsible(ev.target.value)}>
+                        <option value="">Sin responsable</option>
+                        {options.people.map((p) => <option key={p.userId} value={p.userId}>{p.name}</option>)}
+                      </select>
+                    </div>
+                  )}
                   {data.members.map((m) => (
                     <div className="cash-member" key={m.user_id}>
                       <strong>{m.name}</strong>
@@ -973,6 +1058,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
                           required
                           maxLength={200}
                           defaultValue={modal === 'edit' ? editing?.concept : undefined}
+                          onBlur={modal === 'expense' ? (ev) => suggest(ev.currentTarget.value) : undefined}
                         />
                         <button type="button" className="cash-voice" onClick={() => dictate('concept')}><Mic size={15} /> {listening === 'concept' ? 'Escuchando…' : 'Dictar concepto'}</button>
                       </label>
@@ -1009,6 +1095,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
                           </select>
                         </label>
                       )}
+                      {modal === 'expense' && <CamposClasificacion projects={options?.projects ?? []} required />}
                       {modal === 'edit' && <label>Motivo del cambio<textarea name="reason" required minLength={3} maxLength={180} placeholder="Explica por qué se corrige este registro" /><button type="button" className="cash-voice" onClick={() => dictate('reason')}><Mic size={15} /> {listening === 'reason' ? 'Escuchando…' : 'Dictar motivo'}</button></label>}
                     </>
                   )}
