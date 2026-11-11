@@ -52,7 +52,7 @@ export const MODULES: readonly ModuleDef[] = [
   { href: "/coupons", label: "Cupones y referidos", area: "ventas" },
   { href: "/payment-plans", label: "Cuotas", area: "finanzas", accessKey: "cronograma" },
   { href: "/collections", label: "Cobranzas", area: "finanzas", requires: ["/payment-plans"], accessKey: "cobranzas" },
-  { href: "/caja", label: "Golden Caja", area: "finanzas" },
+  { href: "/caja", label: "Caja chica", area: "finanzas" },
   { href: "/calendar", label: "Calendario", area: "agenda" },
   { href: "/automations", label: "Automatizaciones", area: "automatizacion" },
   { href: "/flows", label: "Flujos", area: "automatizacion" },
