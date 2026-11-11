@@ -102,6 +102,71 @@ export async function notifyConversation(
   );
 }
 
+export interface TeamPush {
+  accountId: string;
+  /** Quien originó el aviso: él ya lo sabe, no se le manda. */
+  exceptUserId?: string | null;
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+}
+
+/**
+ * Avisar a TODO el equipo de una cuenta (todos menos "solo lectura", que
+ * son clientes e invitados). Lo usa la Golden App cuando se reserva un lote.
+ * Nunca lanza; las suscripciones vencidas (404/410) se borran.
+ * @returns cuántos celulares recibieron el aviso.
+ */
+export async function notifyTeam(db: SupabaseClient, push: TeamPush): Promise<number> {
+  if (!ensureConfigured()) return 0;
+
+  const { data: perfiles } = await db
+    .from('profiles')
+    .select('user_id, account_role')
+    .eq('account_id', push.accountId)
+    .neq('account_role', 'viewer');
+  const recipients = (perfiles ?? [])
+    .map((p) => p.user_id as string)
+    .filter((id) => id && id !== push.exceptUserId);
+  if (recipients.length === 0) return 0;
+
+  const { data: subscriptions } = await db
+    .from('push_subscriptions')
+    .select('id, endpoint, p256dh, auth')
+    .in('user_id', recipients);
+  if (!subscriptions?.length) return 0;
+
+  const payload = JSON.stringify({
+    title: truncate(push.title, 60),
+    body: truncate(push.body, 140),
+    url: push.url,
+    tag: push.tag,
+  });
+
+  let sent = 0;
+  await Promise.all(
+    subscriptions.map(async (s) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+          payload,
+          { TTL: 3600, urgency: 'high' }
+        );
+        sent += 1;
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410) {
+          await db.from('push_subscriptions').delete().eq('id', s.id);
+        } else {
+          console.error('[push] team send failed:', status, (err as Error).message);
+        }
+      }
+    })
+  );
+  return sent;
+}
+
 /**
  * Avisar al CLIENTE en su celular (Golden App, migración 048).
  *
