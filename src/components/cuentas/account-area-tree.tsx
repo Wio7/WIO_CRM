@@ -9,7 +9,7 @@
 // abajo, a lo ancho.
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Copy, ExternalLink, Layers, LogIn, Smartphone, User } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,6 +34,18 @@ export interface AccountAreaTreeProps {
   onEntrarErp?: (href: string) => void | Promise<void>;
   /** Ruta ERP que se está abriendo ahora (deshabilita los botones). */
   entrandoHref?: string | null;
+  /**
+   * Personas del negocio que además tienen una cuenta propia aparte (id de la
+   * persona -> su cuenta). Solo la vista del super admin la pasa.
+   */
+  cuentasAparte?: Map<string, CuentaAparte>;
+  /** Botones de esa cuenta aparte (Entrar y su menú). */
+  renderCuentaAparte?: (cuenta: CuentaAparte) => ReactNode;
+}
+
+export interface CuentaAparte {
+  id: string;
+  name: string;
 }
 
 function origenActual(): string | undefined {
@@ -49,7 +61,13 @@ async function copiarLink(url: string) {
   }
 }
 
-function Persona({ p }: { p: PersonaArbol }) {
+interface AparteProps {
+  cuentasAparte?: Map<string, CuentaAparte>;
+  renderCuentaAparte?: (cuenta: CuentaAparte) => ReactNode;
+}
+
+function Persona({ p, cuentasAparte, renderCuentaAparte }: { p: PersonaArbol } & AparteProps) {
+  const aparte = cuentasAparte?.get(p.id);
   return (
     <li className="flex items-start gap-2 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2">
       <User className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -65,13 +83,22 @@ function Persona({ p }: { p: PersonaArbol }) {
           <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-400">
             {p.estado}
           </span>
+          {aparte && (
+            <span
+              className="rounded-md border border-white/10 bg-white/[0.03] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              title={`Cuenta aparte: ${aparte.name}`}
+            >
+              Tiene una cuenta aparte
+            </span>
+          )}
         </div>
       </div>
+      {aparte && renderCuentaAparte && <div className="shrink-0">{renderCuentaAparte(aparte)}</div>}
     </li>
   );
 }
 
-function Personas({ rama }: { rama: RamaArbol }) {
+function Personas({ rama, cuentasAparte, renderCuentaAparte }: { rama: RamaArbol } & AparteProps) {
   if (rama.personas.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
@@ -82,7 +109,7 @@ function Personas({ rama }: { rama: RamaArbol }) {
   return (
     <ul className="grid gap-2 lg:grid-cols-2">
       {rama.personas.map((p) => (
-        <Persona key={p.id} p={p} />
+        <Persona key={p.id} p={p} cuentasAparte={cuentasAparte} renderCuentaAparte={renderCuentaAparte} />
       ))}
     </ul>
   );
@@ -121,7 +148,18 @@ function Acciones({
   const tam = ancho ? "h-11 w-full rounded-xl" : "h-9 rounded-xl";
   const titleApagada = apagada ? "Este módulo está apagado en la cuenta" : undefined;
 
-  const erp = onEntrarErp ? (
+  const erp = rama.sinErp ? (
+    <Button
+      type="button"
+      variant="outline"
+      className={`${tam} border-white/10`}
+      disabled
+      title="Esta gente es externa: no tiene acceso al ERP"
+    >
+      <LogIn className="h-4 w-4" />
+      Sin acceso al ERP
+    </Button>
+  ) : onEntrarErp ? (
     <Button
       type="button"
       variant="outline"
@@ -186,7 +224,14 @@ function Acciones({
   );
 }
 
-export function AccountAreaTree({ cuenta, miembros, onEntrarErp, entrandoHref }: AccountAreaTreeProps) {
+export function AccountAreaTree({
+  cuenta,
+  miembros,
+  onEntrarErp,
+  entrandoHref,
+  cuentasAparte,
+  renderCuentaAparte,
+}: AccountAreaTreeProps) {
   const ramas = useMemo(() => armarArbol(miembros, cuenta, origenActual()), [miembros, cuenta]);
 
   return (
@@ -209,7 +254,7 @@ export function AccountAreaTree({ cuenta, miembros, onEntrarErp, entrandoHref }:
               {rama.app && <p className="text-[11px] text-muted-foreground">{rama.app.nombre}</p>}
             </div>
             <div className="min-w-0 flex-1">
-              <Personas rama={rama} />
+              <Personas rama={rama} cuentasAparte={cuentasAparte} renderCuentaAparte={renderCuentaAparte} />
             </div>
             <div className="shrink-0">
               <Acciones rama={rama} ancho={false} onEntrarErp={onEntrarErp} entrandoHref={entrandoHref} />
@@ -226,7 +271,7 @@ export function AccountAreaTree({ cuenta, miembros, onEntrarErp, entrandoHref }:
               <EstadoArea estado={rama.estado} />
             </div>
             {rama.app && <p className="text-[11px] text-muted-foreground">{rama.app.nombre}</p>}
-            <Personas rama={rama} />
+            <Personas rama={rama} cuentasAparte={cuentasAparte} renderCuentaAparte={renderCuentaAparte} />
             <Acciones rama={rama} ancho onEntrarErp={onEntrarErp} entrandoHref={entrandoHref} />
           </div>
         </section>

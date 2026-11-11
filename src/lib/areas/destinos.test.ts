@@ -83,7 +83,7 @@ describe("destinoDeArea", () => {
   });
 
   it("orden fijo de areas", () => {
-    expect(AREA_KEYS).toEqual(["gerencia", "ventas", "legal", "cobranzas", "contabilidad", "marketing", "tecnica", "sin_area"]);
+    expect(AREA_KEYS).toEqual(["gerencia", "ventas", "promueve", "legal", "cobranzas", "contabilidad", "marketing", "tecnica", "sin_area"]);
   });
 });
 
@@ -109,5 +109,22 @@ describe("puedeVerCuentas", () => {
     expect(puedeVerCuentas({ role: "admin", area: "ventas" })).toBe(false);
     expect(puedeVerCuentas({ role: "agent", area: null })).toBe(false);
     expect(puedeVerCuentas({ role: null, area: "gerencia" })).toBe(false);
+  });
+});
+
+describe("destinoDeArea promueve", () => {
+  it("Promueve (externos): sin ERP; app Golden App solo en Golden", () => {
+    expect(destinoDeArea("promueve", golden, ORIGEN)).toMatchObject({
+      key: "promueve",
+      label: "Promueve (externos)",
+      sinErp: true,
+      estado: "activa",
+      app: { nombre: "Golden App", url: "https://golden.wiocompany.com" },
+    });
+    expect(destinoDeArea("promueve", otra, ORIGEN).app).toBeNull();
+  });
+
+  it("las demas areas conservan su ERP (sinErp no esta puesto)", () => {
+    expect(destinoDeArea("ventas", golden, ORIGEN).sinErp).toBeUndefined();
   });
 });

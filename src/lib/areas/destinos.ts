@@ -11,6 +11,7 @@ import type { AccountRole } from "@/lib/auth/roles";
 export const AREA_KEYS = [
   "gerencia",
   "ventas",
+  "promueve",
   "legal",
   "cobranzas",
   "contabilidad",
@@ -25,6 +26,7 @@ export type RamaKey = AreaKey | "tienda";
 export const AREA_LABEL: Record<RamaKey, string> = {
   gerencia: "Gerencia",
   ventas: "Ventas",
+  promueve: "Promueve (externos)",
   legal: "Legal",
   cobranzas: "Cobranzas",
   contabilidad: "Contabilidad",
@@ -50,8 +52,10 @@ export interface AppDestino {
 export interface Destino {
   key: RamaKey;
   label: string;
-  /** Ruta del módulo en el ERP, dentro de la misma cuenta. */
+  /** Ruta del módulo en el ERP, dentro de la misma cuenta. Vacía si sinErp. */
   erpHref: string;
+  /** true = esta gente no entra al ERP (Promueve): el botón sale deshabilitado. */
+  sinErp?: boolean;
   /** null = el área todavía no tiene app ("App en camino"). */
   app: AppDestino | null;
   /** Encendida o apagada según accounts.disabled_modules. */
@@ -88,6 +92,15 @@ export function destinoDeArea(area: AreaKey, cuenta: CuentaDestino, origen?: str
         app: golden ? { nombre: "Golden App (ventas)", url: GOLDEN_VENTAS_URL } : null,
       };
     }
+    case "promueve":
+      // Externos de venta por comisión: no son del equipo y no tienen ERP.
+      return {
+        ...base,
+        erpHref: "",
+        sinErp: true,
+        estado: "activa",
+        app: golden ? { nombre: "Golden App", url: GOLDEN_VENTAS_URL } : null,
+      };
     case "legal":
       return {
         ...base,
