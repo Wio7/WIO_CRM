@@ -1,8 +1,10 @@
 // ============================================================
-// /api/golden/separacion-aprobada — "Lote separado", a todo el equipo
+// /api/golden/separacion-aprobada — avisos de etapa de un lote, a todo
+// el equipo: "Lote en proceso" (solicitada), "Lote separado" (aprobada)
+// y "Lote vendido" (vendida). Un solo endpoint; el nombre es el original.
 //
-//   POST Bearer <sesión del CRM de quien aprobó>
-//        { solicitud_id, nombre_proyecto? }
+//   POST Bearer <sesión del CRM de quien actuó>
+//        { solicitud_id, nombre_proyecto?, evento? }   evento por defecto: "aprobada"
 //     → { ok: true, enviados, duplicado? } | { ok: false, reason }
 //
 // La aprobación vive en la base del catálogo (otra base); las
@@ -10,10 +12,11 @@
 // disparar avisos falsos, el cuerpo NO trae lote ni asesor: sólo el id
 // de la solicitud. El servidor:
 //   1. exige una sesión del CRM de un miembro (no "solo lectura");
-//   2. le pregunta al catálogo si esa solicitud está APROBADA y es
-//      reciente (función gh_aviso_separacion, sin datos del cliente);
-//   3. reserva el aviso en golden_separacion_avisos (migración 088):
-//      un solo aviso por solicitud, aunque la llamen diez veces;
+//   2. le pregunta al catálogo si el lote de esa solicitud está de verdad
+//      en la etapa del evento y es reciente (función gh_aviso_separacion,
+//      sin datos del cliente);
+//   3. reserva el aviso en golden_separacion_avisos (088 + 090): un solo
+//      aviso por solicitud Y evento, aunque la llamen diez veces;
 //   4. arma él mismo el texto y avisa a todo el equipo de la cuenta.
 // Si no salió a ningún celular, libera la reserva para poder reintentar.
 // ============================================================
@@ -24,8 +27,11 @@ import { corsPreflight, withCors } from "@/lib/cors";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import {
   armarAvisoSeparacion,
-  consultarSeparacionAprobada,
+  consultarAvisoSeparacion,
+  esEvento,
   esUuid,
+  EVENTO_POR_DEFECTO,
+  instanteDelEvento,
   solicitudReciente,
 } from "@/lib/golden/aviso-separacion";
 import { notifyTeam } from "@/lib/push/send";
@@ -59,11 +65,17 @@ export async function POST(request: Request) {
   const solicitudId = body?.solicitud_id;
   if (!esUuid(solicitudId)) return responder(request, { ok: false, reason: "invalid_input" }, 400);
 
-  const consulta = await consultarSeparacionAprobada(solicitudId);
+  // Un cliente anterior no manda el evento: se entiende "aprobada".
+  const evento = body?.evento ?? EVENTO_POR_DEFECTO;
+  if (!esEvento(evento)) return responder(request, { ok: false, reason: "invalid_input" }, 400);
+
+  const consulta = await consultarAvisoSeparacion(solicitudId, evento);
   if (consulta.estado === "sin_config") return responder(request, { ok: false, reason: "not_configured" }, 503);
   if (consulta.estado === "error") return responder(request, { ok: false, reason: "catalog_unavailable" }, 502);
-  if (consulta.estado === "no_aprobada") return responder(request, { ok: false, reason: "not_approved" }, 409);
-  if (!solicitudReciente(consulta.solicitud.resuelta)) {
+  if (consulta.estado === "no_aprobada") {
+    return responder(request, { ok: false, reason: evento === "aprobada" ? "not_approved" : "not_in_stage" }, 409);
+  }
+  if (!solicitudReciente(instanteDelEvento(consulta.solicitud, evento))) {
     return responder(request, { ok: false, reason: "too_old" }, 409);
   }
 
@@ -73,7 +85,7 @@ export async function POST(request: Request) {
   // Candado de idempotencia: la clave primaria deja pasar a uno solo.
   const { error: choque } = await db
     .from("golden_separacion_avisos")
-    .insert({ solicitud_id: solicitudId, account_id: accountId, enviado_por: user.id });
+    .insert({ solicitud_id: solicitudId, evento, account_id: accountId, enviado_por: user.id });
   if (choque) {
     if (choque.code === "23505") return responder(request, { ok: true, enviados: 0, duplicado: true });
     console.error("[golden/separacion-aprobada] no se pudo reservar:", choque.message);
@@ -82,6 +94,7 @@ export async function POST(request: Request) {
 
   const { proyecto, lote, asesor } = consulta.solicitud;
   const aviso = armarAvisoSeparacion({
+    evento,
     proyecto,
     nombreProyecto: typeof body?.nombre_proyecto === "string" ? body.nombre_proyecto : "",
     lote,
@@ -96,7 +109,11 @@ export async function POST(request: Request) {
   }
   if (enviados === 0) {
     // Nadie lo recibió (sin VAPID, sin suscripciones, error): se libera para reintentar.
-    await db.from("golden_separacion_avisos").delete().eq("solicitud_id", solicitudId);
+    await db
+      .from("golden_separacion_avisos")
+      .delete()
+      .eq("solicitud_id", solicitudId)
+      .eq("evento", evento);
   }
   return responder(request, { ok: true, enviados });
 }
