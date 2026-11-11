@@ -25,6 +25,16 @@ export const APPS: Record<AppKey, AppDef> = {
 /** Apps que ya existen como ruta en este repo (el resto no se ofrece como destino). */
 const EXISTENTES: readonly AppKey[] = ["cobranzas", "caja"];
 
+/**
+ * Áreas de gente de afuera de la empresa (089): asesores externos que venden
+ * por comisión desde la Golden App. No figuran en ninguna app de APPS ni en
+ * el ERP web: la base tampoco les abre datos (is_account_member los deja
+ * fuera). Se listan aquí para que ninguna app nueva los admita por error.
+ */
+export const AREAS_EXTERNAS: readonly string[] = ["promueve"];
+
+export const esAreaExterna = (area: string | null): boolean => area !== null && AREAS_EXTERNAS.includes(area);
+
 export interface Viewer {
   /** profiles.area de quien entra (null = sin área). */
   area: string | null;
@@ -33,6 +43,7 @@ export interface Viewer {
 }
 
 export function canEnterApp(app: AppKey, viewer: Viewer): boolean {
+  if (esAreaExterna(viewer.area)) return false;
   if (viewer.isOwner || viewer.isSuperAdmin) return true;
   return viewer.area !== null && APPS[app].areas.includes(viewer.area);
 }

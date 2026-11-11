@@ -123,10 +123,12 @@ export async function notifyTeam(db: SupabaseClient, push: TeamPush): Promise<nu
 
   const { data: perfiles } = await db
     .from('profiles')
-    .select('user_id, account_role')
+    .select('user_id, account_role, area')
     .eq('account_id', push.accountId)
     .neq('account_role', 'viewer');
+  // Los asesores externos (Promueve) no son del equipo: no reciben avisos internos.
   const recipients = (perfiles ?? [])
+    .filter((p) => p.area !== 'promueve')
     .map((p) => p.user_id as string)
     .filter((id) => id && id !== push.exceptUserId);
   if (recipients.length === 0) return 0;
