@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-import "@/app/cobranzas/cobranzas.css";
+import { GoldenBody } from "@/components/apps/golden-frame";
 
 function mensajeDeError(mensaje: string): string {
   if (/invalid login credentials/i.test(mensaje)) {
@@ -58,6 +58,7 @@ function Formulario() {
   }
 
   return (
+    <GoldenBody app="cobranzas">
     <main data-app-login className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
       <form onSubmit={entrar} className="w-full max-w-sm space-y-5 rounded-2xl border border-border bg-card p-6 shadow-sm">
         <div className="flex flex-col items-center gap-2 text-center">
@@ -90,5 +91,6 @@ function Formulario() {
         </p>
       </form>
     </main>
+    </GoldenBody>
   );
 }

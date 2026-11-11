@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { nombreAppCobranzas } from "@/lib/cobranzas/cuenta-servidor";
+import { clasesFuentesGolden } from "@/lib/apps/fuentes";
 
 // App propia de Cobranzas (Fase F4): sin el menú del ERP, con su manifiesto
 // (scope /cobranzas) y su nombre armado desde la cuenta.
@@ -15,8 +16,9 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export const viewport: Viewport = { themeColor: "#0b3d3a", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { themeColor: "#1d0b0f", width: "device-width", initialScale: 1 };
 
 export default function CobranzasLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  // Las fuentes de Golden (Plex y Newsreader) solo se cargan en las apps.
+  return <div className={clasesFuentesGolden}>{children}</div>;
 }
