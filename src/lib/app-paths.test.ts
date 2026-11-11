@@ -48,6 +48,7 @@ describe("isAppPublicPath", () => {
   it("el login y el manifiesto de la app se abren sin sesión", () => {
     expect(isAppPublicPath("/cobranzas/login")).toBe(true);
     expect(isAppPublicPath("/cobranzas/manifest.webmanifest")).toBe(true);
+    expect(isAppPublicPath("/cobranzas/icono/192")).toBe(true);
   });
   it("lo demás de la app pide sesión", () => {
     expect(isAppPublicPath("/cobranzas")).toBe(false);

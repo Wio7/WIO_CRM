@@ -8,8 +8,10 @@ const APP_LOGINS: Record<string, string> = {
   "/cobranzas": "/cobranzas/login",
 };
 
-/** Archivos de una app que se abren sin sesión: su login y su manifiesto. */
+/** Archivos de una app que se abren sin sesión: su login, su manifiesto y sus íconos. */
 const APP_PUBLIC = ["/cobranzas/login", "/cobranzas/manifest.webmanifest"];
+/** Carpetas públicas de una app (íconos). */
+const APP_PUBLIC_DIRS = ["/cobranzas/icono/"];
 
 /** Rutas que piden sesión (se compara por prefijo, como siempre). */
 const PROTECTED_PREFIXES = [
@@ -20,7 +22,7 @@ const PROTECTED_PREFIXES = [
 const dentroDe = (path: string, base: string) => path === base || path.startsWith(base + "/");
 
 export function isAppPublicPath(pathname: string): boolean {
-  return APP_PUBLIC.includes(pathname);
+  return APP_PUBLIC.includes(pathname) || APP_PUBLIC_DIRS.some((d) => pathname.startsWith(d));
 }
 
 export function isProtectedPath(pathname: string): boolean {

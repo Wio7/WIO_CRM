@@ -47,6 +47,9 @@ import {
   type CollectionAction,
   type PromiseState,
 } from "@/lib/collection-actions";
+import { useCollectionsPaths } from "@/components/collections/base-path";
+import { useAppEntry } from "@/hooks/use-my-area";
+import { useRouter } from "next/navigation";
 
 const PAGE = 1000;
 // Ids por consulta .in(): 100 UUID mantienen la URL corta.
@@ -63,6 +66,12 @@ const TRAMO_STYLE: Record<Tramo, string> = {
 const fecha = fechaLima;
 
 export default function CollectionsPage() {
+  const paths = useCollectionsPaths();
+  const router = useRouter();
+  // En el ERP web se ofrece la app propia a quien puede entrar; dentro de la app no hace falta.
+  const appEntry = useAppEntry("cobranzas");
+  const puedeAbrirApp = paths.cliente === null && appEntry.entrada?.ok === true;
+  const abrirCliente = (id: string) => (paths.cliente ? router.push(paths.cliente(id)) : setAbierto(id));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<OverdueInstallment[]>([]);
@@ -311,18 +320,23 @@ export default function CollectionsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+        {puedeAbrirApp && (
+          <Link href="/cobranzas" className={buttonVariants({ size: "sm" })}>
+            <HandCoins className="h-4 w-4" /> Abrir la app de Cobranzas
+          </Link>
+        )}
         {bandeja !== null && (
-          <Link href="/collections/bandeja" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <Link href={`${paths.base}/bandeja`} className={buttonVariants({ variant: "outline", size: "sm" })}>
             <Inbox className="h-4 w-4" /> Bandeja
             {bandeja > 0 && (
               <span className="rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{bandeja}</span>
             )}
           </Link>
         )}
-        <Link href="/collections/vouchers" className={buttonVariants({ variant: "outline", size: "sm" })}>
+        <Link href={`${paths.base}/vouchers`} className={buttonVariants({ variant: "outline", size: "sm" })}>
           <FileText className="h-4 w-4" /> Vouchers
         </Link>
-        <Link href="/collections/daily" className={buttonVariants({ variant: "outline", size: "sm" })}>
+        <Link href={paths.daily} className={buttonVariants({ variant: "outline", size: "sm" })}>
           <CalendarDays className="h-4 w-4" /> Pagos del día
         </Link>
         {esAdmin && accountId && (
@@ -449,7 +463,7 @@ export default function CollectionsPage() {
                     {visibles.map((d) => (
                       <tr key={`${d.contactId}-${d.currency}`} className="border-t border-border hover:bg-muted/30">
                         <td className="px-3 py-2">
-                          <button type="button" className="text-left hover:underline" onClick={() => setAbierto(d.contactId)}>
+                          <button type="button" className="text-left hover:underline" onClick={() => abrirCliente(d.contactId)}>
                             <span className="font-medium">{d.name}</span>
                             {enCausal(d) && <CausalBadge />}
                             <span className="block text-xs text-muted-foreground">{d.phone ?? "Sin teléfono"}</span>
@@ -501,7 +515,7 @@ export default function CollectionsPage() {
                 {visibles.map((d) => (
                   <li key={`${d.contactId}-${d.currency}`} className="rounded-xl border border-border bg-card p-3">
                     <div className="flex items-start justify-between gap-2">
-                      <button type="button" className="text-left" onClick={() => setAbierto(d.contactId)}>
+                      <button type="button" className="text-left" onClick={() => abrirCliente(d.contactId)}>
                         <p className="font-medium">{d.name}</p>
                         {enCausal(d) && <CausalBadge />}
                         <p className="text-xs text-muted-foreground">{d.units.join(", ") || "—"} · {d.projects.join(", ")}</p>
