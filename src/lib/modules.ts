@@ -35,7 +35,7 @@ export interface ModuleDef {
   /** Módulos que este necesita encendidos para funcionar. */
   requires?: readonly string[];
   /** Llave de my_module_access() que hace falta para ver el módulo (084). */
-  accessKey?: "cobranzas" | "legal" | "ventas" | "cronograma";
+  accessKey?: "cobranzas" | "legal" | "ventas" | "cronograma" | "tienda";
 }
 
 /** Registro de módulos (mismo orden que el menú). */
@@ -50,6 +50,7 @@ export const MODULES: readonly ModuleDef[] = [
   { href: "/projects", label: "Proyectos", area: "ventas" },
   { href: "/reservations", label: "Separaciones", area: "ventas", requires: ["/projects"] },
   { href: "/coupons", label: "Cupones y referidos", area: "ventas" },
+  { href: "/store", label: "Tienda", area: "ventas", accessKey: "tienda" },
   { href: "/payment-plans", label: "Cuotas", area: "finanzas", accessKey: "cronograma" },
   { href: "/collections", label: "Cobranzas", area: "finanzas", requires: ["/payment-plans"], accessKey: "cobranzas" },
   { href: "/caja", label: "Golden Caja", area: "finanzas" },
@@ -169,6 +170,15 @@ export const RUBRO_TEMPLATES: ReadonlyArray<{
     disabled: offExcept([
       "/inbox", "/notifications", "/broadcasts", "/contacts", "/pipelines",
       "/coupons", "/payment-plans", "/collections", "/caja", "/calendar", "/automations", "/agents",
+    ]),
+  },
+  {
+    // Vendedor con tienda web: pedidos, productos, contactos y difusiones.
+    key: "comercio",
+    label: "Comercio con tienda web",
+    disabled: offExcept([
+      "/inbox", "/notifications", "/broadcasts", "/contacts", "/store",
+      "/coupons", "/automations", "/agents",
     ]),
   },
   {

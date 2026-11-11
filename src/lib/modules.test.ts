@@ -72,9 +72,9 @@ describe('registro de módulos del ERP', () => {
       expect(inmo).not.toContain(on);
     }
     expect(RUBRO_TEMPLATES.find((t) => t.key === 'barberia')!.disabled).toContain('/reservations');
-    // Solo las cuentas de campañas pasan al inicio simple.
+    // Campañas y comercio (sin embudos) pasan al inicio simple.
     for (const t of RUBRO_TEMPLATES) {
-      expect(isSimpleAccount(t.disabled)).toBe(t.key === 'campanas');
+      expect(isSimpleAccount(t.disabled)).toBe(t.key === 'campanas' || t.key === 'comercio');
     }
   });
 
@@ -119,5 +119,28 @@ describe('visibilidad por acceso de módulo (084)', () => {
   });
   it('sigue respetando los módulos apagados de la cuenta', () => {
     expect(isModuleVisible('/collections', ['/collections'], { cobranzas: true })).toBe(false);
+  });
+});
+
+describe('Tienda (087)', () => {
+  it('es un modulo del area de ventas con su llave de acceso', () => {
+    const m = MODULES.find((x) => x.href === '/store');
+    expect(m?.label).toBe('Tienda');
+    expect(m?.area).toBe('ventas');
+    expect(m?.accessKey).toBe('tienda');
+  });
+  it('se oculta a quien no tiene el modulo y se muestra con el', () => {
+    expect(isModuleVisible('/store', [], { tienda: false })).toBe(false);
+    expect(isModuleVisible('/store', [], { tienda: true })).toBe(true);
+    expect(isModuleVisible('/store', [], null)).toBe(true);
+  });
+  it('la plantilla comercio enciende la tienda y las de otros rubros no', () => {
+    const comercio = RUBRO_TEMPLATES.find((t) => t.key === 'comercio');
+    expect(comercio).toBeDefined();
+    expect(comercio!.disabled).not.toContain('/store');
+    expect(comercio!.disabled).toContain('/projects');
+    for (const t of RUBRO_TEMPLATES.filter((x) => x.key !== 'comercio' && x.key !== 'todo')) {
+      expect(t.disabled).toContain('/store');
+    }
   });
 });

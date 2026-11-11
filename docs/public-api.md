@@ -50,6 +50,8 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
+| `store:read`         | Read the Tienda catalog and payment info |
+| `store:write`        | Create Tienda orders                     |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -313,6 +315,98 @@ Invalid phone numbers are dropped and counted as `rejected`. Response
 Broadcast status + counts. Scope: `broadcasts:send`. `status` moves
 `sending` → `sent`; `delivered_count` / `read_count` keep climbing as
 Meta delivery webhooks arrive. `404` for another account's broadcast.
+
+### `GET /api/v1/store/catalog`
+
+Tienda (online store) catalog and payment details. Scope: `store:read`.
+Call it from the store's **server** (there is no CORS): the key must never
+reach a browser. Only active products, ordered by `sort`. If the account
+has not set up its store yet, `store.enabled` is `false` and `products`
+is empty.
+
+```json
+{
+  "data": {
+    "store": {
+      "name": "Vita Life",
+      "logo_url": "https://…/logo.png",
+      "whatsapp": "+51919649875",
+      "yape_number": "900292154",
+      "yape_holder": "Jhosseph Romero",
+      "mercadopago_holder": "Jhosseph Romero",
+      "mercadopago_link": null,
+      "shipping_note": "Envios gratis a todo el Peru…",
+      "currency": "PEN",
+      "enabled": true
+    },
+    "products": [
+      {
+        "id": "uuid",
+        "name": "Power Maker - Tratamiento basico",
+        "subtitle": "1 caja · 30 dias",
+        "description": null,
+        "price": 269,
+        "currency": "PEN",
+        "image_url": null,
+        "includes": ["1 caja Power Maker (30 sobres)", "1 Kolina de regalo"],
+        "badge": null,
+        "sort": 0
+      }
+    ]
+  }
+}
+```
+
+`store.name` is the account's `brand_name` (or its name when no brand is set).
+
+### `POST /api/v1/store/orders`
+
+Create an order. Scope: `store:write`. Server-to-server, like the catalog.
+
+```json
+{
+  "customer": { "name": "Ana Perez", "phone": "+51999111222", "email": "ana@mail.com", "document": "12345678" },
+  "shipping": { "method": "shalom", "country": "Peru", "city": "Ica", "address": "Av. Grau 123" },
+  "payment_method": "yape",
+  "items": [{ "product_id": "uuid", "quantity": 2 }],
+  "notes": "Entregar por la tarde",
+  "source": "tiktok"
+}
+```
+
+| Field | Rules |
+| ----- | ----- |
+| `customer.name`, `customer.phone` | required; `email` and `document` optional |
+| `shipping.method` | `shalom`, `olva`, `marvisur`, `internacional` or `recojo` |
+| `shipping.city`, `shipping.address` | required; `country` defaults to `Peru` |
+| `payment_method` | `yape`, `mercadopago` or `whatsapp` |
+| `items` | at least one; `quantity` an integer from 1 to 20 (repeated products are added up, still max 20) |
+| `notes`, `source` | optional; `source` is `tiktok`, `instagram`, `facebook` or `link` |
+
+The **total is always computed by the CRM** from the current prices of the
+account's active products; any `price`/`total` in the body is ignored.
+Response `201`:
+
+```json
+{
+  "data": {
+    "order": {
+      "id": "uuid",
+      "code": "VL-0001",
+      "total": 538,
+      "currency": "PEN",
+      "status": "nuevo",
+      "items": [
+        { "product_id": "uuid", "name": "…", "unit_price": 269, "quantity": 2, "subtotal": 538 }
+      ]
+    }
+  }
+}
+```
+
+Errors (Spanish `message`): `400 bad_request` (invalid body, or a product that
+is inactive / not found / from another account), `409 store_disabled` (the
+account turned its store off), plus the usual `401` / `403` / `429`.
 
 ## Pagination
 
