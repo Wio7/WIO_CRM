@@ -1,0 +1,436 @@
+/* Apps de área de Golden (Cobranzas, Caja y las que vienen) con el aspecto de
+   Golden Legal: vino y dorado sobre crema, títulos en serif. Todo cuelga de
+   body[data-golden-app] para no tocar el ERP web. Las variables de shadcn se
+   redefinen ahí, así las pantallas reusadas del ERP y sus diálogos (portales)
+   toman el estilo sin copiarlas. Primero celular; la laptop empieza en 768 px. */
+
+body[data-golden-app] {
+  --paper: #f5f1ea;
+  --surface: #ffffff;
+  --surface-2: #faf7f1;
+  --ink: #1b1417;
+  --ink-2: #4b4246;
+  --ink-3: #7d7378;
+  --line: #e7dfd3;
+  --line-strong: #d5cabb;
+  --guinda: #7a0c1e;
+  --guinda-deep: #4c0712;
+  --guinda-soft: #f7eaec;
+  --chrome: #1d0b0f;
+  --gold: #c9a23f;
+  --gold-bright: #e6c877;
+  --gold-soft: #f8f0da;
+  --ok: #1f6b45;
+  --ok-soft: #e7f3ec;
+  --warn: #80560f;
+  --warn-soft: #fdf5e0;
+  --bad: #a02a22;
+  --bad-soft: #fdeeec;
+  --info: #2c4a75;
+  --info-soft: #f2f6fc;
+  --g-font-ui: var(--font-golden-sans), system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --g-font-display: var(--font-golden-serif), Georgia, "Times New Roman", serif;
+
+  /* Variables de shadcn con la paleta de Legal. */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-2: var(--surface-2);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--guinda);
+  --primary-foreground: #ffffff;
+  --primary-hover: var(--guinda-deep);
+  --primary-soft: rgba(122, 12, 30, 0.08);
+  --primary-soft-2: rgba(122, 12, 30, 0.14);
+  --secondary: #efe9de;
+  --secondary-foreground: var(--ink);
+  --muted: #efe9de;
+  --muted-foreground: var(--ink-3);
+  --accent: var(--gold-soft);
+  --accent-foreground: var(--ink);
+  --destructive: var(--bad);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--guinda);
+  --radius: 0.875rem;
+  color-scheme: light;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--g-font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+body[data-golden-app] :is(h1, h2) {
+  font-family: var(--g-font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Los colores sueltos del ERP oscuro (rose/amber/emerald en -400) se leen mal sobre crema. */
+body[data-golden-app] .text-rose-400,
+body[data-golden-app] .text-rose-300 { color: var(--bad); }
+body[data-golden-app] .text-amber-400 { color: var(--warn); }
+body[data-golden-app] .text-emerald-400 { color: var(--ok); }
+body[data-golden-app] .text-sky-300 { color: var(--info); }
+body[data-golden-app] .text-orange-400 { color: #9a4a12; }
+body[data-golden-app] .text-red-400 { color: var(--bad); }
+
+/* ---------- MARCO ---------- */
+.gapp {
+  --gapp-tabbar-h: 62px;
+  min-height: 100dvh;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.gapp-sidebar { display: none; }
+
+.gapp-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+  background: var(--chrome);
+  border-bottom: 1px solid rgba(201, 162, 63, 0.4);
+  color: #fff;
+}
+.gapp-topbar-text { flex: 1; min-width: 0; }
+.gapp-eyebrow {
+  display: block;
+  color: var(--gold-bright);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+.gapp-topbar-title {
+  overflow: hidden;
+  font-family: var(--g-font-display);
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gapp-topbar-actions { display: flex; align-items: center; gap: 8px; }
+.gapp-chip-demo {
+  padding: 4px 10px;
+  border: 1px solid rgba(230, 200, 119, 0.55);
+  border-radius: 999px;
+  color: var(--gold-bright);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+/* Rótulo de la demostración: en celular va en una franja bajo la cabecera para no quitarle sitio al título. */
+.gapp-chip-laptop { display: none; }
+.gapp-demo-strip {
+  padding: 6px 16px;
+  background: var(--gold-soft);
+  border-bottom: 1px solid #ecd7a2;
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+.gapp-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.gapp-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(217, 182, 85, 0.45);
+  border-radius: 12px;
+  background: linear-gradient(135deg, #8f1428, #3d060e);
+  color: var(--gold-bright);
+}
+
+.gapp-main {
+  min-width: 0;
+  padding: 16px 14px calc(var(--gapp-tabbar-h) + 24px + env(safe-area-inset-bottom));
+}
+
+/* Barra inferior (celular) */
+.gapp-tabbar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.97);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.gapp-tab {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 50px;
+  padding: 0 2px;
+  border-radius: 12px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.gapp-tab[aria-current="page"] {
+  background: var(--guinda-soft);
+  color: var(--guinda);
+}
+.gapp-badge {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--guinda);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.gapp-tab .gapp-badge { position: absolute; top: 2px; left: calc(50% + 6px); box-shadow: 0 0 0 2px #fff; }
+
+/* Controles tocables en celular (diálogos incluidos: van por el body). */
+@media (max-width: 767px) {
+  body[data-golden-app] :is(button, select, textarea, input:not([type="checkbox"]):not([type="radio"])),
+  body[data-golden-app] a.inline-flex {
+    min-height: 44px;
+  }
+  body[data-golden-app] input[type="checkbox"],
+  body[data-golden-app] input[type="radio"] { width: 22px; height: 22px; }
+  /* Evita el zoom automático de iOS al enfocar un campo. */
+  body[data-golden-app] :is(select, textarea, input) { font-size: 16px; }
+}
+
+/* ---------- LAPTOP ---------- */
+@media (min-width: 768px) {
+  .gapp { display: grid; grid-template-columns: 252px minmax(0, 1fr); }
+  .gapp-sidebar {
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    padding: 26px 16px 20px;
+    border-right: 1px solid rgba(201, 162, 63, 0.3);
+    background: var(--chrome);
+    color: #fff;
+  }
+  .gapp-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 22px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .gapp-brand-title {
+    font-family: var(--g-font-display);
+    font-size: 21px;
+    font-weight: 500;
+    line-height: 1.15;
+  }
+  .gapp-nav { display: grid; gap: 4px; }
+  .gapp-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 44px;
+    padding: 0 12px;
+    border-radius: 10px;
+    color: #b9a9ad;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background-color 0.15s, color 0.15s;
+  }
+  .gapp-nav-link:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+  .gapp-nav-link[aria-current="page"] {
+    background: rgba(122, 12, 30, 0.55);
+    box-shadow: inset 3px 0 0 var(--gold);
+    color: var(--gold-bright);
+    font-weight: 600;
+  }
+  .gapp-nav-link .gapp-badge { margin-left: auto; }
+  .gapp-foot {
+    display: grid;
+    gap: 2px;
+    margin-top: auto;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  .gapp-foot-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 10px;
+    background: none;
+    color: var(--gold-bright);
+    font-size: 13.5px;
+    text-align: left;
+    text-decoration: none;
+  }
+  .gapp-foot-link:hover { background: rgba(255, 255, 255, 0.06); }
+
+  .gapp-tabbar { display: none; }
+  .gapp-topbar {
+    padding: 22px 36px 16px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(245, 241, 234, 0.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--ink);
+  }
+  .gapp-topbar .gapp-mark,
+  .gapp-topbar .gapp-eyebrow,
+  .gapp-topbar .gapp-icon-btn { display: none; }
+  .gapp-topbar-title { font-size: 28px; letter-spacing: -0.015em; }
+  .gapp-chip-laptop { display: inline-block; }
+  .gapp-demo-strip { display: none; }
+  .gcard-mini:first-child { grid-column: auto; }
+  .gapp-chip-demo { border-color: var(--gold); color: var(--warn); background: var(--gold-soft); }
+  .gapp-main { padding: 24px 36px 40px; }
+}
+
+/* ---------- PIEZAS COMUNES ---------- */
+/* Tarjeta vino con el total (estilo Caja) y sus subtarjetas. */
+.gcard-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 20px 18px 16px;
+  border: 1px solid rgba(217, 182, 85, 0.35);
+  border-radius: 18px;
+  background: radial-gradient(120% 140% at 100% 0%, #8f1428 0%, #4c0712 70%);
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(76, 7, 18, 0.22);
+}
+.gcard-hero-label {
+  color: var(--gold-bright);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.gcard-hero-value {
+  margin-top: 4px;
+  font-family: var(--g-font-display);
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.gcard-hero-sub { margin-top: 4px; color: #e9d8dc; font-size: 13px; }
+.gcard-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+.gcard-mini:first-child { grid-column: 1 / -1; }
+.gcard-mini {
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  text-align: left;
+}
+.gcard-mini[aria-pressed="true"] {
+  border-color: var(--gold);
+  background: rgba(201, 162, 63, 0.22);
+}
+.gcard-mini-label { color: #e0cdd2; font-size: 11.5px; }
+.gcard-mini-value { font-size: 20px; font-weight: 600; line-height: 1.2; }
+@media (min-width: 768px) {
+  .gcard-hero { padding: 24px 28px 20px; }
+  .gcard-hero-value { font-size: 42px; }
+  .gcard-hero-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+}
+
+/* Chips de tramo y estado sobre crema. */
+.gchip {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.gchip-1-30 { background: var(--warn-soft); color: var(--warn); }
+.gchip-31-60 { background: #fdeede; color: #9a4a12; }
+.gchip-61-90 { background: var(--bad-soft); color: var(--bad); }
+.gchip-90 { background: #f8dcd8; color: #7d1a14; }
+.gchip-ok { background: var(--ok-soft); color: var(--ok); }
+.gchip-info { background: var(--info-soft); color: var(--info); }
+
+.gbtn-wa {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  background: var(--ok);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+@media (min-width: 768px) { .gbtn-wa { min-height: 34px; padding: 0 12px; font-size: 13px; } }
+
+.gtable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.gtable th {
+  padding: 10px 14px;
+  background: var(--surface-2);
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.gtable td { padding: 12px 14px; border-top: 1px solid var(--line); vertical-align: top; }
+.gtable tr:hover td { background: var(--surface-2); }
+.gpanel {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(48, 22, 28, 0.05), 0 8px 24px rgba(48, 22, 28, 0.05);
+}
+.gitem {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(48, 22, 28, 0.05);
+}

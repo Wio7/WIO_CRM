@@ -32,6 +32,8 @@ import {
 } from "@/lib/collections";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ResumenMoraCard } from "@/components/cobranzas/resumen-mora";
+import { resumenMora } from "@/lib/cobranzas/resumen";
 import { ContactDetailView } from "@/components/contacts/contact-detail-view";
 import { CollectionActionDialog } from "@/components/collections/collection-action-dialog";
 import { useAuth } from "@/hooks/use-auth";
@@ -288,6 +290,10 @@ export default function CollectionsPage() {
     return c;
   }, [debtors]);
 
+  // Tarjeta vino de la app de Cobranzas (el ERP web conserva sus cuatro tarjetas de siempre).
+  const resumen = useMemo(() => resumenMora(debtors), [debtors]);
+  const moraPorMoneda = useMemo(() => Object.fromEntries(totales.map(([cur, t]) => [cur, t.mora])), [totales]);
+
   function exportar() {
     const blob = new Blob([`﻿${debtorsCsv(visibles)}`], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -362,6 +368,9 @@ export default function CollectionsPage() {
         </p>
       ) : (
         <>
+          {paths.cliente !== null ? (
+            <ResumenMoraCard resumen={resumen} tramo={tramo} onTramo={setTramo} moraPorMoneda={conMora ? moraPorMoneda : {}} />
+          ) : (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {totales.map(([cur, t]) => (
               <div key={cur} className="rounded-xl border border-border bg-card p-4">
@@ -389,6 +398,7 @@ export default function CollectionsPage() {
               </button>
             ))}
           </div>
+          )}
 
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input

@@ -8,10 +8,10 @@ const APP_LOGINS: Record<string, string> = {
   "/cobranzas": "/cobranzas/login",
 };
 
-/** Archivos de una app que se abren sin sesión: su login, su manifiesto y sus íconos. */
-const APP_PUBLIC = ["/cobranzas/login", "/cobranzas/manifest.webmanifest"];
+/** Archivos de una app que se abren sin sesión: su login, su manifiesto, sus íconos y sus demostraciones (datos inventados, no escriben nada). */
+const APP_PUBLIC = ["/cobranzas/login", "/cobranzas/manifest.webmanifest", "/cobranzas/demo", "/caja/demo"];
 /** Carpetas públicas de una app (íconos). */
-const APP_PUBLIC_DIRS = ["/cobranzas/icono/"];
+const APP_PUBLIC_DIRS = ["/cobranzas/icono/", "/cobranzas/demo/"];
 
 /** Rutas que piden sesión (se compara por prefijo, como siempre). */
 const PROTECTED_PREFIXES = [
