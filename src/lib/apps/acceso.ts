@@ -1,0 +1,58 @@
+// Quién entra a qué app (Fase F §4). Separado del acceso a los DATOS, que
+// manda la 084 (can_access_module): contabilidad lee pagos pero no entra a la
+// app de Cobranzas. Puro y con pruebas; lo reusan las apps que vienen
+// (Contabilidad, Marketing, Gerencia, Técnica): basta una fila en APPS.
+
+export type AppKey = "cobranzas" | "caja" | "marketing" | "gerencia" | "tecnica";
+
+export interface AppDef {
+  /** Áreas (profiles.area) que entran. Dueño y super admin entran siempre. */
+  areas: readonly string[];
+  /** Ruta de la app dentro de este repo. */
+  ruta: string;
+}
+
+export const APPS: Record<AppKey, AppDef> = {
+  cobranzas: { areas: ["cobranzas", "gerencia"], ruta: "/cobranzas" },
+  // Contabilidad aún no tiene app propia: su Caja es lo que le corresponde.
+  caja: { areas: ["contabilidad", "gerencia"], ruta: "/caja" },
+  // Aún sin ruta en este repo (F6 a F8): se activan al construirlas.
+  marketing: { areas: ["marketing"], ruta: "/marketing" },
+  gerencia: { areas: ["gerencia"], ruta: "/gerencia" },
+  tecnica: { areas: ["tecnica"], ruta: "/tecnica" },
+};
+
+/** Apps que ya existen como ruta en este repo (el resto no se ofrece como destino). */
+const EXISTENTES: readonly AppKey[] = ["cobranzas", "caja"];
+
+export interface Viewer {
+  /** profiles.area de quien entra (null = sin área). */
+  area: string | null;
+  isOwner: boolean;
+  isSuperAdmin: boolean;
+}
+
+export function canEnterApp(app: AppKey, viewer: Viewer): boolean {
+  if (viewer.isOwner || viewer.isSuperAdmin) return true;
+  return viewer.area !== null && APPS[app].areas.includes(viewer.area);
+}
+
+/** La app de un área, si existe aquí. Para áreas con varias, la primera que exista. */
+export function appDeArea(area: string | null): (AppDef & { key: AppKey }) | null {
+  if (!area) return null;
+  const key = EXISTENTES.find((k) => APPS[k].areas.includes(area));
+  return key ? { key, ...APPS[key] } : null;
+}
+
+export type Entrada = { ok: true } | { ok: false; destino: { href: string; etiqueta: string } };
+
+/**
+ * ¿Entra a esta app? Si no, a dónde se lo manda: a su app si tiene una en
+ * este repo; si no, al ERP web (que sigue abierto hasta que su app exista).
+ */
+export function entradaApp(app: AppKey, viewer: Viewer): Entrada {
+  if (canEnterApp(app, viewer)) return { ok: true };
+  const suya = appDeArea(viewer.area);
+  if (suya && suya.key !== app) return { ok: false, destino: { href: suya.ruta, etiqueta: "Ir a mi app" } };
+  return { ok: false, destino: { href: "/dashboard", etiqueta: "Ir al ERP web" } };
+}
