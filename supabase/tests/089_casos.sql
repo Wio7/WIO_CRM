@@ -79,8 +79,15 @@ BEGIN
   VALUES (v_plan, v_acc, 1, 500, current_date), (v_plan, v_acc, 2, 500, current_date + 30);
   INSERT INTO public.collection_actions (account_id, contact_id, plan_id, channel, result, note, created_by)
   VALUES (v_acc, v_contact, v_plan, 'llamada', 'contactado', 'nota privada 089', v_asesor);
-  INSERT INTO public.conversations (id, account_id, contact_id, user_id, assigned_agent_id)
-  VALUES ('0890c000-0000-4000-8000-0000000000d1', v_acc, v_contact, v_asesor, v_asesor);
+  -- La base real tiene conversations.user_id (NOT NULL); las migraciones del repo no.
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'conversations' AND column_name = 'user_id') THEN
+    EXECUTE 'INSERT INTO public.conversations (id, account_id, contact_id, user_id, assigned_agent_id) VALUES ($1, $2, $3, $4, $4)'
+      USING '0890c000-0000-4000-8000-0000000000d1'::uuid, v_acc, v_contact, v_asesor;
+  ELSE
+    INSERT INTO public.conversations (id, account_id, contact_id, assigned_agent_id)
+    VALUES ('0890c000-0000-4000-8000-0000000000d1', v_acc, v_contact, v_asesor);
+  END IF;
 
   PERFORM set_config('t089.acc', v_acc::text, true);
   PERFORM set_config('t089.contact', v_contact::text, true);
