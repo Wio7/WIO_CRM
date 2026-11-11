@@ -10,7 +10,7 @@ describe("armarArbol", () => {
   it("ordena las ramas por area, con sus personas, y deja Sin area al final", () => {
     const ramas = armarArbol([m("a", "cobranzas"), m("b", null), m("c", "gerencia"), m("d", "cobranzas")], cuenta, "https://o");
     const keys = ramas.map((r) => r.key);
-    expect(keys.slice(0, 4)).toEqual(["gerencia", "ventas", "legal", "cobranzas"]);
+    expect(keys.slice(0, 5)).toEqual(["gerencia", "ventas", "promueve", "legal", "cobranzas"]);
     expect(keys[keys.length - 1]).toBe("sin_area");
     expect(ramas.find((r) => r.key === "cobranzas")!.personas.map((p) => p.id)).toEqual(["a", "d"]);
     expect(ramas.find((r) => r.key === "sin_area")!.personas.map((p) => p.id)).toEqual(["b"]);
@@ -43,5 +43,15 @@ describe("armarArbol", () => {
   it("cada persona trae estado Activo (profiles no tiene columna de estado)", () => {
     const ramas = armarArbol([m("a", "legal")], cuenta);
     expect(ramas.find((r) => r.key === "legal")!.personas[0].estado).toBe("Activo");
+  });
+});
+
+describe("armarArbol promueve", () => {
+  it("la rama Promueve va despues de Ventas y recibe a sus personas (no cae en Sin area)", () => {
+    const ramas = armarArbol([m("p", "promueve"), m("v", "ventas")], cuenta);
+    const keys = ramas.map((r) => r.key);
+    expect(keys.slice(0, 3)).toEqual(["gerencia", "ventas", "promueve"]);
+    expect(ramas.find((r) => r.key === "promueve")!.personas.map((p) => p.id)).toEqual(["p"]);
+    expect(keys).not.toContain("sin_area");
   });
 });

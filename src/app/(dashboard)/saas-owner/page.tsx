@@ -25,10 +25,12 @@ import {
   UserPlus,
   LayoutList,
   ChevronRight,
-  Network
+  Network,
+  MoreHorizontal
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -42,6 +44,8 @@ import { SaasInviteDialog } from "@/components/saas-owner/saas-invite-dialog";
 import { AccountModulesDialog } from "@/components/saas-owner/account-modules-dialog";
 import { AccountBusinessDialog } from "@/components/saas-owner/account-business-dialog";
 import { AccountAreaTreeAdmin } from "@/components/saas-owner/account-area-tree-admin";
+import { separarCuentasAparte } from "@/lib/areas/cuentas-aparte";
+import type { MiembroArbol } from "@/lib/areas/arbol";
 import { groupAccountsByBusiness, hasBusinessColumns, knownApps } from "@/lib/saas-account-groups";
 
 interface Account {
@@ -71,6 +75,9 @@ export default function SaasOwnerPage() {
   const [modulesTarget, setModulesTarget] = useState<Account | null>(null);
   const [businessTarget, setBusinessTarget] = useState<Account | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  // Gente de cada negocio ya cargada (sin clave = cargando, null = falló). Sirve
+  // para sacar de "Otras cuentas" las que se llaman como el correo de alguien de dentro.
+  const [gentePorNegocio, setGentePorNegocio] = useState<Record<string, MiembroArbol[] | null>>({});
 
   const toggleExpanded = (key: string) =>
     setExpanded(prev => {
@@ -333,6 +340,64 @@ export default function SaasOwnerPage() {
     );
   }, [filteredGroups, search]);
 
+  // Otras cuentas del negocio: las hijas menos las que son la cuenta aparte de una persona.
+  const otrasDe = (group: { key: string; members: Account[] }): Account[] | undefined => {
+    const gente = gentePorNegocio[group.key];
+    if (gente === undefined) return undefined;
+    return gente === null ? group.members : separarCuentasAparte(gente, group.members).otras;
+  };
+
+  const renderCuentaAparte = (cuenta: { id: string }) => {
+    const account = accounts.find((a) => a.id === cuenta.id);
+    if (!account) return null;
+    return (
+      <div className="flex items-center gap-1.5">
+        <Button
+          onClick={() => handleEnterAccount(account.id)}
+          disabled={enteringId !== null || (isVisiting && accountId === account.id)}
+          variant="outline"
+          className="h-8 rounded-lg border-primary/30 px-2.5 text-xs text-primary"
+        >
+          <LogIn className="h-3.5 w-3.5" />
+          {isVisiting && accountId === account.id ? "Dentro" : enteringId === account.id ? "Entrando…" : "Entrar a su cuenta"}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label="Más acciones de la cuenta aparte"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/5 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-52">
+            <DropdownMenuItem onClick={() => setInviteTarget(account)}>
+              <UserPlus className="h-4 w-4" />
+              Invitar por correo
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setModulesTarget(account)}>
+              <LayoutList className="h-4 w-4" />
+              Secciones que ve
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={!canEditBusiness} onClick={() => setBusinessTarget(account)}>
+              <Network className="h-4 w-4" />
+              Negocio y apps
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={togglingId === account.id} onClick={() => handleToggleStatus(account)}>
+              {account.status === "active" ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+              {account.status === "active" ? "Desactivar acceso" : "Activar acceso"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={deletingId === account.id || account.id === homeAccountId || (isVisiting && account.id === accountId)}
+              onClick={() => handleDeleteAccount(account)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Eliminar cuenta
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    );
+  };
+
   const canEditBusiness = useMemo(() => hasBusinessColumns(accounts), [accounts]);
   const suggestedApps = useMemo(() => knownApps(accounts), [accounts]);
 
@@ -491,6 +556,9 @@ export default function SaasOwnerPage() {
               <tbody className="divide-y divide-white/5 text-xs">
                 {filteredGroups.map(group => {
                   const isOpen = expanded.has(group.key) || searchOpened.has(group.key);
+                  const otras = otrasDe(group);
+                  const otrasVisibles = otras ?? [];
+                  const dentro = (otras ?? group.members).length;
                   return (
                   <Fragment key={group.key}>
                   <tr className="bg-white/[0.03]">
@@ -509,9 +577,9 @@ export default function SaasOwnerPage() {
                             {app}
                           </span>
                         ))}
-                        {group.members.length > 0 && (
+                        {dentro > 0 && (
                           <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                            {group.members.length} {group.members.length === 1 ? "cuenta dentro" : "cuentas dentro"}
+                            {dentro} {dentro === 1 ? "cuenta dentro" : "cuentas dentro"}
                           </span>
                         )}
                         <span
@@ -534,11 +602,14 @@ export default function SaasOwnerPage() {
                           cuenta={group.primary}
                           accountId={group.primary.id}
                           onEntrar={handleEnterAccount}
+                          cuentasHijas={group.members}
+                          renderCuentaAparte={renderCuentaAparte}
+                          onMiembros={(gente) => setGentePorNegocio((prev) => ({ ...prev, [group.key]: gente }))}
                         />
                       </td>
                     </tr>
                   )}
-                  {isOpen && group.members.length > 0 && (
+                  {isOpen && otrasVisibles.length > 0 && (
                     <tr>
                       <td colSpan={5} className="pl-10 pr-4 pb-1 pt-2">
                         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -547,7 +618,7 @@ export default function SaasOwnerPage() {
                       </td>
                     </tr>
                   )}
-                  {isOpen && group.members.map(account => (
+                  {isOpen && otrasVisibles.map(account => (
                   <tr key={account.id} className="group hover:bg-white/[0.01] transition-colors">
                     <td className={`py-4 px-4 space-y-1 ${account.id === group.primary.id ? "pl-10" : "pl-16"}`}>
                       <div className="font-bold text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-1.5 text-sm">
