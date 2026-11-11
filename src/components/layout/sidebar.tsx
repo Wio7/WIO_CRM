@@ -9,6 +9,7 @@ import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import { MODULES, MODULE_AREAS, isModuleVisible } from "@/lib/modules";
 import { resolveAccountBrand } from "@/lib/account-brand";
+import { cajaMenuLabel } from "@/lib/cash/menu";
 import { Ticket,
   Bell,
   Bot,
@@ -166,7 +167,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           )}
         >
           <item.icon className="h-4 w-4" />
-          <span className="flex-1">{item.label}</span>
+          <span className="flex-1">{item.href === "/caja" ? cajaMenuLabel(account?.name, account?.brand_name) : item.label}</span>
           {item.beta && (
             <span
               aria-label="Beta feature"
@@ -327,7 +328,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     )}
                   >
                     <item.icon className="h-4 w-4" />
-                    {item.label}
+                    {item.href === "/caja" ? cajaMenuLabel(account?.name, account?.brand_name) : item.label}
                   </Link>
                 </li>
               );

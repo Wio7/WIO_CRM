@@ -4,6 +4,8 @@
 // Sin red ni base de datos, para probarlo solo.
 // ============================================================
 
+import { RUBRO_ETIQUETAS, type Rubro } from "@/lib/cash/clasificar";
+
 export const MARCA_CAJA = "💼 Caja";
 
 export type Modo = "caja" | "app" | "legal";
@@ -130,6 +132,9 @@ export interface Borrador {
   paymentMethod: Metodo;
   category: Categoria | null;
   justification: string | null;
+  /** Rubro y proyecto propuestos (087). null = sin asignar, se completa luego en la app. */
+  rubro?: string | null;
+  proyecto?: string | null;
 }
 
 /** "−S/ 120 en Restaurante · Gas · Yape" */
@@ -143,6 +148,9 @@ export function lineaDeMovimiento(b: Borrador): string {
 export function textoDelBorrador(b: Borrador): string {
   const tipo = b.kind === "expense" ? "Gasto" : "Ingreso";
   const lineas = [`${MARCA_CAJA}`, `¿Guardo este ${tipo.toLowerCase()}?`, "", lineaDeMovimiento(b)];
+  if (b.kind === "expense") {
+    lineas.push(`Rubro: ${b.rubro ? (RUBRO_ETIQUETAS[b.rubro as Rubro] ?? b.rubro) : "sin asignar"} · Proyecto: ${b.proyecto ?? "sin asignar"}`);
+  }
   if (b.justification) lineas.push(`Motivo: ${b.justification}`);
   lineas.push("", "Toca *Sí, guardar* para que quede registrado.");
   return lineas.join("\n");
