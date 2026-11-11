@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import './caja.css';
+import { clasesFuentesGolden } from '@/lib/apps/fuentes';
+export const viewport = { themeColor: '#1d0b0f' };
 export const metadata: Metadata = {
   title: { absolute: 'Golden Caja' },
   description: 'Tu caja, clara y al día.',
@@ -17,5 +19,6 @@ export default function CashLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  // Fuentes de Golden (Plex y Newsreader), como en Golden Legal.
+  return <div className={clasesFuentesGolden}>{children}</div>;
 }

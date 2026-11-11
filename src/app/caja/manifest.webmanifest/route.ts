@@ -8,8 +8,8 @@ export function GET() {
       start_url: '/caja',
       scope: '/caja',
       display: 'standalone',
-      background_color: '#f6f5ef',
-      theme_color: '#173e35',
+      background_color: '#f5f1ea',
+      theme_color: '#1d0b0f',
       icons: [
         { src: '/caja-icon-192.png', sizes: '192x192', type: 'image/png' },
         { src: '/caja-icon-512.png', sizes: '512x512', type: 'image/png' },
