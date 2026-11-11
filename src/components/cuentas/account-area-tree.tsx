@@ -48,6 +48,13 @@ export interface CuentaAparte {
   name: string;
 }
 
+/** Clases del grupo según su acento: Administración va en celeste, el resto neutro. */
+function estiloRama(rama: RamaArbol) {
+  return rama.acento === "celeste"
+    ? { seccion: "border-sky-400/40 bg-sky-400/[0.07]", icono: "text-sky-300", titulo: "text-sky-200" }
+    : { seccion: "border-white/5 bg-[#0d0d0f]", icono: "text-primary", titulo: "text-white" };
+}
+
 function origenActual(): string | undefined {
   return typeof window === "undefined" ? undefined : window.location.origin;
 }
@@ -236,13 +243,15 @@ export function AccountAreaTree({
 
   return (
     <div className="space-y-2" data-testid="arbol-cuentas">
-      {ramas.map((rama) => (
-        <section key={rama.key} className="rounded-2xl border border-white/5 bg-[#0d0d0f]">
+      {ramas.map((rama) => {
+        const est = estiloRama(rama);
+        return (
+        <section key={rama.key} data-acento={rama.acento} className={`rounded-2xl border ${est.seccion}`}>
           {/* Pantalla ancha: fila con los botones a la derecha. */}
           <div className="hidden items-start gap-4 p-4 md:flex">
             <div className="w-48 shrink-0 space-y-2">
-              <p className="flex items-center gap-2 text-sm font-black uppercase tracking-wider text-white">
-                <Layers className="h-4 w-4 text-primary" />
+              <p className={`flex items-center gap-2 text-sm font-black uppercase tracking-wider ${est.titulo}`}>
+                <Layers className={`h-4 w-4 ${est.icono}`} />
                 {rama.label}
               </p>
               <div className="flex items-center gap-2">
@@ -264,8 +273,8 @@ export function AccountAreaTree({
           {/* Celular: tarjeta apilada con los botones abajo, a lo ancho. */}
           <div className="space-y-3 p-4 md:hidden">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="flex items-center gap-2 text-sm font-black uppercase tracking-wider text-white">
-                <Layers className="h-4 w-4 text-primary" />
+              <p className={`flex items-center gap-2 text-sm font-black uppercase tracking-wider ${est.titulo}`}>
+                <Layers className={`h-4 w-4 ${est.icono}`} />
                 {rama.label}
               </p>
               <EstadoArea estado={rama.estado} />
@@ -275,7 +284,8 @@ export function AccountAreaTree({
             <Acciones rama={rama} ancho onEntrarErp={onEntrarErp} entrandoHref={entrandoHref} />
           </div>
         </section>
-      ))}
+        );
+      })}
     </div>
   );
 }

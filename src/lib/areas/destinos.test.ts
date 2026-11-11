@@ -83,7 +83,7 @@ describe("destinoDeArea", () => {
   });
 
   it("orden fijo de areas", () => {
-    expect(AREA_KEYS).toEqual(["gerencia", "ventas", "promueve", "legal", "cobranzas", "contabilidad", "marketing", "tecnica", "sin_area"]);
+    expect(AREA_KEYS).toEqual(["gerencia", "ventas", "promueve", "legal", "cobranzas", "contabilidad", "administracion", "marketing", "tecnica", "sin_area"]);
   });
 });
 
@@ -126,5 +126,29 @@ describe("destinoDeArea promueve", () => {
 
   it("las demas areas conservan su ERP (sinErp no esta puesto)", () => {
     expect(destinoDeArea("ventas", golden, ORIGEN).sinErp).toBeUndefined();
+  });
+});
+
+describe("destinoDeArea administracion", () => {
+  it("administracion: lleva la Caja, ERP en cuotas y acento celeste", () => {
+    expect(destinoDeArea("administracion", golden, ORIGEN)).toMatchObject({
+      key: "administracion",
+      label: "Administración",
+      erpHref: "/payment-plans",
+      acento: "celeste",
+      estado: "activa",
+      app: { nombre: "Golden Caja", url: `${ORIGEN}/caja` },
+    });
+    expect(destinoDeArea("administracion", otra, ORIGEN).app?.nombre).toBe("Caja chica");
+  });
+
+  it("solo administracion lleva acento; las demas no", () => {
+    for (const k of AREA_KEYS.filter((x) => x !== "administracion")) {
+      expect(destinoDeArea(k, golden, ORIGEN).acento).toBeUndefined();
+    }
+  });
+
+  it("administracion apagada si /payment-plans esta apagado", () => {
+    expect(destinoDeArea("administracion", { ...otra, disabled_modules: ["/payment-plans"] }, ORIGEN).estado).toBe("apagada");
   });
 });

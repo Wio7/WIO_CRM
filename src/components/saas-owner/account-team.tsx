@@ -28,6 +28,8 @@ const AREA_LABEL: Record<string, string> = {
   ventas: "Jefatura de ventas",
   gerencia: "Gerencia",
   contabilidad: "Contabilidad",
+  administracion: "Administración",
+  tecnica: "Área técnica",
   promueve: "Promueve (externo)",
 };
 

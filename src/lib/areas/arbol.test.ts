@@ -54,4 +54,15 @@ describe("armarArbol promueve", () => {
     expect(ramas.find((r) => r.key === "promueve")!.personas.map((p) => p.id)).toEqual(["p"]);
     expect(keys).not.toContain("sin_area");
   });
+
+  it("Administración sale como grupo propio, junto a Contabilidad, con sus personas y acento celeste", () => {
+    const ramas = armarArbol([m("x", "administracion"), m("y", "contabilidad"), m("z", "administracion")], cuenta);
+    const keys = ramas.map((r) => r.key);
+    expect(keys.indexOf("administracion")).toBe(keys.indexOf("contabilidad") + 1);
+    const rama = ramas.find((r) => r.key === "administracion")!;
+    expect(rama.personas.map((p) => p.id)).toEqual(["x", "z"]);
+    expect(rama.acento).toBe("celeste");
+    expect(ramas.find((r) => r.key === "contabilidad")!.personas.map((p) => p.id)).toEqual(["y"]);
+    expect(ramas.find((r) => r.key === "sin_area")).toBeUndefined();
+  });
 });
