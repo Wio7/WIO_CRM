@@ -50,6 +50,17 @@ describe("isAppPublicPath", () => {
     expect(isAppPublicPath("/cobranzas/manifest.webmanifest")).toBe(true);
     expect(isAppPublicPath("/cobranzas/icono/192")).toBe(true);
   });
+  it("las demostraciones con datos inventados se abren sin sesión", () => {
+    for (const p of ["/cobranzas/demo", "/cobranzas/demo/vouchers", "/cobranzas/demo/cliente/d1", "/caja/demo"]) {
+      expect(isAppPublicPath(p), p).toBe(true);
+      expect(isProtectedPath(p), p).toBe(false);
+    }
+  });
+  it("la demo no abre rutas parecidas ni la app real", () => {
+    for (const p of ["/cobranzas/demoX", "/caja/demox", "/caja/demo/otra", "/caja", "/cobranzas"]) {
+      expect(isAppPublicPath(p), p).toBe(false);
+    }
+  });
   it("lo demás de la app pide sesión", () => {
     expect(isAppPublicPath("/cobranzas")).toBe(false);
     expect(isAppPublicPath("/cobranzas/loginx")).toBe(false);
