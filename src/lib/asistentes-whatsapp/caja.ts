@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { RUBROS, esRubro, proponerClasificacion, type ProyectoOpcion } from "@/lib/cash/clasificar";
 import {
   CATEGORIAS,
   METODOS,
@@ -58,7 +59,7 @@ export function instruccionesCaja(ctx: ContextoCaja): string {
     "- Responde corto, para leer en el celular: frases breves y listas con '- '. *Negrita* (un asterisco) sólo para lo importante.",
     "- Si piden algo de una caja que no ves, dilo sin dar detalles.",
     ctx.esDueno
-      ? "- Para registrar un gasto o un ingreso usa `proponer_movimiento`. Necesitas caja, monto, concepto y cómo se pagó (si no lo dicen, efectivo). Si falta la caja o el monto, pregunta. Si la herramienta pide justificación porque es un gasto grande, pídela en una línea. Después de proponer, di sólo que revise el borrador y toque *Sí, guardar*: un 'sí' escrito NO guarda nada."
+      ? "- Para registrar un gasto o un ingreso usa `proponer_movimiento`. Necesitas caja, monto, concepto y cómo se pagó (si no lo dicen, efectivo). Si falta la caja o el monto, pregunta. Si la herramienta pide justificación porque es un gasto grande, pídela en una línea. Rubro y proyecto se proponen solos por el texto; si la herramienta los devuelve vacíos quedan sin asignar y se completan en la app (no preguntes por ellos). Después de proponer, di sólo que revise el borrador y toque *Sí, guardar*: un 'sí' escrito NO guarda nada."
       : "- Esta persona no puede registrar movimientos por WhatsApp. Si lo pide, dile que lo haga en la app de Golden Caja.",
     "- Lo que registres queda en el historial de la caja con origen WhatsApp.",
   ].join("\n");
@@ -133,6 +134,8 @@ export function herramientasCaja(ctx: ContextoCaja) {
             metodo: { type: "string", enum: Object.keys(METODOS), description: "Cómo se pagó. Por defecto cash (efectivo)." },
             categoria: { type: "string", enum: Object.keys(CATEGORIAS), description: "Sólo para gastos." },
             justificacion: { type: "string", description: "Motivo, obligatorio si el gasto pasa el límite de la caja." },
+            rubro: { type: "string", enum: [...RUBROS], description: "Sólo gastos. Si no lo dicen, déjalo vacío: se propone solo por el texto o queda sin asignar." },
+            proyecto: { type: "string", description: "Sólo gastos. Nombre del proyecto si lo dicen (Colinas del Este 2, Blue Village…). Vacío = se propone por el texto o queda sin asignar." },
           },
           required: ["caja", "tipo", "monto", "concepto"],
           additionalProperties: false,
@@ -261,7 +264,21 @@ export function ejecutorCaja(ctx: ContextoCaja) {
       };
     }
 
-    const borrador: Borrador = { caja: caja.name, kind, amountCents, concept, paymentMethod, category, justification };
+    // Proyecto y rubro (087): lo que dijo la persona; si no, se propone por palabras clave; si no se puede, sin asignar.
+    const aQuien = String(args.a_quien ?? "").trim();
+    let rubro: string | null = null;
+    let proyecto: ProyectoOpcion | null = null;
+    if (kind === "expense") {
+      const { data: filas } = await ctx.db.from("real_estate_projects").select("id, name").eq("account_id", ctx.accountId);
+      const proyectos = (filas ?? []) as ProyectoOpcion[];
+      const sugerida = proponerClasificacion(`${concept} ${aQuien}`, proyectos);
+      rubro = esRubro(args.rubro) ? args.rubro : sugerida.rubro;
+      const dicho = typeof args.proyecto === "string" && args.proyecto.trim() ? proponerClasificacion(args.proyecto, proyectos) : null;
+      const id = dicho?.projectId ?? sugerida.projectId;
+      proyecto = proyectos.find((p) => p.id === id) ?? null;
+    }
+
+    const borrador: Borrador = { caja: caja.name, kind, amountCents, concept, paymentMethod, category, justification, rubro, proyecto: proyecto?.name ?? null };
     const command = {
       companyId: caja.id,
       requestId: randomUUID(),
@@ -273,6 +290,7 @@ export function ejecutorCaja(ctx: ContextoCaja) {
       paymentMethod,
       category,
       justification,
+      ...(kind === "expense" ? { rubro, projectId: proyecto?.id ?? null } : {}),
     };
     const { data, error } = await ctx.db
       .from("whatsapp_team_drafts")
