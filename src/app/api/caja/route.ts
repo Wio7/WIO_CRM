@@ -22,7 +22,7 @@ function databaseError(error: { code?: string }) {
     return json(
       {
         error:
-          'Caja aún no está habilitada en esta instalación. Revisa las migraciones 063, 064 y 065.',
+          'Caja aún no está habilitada en esta instalación. Revisa las migraciones 063, 064, 065 y 087.',
       },
       503
     );
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
         400
       );
     }
-    const { data, error } = await supabase.rpc('cash_company_command', {
+    const { data, error } = await supabase.rpc(command.action === 'entry' ? 'cash_company_entry' : 'cash_company_command', {
       p_command: command,
     });
     return error ? databaseError(error) : json({ id: data });
