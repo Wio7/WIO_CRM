@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { safeNextPath } from '@/lib/app-paths'
+import { appLoginPath, isProtectedPath, safeNextPath } from '@/lib/app-paths'
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -49,6 +49,14 @@ export async function middleware(request: NextRequest) {
   // they can accept the invitation in one click. Without this,
   // a forwarded invite link to someone who's already signed in
   // would silently drop them on /dashboard.
+  // La app de Cobranzas tiene su login dentro de su scope; con sesión abierta
+  // vuelve a la ruta pedida o, sin ella, a la app (no al ERP).
+  if (user && request.nextUrl.pathname === '/cobranzas/login') {
+    const url = request.nextUrl.clone()
+    url.pathname = safeNextPath(request.nextUrl.searchParams.get('next'), '/cobranzas')
+    url.search = ''
+    return withRefreshedCookies(NextResponse.redirect(url))
+  }
   if (user && (
     request.nextUrl.pathname === '/login' ||
     request.nextUrl.pathname === '/signup' ||
@@ -71,10 +79,11 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected pages - redirect to login if not authenticated
-  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings', '/caja', '/collections']
-  if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
+  // Cada app puede tener su propio login (appLoginPath); su login y su
+  // manifiesto se abren sin sesión (isProtectedPath los deja fuera).
+  if (!user && isProtectedPath(request.nextUrl.pathname)) {
     const url = request.nextUrl.clone()
-    url.pathname = '/login'
+    url.pathname = appLoginPath(request.nextUrl.pathname)
     url.search = ''
     url.searchParams.set('next', request.nextUrl.pathname)
     return withRefreshedCookies(NextResponse.redirect(url))
