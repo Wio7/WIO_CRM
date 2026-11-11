@@ -1,0 +1,17 @@
+/* App de Cobranzas: en celular todo control se puede tocar con el pulgar
+   (44 px). Va sobre el body para alcanzar también los diálogos (portales). */
+@media (max-width: 767px) {
+  body[data-app="cobranzas"] :is(button, select, textarea, input:not([type="checkbox"]):not([type="radio"])),
+  body[data-app="cobranzas"] a.inline-flex {
+    min-height: 44px;
+  }
+  body[data-app="cobranzas"] input[type="checkbox"],
+  body[data-app="cobranzas"] input[type="radio"] {
+    width: 22px;
+    height: 22px;
+  }
+  /* Evita el zoom automático de iOS al enfocar un campo. */
+  body[data-app="cobranzas"] :is(select, textarea, input) {
+    font-size: 16px;
+  }
+}
