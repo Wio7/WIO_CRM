@@ -41,7 +41,7 @@ import {
 import { SaasInviteDialog } from "@/components/saas-owner/saas-invite-dialog";
 import { AccountModulesDialog } from "@/components/saas-owner/account-modules-dialog";
 import { AccountBusinessDialog } from "@/components/saas-owner/account-business-dialog";
-import { AccountTeam } from "@/components/saas-owner/account-team";
+import { AccountAreaTreeAdmin } from "@/components/saas-owner/account-area-tree-admin";
 import { groupAccountsByBusiness, hasBusinessColumns, knownApps } from "@/lib/saas-account-groups";
 
 interface Account {
@@ -92,13 +92,16 @@ export default function SaasOwnerPage() {
 
   const supabase = createClient();
 
-  const handleEnterAccount = async (id: string) => {
+  /** Entra a la cuenta y abre `destino` (por defecto el panel del ERP). true = entró. */
+  const handleEnterAccount = async (id: string, destino?: string): Promise<boolean> => {
     setEnteringId(id);
     try {
-      await switchPlatformAccount(supabase, id);
+      await switchPlatformAccount(supabase, id, destino);
+      return true;
     } catch {
       toast.error("No se pudo entrar a la cuenta. Vuelve a intentarlo.");
       setEnteringId(null);
+      return false;
     }
   };
 
@@ -228,6 +231,82 @@ export default function SaasOwnerPage() {
       setIsCreating(false);
     }
   };
+
+  const renderAcciones = (account: Account) => (
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          onClick={() => handleEnterAccount(account.id)}
+          disabled={enteringId !== null || (isVisiting && accountId === account.id)}
+          variant="outline"
+          className="h-9 rounded-xl border-primary/30 text-primary"
+        >
+          <LogIn className="h-4 w-4" />
+          {isVisiting && accountId === account.id ? "Dentro" : enteringId === account.id ? "Entrando…" : "Entrar"}
+        </Button>
+        {/* Invite by Email Button */}
+        <Button
+          onClick={() => setInviteTarget(account)}
+          variant="ghost"
+          className="h-9 w-9 rounded-xl border border-primary/10 bg-primary/5 hover:bg-primary/20 p-0 text-primary"
+          title="Invitar por correo a esta cuenta"
+        >
+          <UserPlus className="h-4 w-4" />
+        </Button>
+
+        {/* Sections this account sees */}
+        <Button
+          onClick={() => setModulesTarget(account)}
+          variant="ghost"
+          className="h-9 w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+          title="Secciones que ve esta cuenta"
+        >
+          <LayoutList className="h-4 w-4" />
+        </Button>
+
+        {/* Business and apps (migration 081) */}
+        <Button
+          onClick={() => setBusinessTarget(account)}
+          disabled={!canEditBusiness}
+          variant="ghost"
+          className="h-9 w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+          title={canEditBusiness ? "Negocio y apps de esta cuenta" : "Falta correr la migración 081 en Supabase"}
+        >
+          <Network className="h-4 w-4" />
+        </Button>
+
+        {/* Toggle Status Button */}
+        <Button
+          onClick={() => handleToggleStatus(account)}
+          disabled={togglingId === account.id}
+          variant="ghost"
+          className="h-9 w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+          title={account.status === "active" ? "Desactivar Acceso" : "Activar Acceso"}
+        >
+          {togglingId === account.id ? (
+            <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent" />
+          ) : account.status === "active" ? (
+            <ToggleRight className="h-5 w-5 text-emerald-500" />
+          ) : (
+            <ToggleLeft className="h-5 w-5 text-muted-foreground/50" />
+          )}
+        </Button>
+
+        {/* Delete Button */}
+        <Button
+          onClick={() => handleDeleteAccount(account)}
+          disabled={deletingId === account.id || account.id === homeAccountId || (isVisiting && account.id === accountId)}
+          variant="ghost"
+          className="h-9 w-9 rounded-xl border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/20 p-0 text-rose-400 hover:text-rose-300"
+          title="Eliminar Cuenta"
+        >
+          {deletingId === account.id ? (
+            <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent" />
+          ) : (
+            <Trash2 className="h-4 w-4" />
+          )}
+        </Button>
+      </div>
+  );
 
   // Cada negocio (Golden Habitat, Broker Home…) es una cuenta; los correos de
   // su personal cuelgan de él en vez de contarse como cuentas aparte.
@@ -415,7 +494,7 @@ export default function SaasOwnerPage() {
                   return (
                   <Fragment key={group.key}>
                   <tr className="bg-white/[0.03]">
-                    <td colSpan={5} className="p-0">
+                    <td colSpan={4} className="p-0">
                       <button
                         type="button"
                         onClick={() => toggleExpanded(group.key)}
@@ -441,8 +520,34 @@ export default function SaasOwnerPage() {
                         />
                       </button>
                     </td>
+                    <td className="py-2 px-4 text-right">
+                      {renderAcciones(group.primary)}
+                    </td>
                   </tr>
-                  {isOpen && [group.primary, ...group.members].map(account => (
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={5} className="pb-5 pl-10 pr-4 pt-1">
+                        <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          Áreas y personas de {group.primary.name}
+                        </p>
+                        <AccountAreaTreeAdmin
+                          cuenta={group.primary}
+                          accountId={group.primary.id}
+                          onEntrar={handleEnterAccount}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  {isOpen && group.members.length > 0 && (
+                    <tr>
+                      <td colSpan={5} className="pl-10 pr-4 pb-1 pt-2">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          Otras cuentas del negocio
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                  {isOpen && group.members.map(account => (
                   <tr key={account.id} className="group hover:bg-white/[0.01] transition-colors">
                     <td className={`py-4 px-4 space-y-1 ${account.id === group.primary.id ? "pl-10" : "pl-16"}`}>
                       <div className="font-bold text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-1.5 text-sm">
@@ -493,92 +598,10 @@ export default function SaasOwnerPage() {
                       </span>
                     </td>
                     <td className="py-4 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          onClick={() => handleEnterAccount(account.id)}
-                          disabled={enteringId !== null || (isVisiting && accountId === account.id)}
-                          variant="outline"
-                          className="h-9 rounded-xl border-primary/30 text-primary"
-                        >
-                          <LogIn className="h-4 w-4" />
-                          {isVisiting && accountId === account.id ? "Dentro" : enteringId === account.id ? "Entrando…" : "Entrar"}
-                        </Button>
-                        {/* Invite by Email Button */}
-                        <Button
-                          onClick={() => setInviteTarget(account)}
-                          variant="ghost"
-                          className="h-9 w-9 rounded-xl border border-primary/10 bg-primary/5 hover:bg-primary/20 p-0 text-primary"
-                          title="Invitar por correo a esta cuenta"
-                        >
-                          <UserPlus className="h-4 w-4" />
-                        </Button>
-
-                        {/* Sections this account sees */}
-                        <Button
-                          onClick={() => setModulesTarget(account)}
-                          variant="ghost"
-                          className="h-9 w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
-                          title="Secciones que ve esta cuenta"
-                        >
-                          <LayoutList className="h-4 w-4" />
-                        </Button>
-
-                        {/* Business and apps (migration 081) */}
-                        <Button
-                          onClick={() => setBusinessTarget(account)}
-                          disabled={!canEditBusiness}
-                          variant="ghost"
-                          className="h-9 w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
-                          title={canEditBusiness ? "Negocio y apps de esta cuenta" : "Falta correr la migración 081 en Supabase"}
-                        >
-                          <Network className="h-4 w-4" />
-                        </Button>
-
-                        {/* Toggle Status Button */}
-                        <Button
-                          onClick={() => handleToggleStatus(account)}
-                          disabled={togglingId === account.id}
-                          variant="ghost"
-                          className="h-9 w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
-                          title={account.status === "active" ? "Desactivar Acceso" : "Activar Acceso"}
-                        >
-                          {togglingId === account.id ? (
-                            <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent" />
-                          ) : account.status === "active" ? (
-                            <ToggleRight className="h-5 w-5 text-emerald-500" />
-                          ) : (
-                            <ToggleLeft className="h-5 w-5 text-muted-foreground/50" />
-                          )}
-                        </Button>
-
-                        {/* Delete Button */}
-                        <Button
-                          onClick={() => handleDeleteAccount(account)}
-                          disabled={deletingId === account.id || account.id === homeAccountId || (isVisiting && account.id === accountId)}
-                          variant="ghost"
-                          className="h-9 w-9 rounded-xl border border-rose-500/10 bg-rose-500/5 hover:bg-rose-500/20 p-0 text-rose-400 hover:text-rose-300"
-                          title="Eliminar Cuenta"
-                        >
-                          {deletingId === account.id ? (
-                            <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </div>
+                      {renderAcciones(account)}
                     </td>
                   </tr>
                   ))}
-                  {isOpen && (
-                    <tr>
-                      <td colSpan={5} className="pb-5 pl-10 pr-4 pt-1">
-                        <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                          Equipo dentro de {group.primary.name}
-                        </p>
-                        <AccountTeam accountId={group.primary.id} apps={group.apps} />
-                      </td>
-                    </tr>
-                  )}
                   </Fragment>
                   );
                 })}

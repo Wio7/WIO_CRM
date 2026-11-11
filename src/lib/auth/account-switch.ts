@@ -6,6 +6,8 @@ export const ACCOUNT_SWITCH_EVENT = "wio-account-switch";
 export async function switchPlatformAccount(
   supabase: SupabaseClient,
   accountId: string | null,
+  /** Ruta a la que se va tras entrar a la cuenta (solo rutas propias; si no, /dashboard). */
+  destino?: string,
 ) {
   const { error } = accountId === null
     ? await supabase.rpc("platform_admin_exit_account")
@@ -17,5 +19,6 @@ export async function switchPlatformAccount(
   } catch {
     // La recarga de esta pestaña no depende del almacenamiento del navegador.
   }
-  window.location.assign(accountId === null ? "/saas-owner" : "/dashboard");
+  const rutaPropia = destino && /^\/(?![/\\])/.test(destino) ? destino : "/dashboard";
+  window.location.assign(accountId === null ? "/saas-owner" : rutaPropia);
 }

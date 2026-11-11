@@ -4,6 +4,8 @@ export interface SaasAccount {
   status: string;
   created_at: string;
   default_currency: string;
+  /** Módulos apagados de la cuenta (migración 066); lo usa el árbol por áreas. */
+  disabled_modules?: string[] | null;
   /** Negocio del que cuelga (migración 081). null = es un negocio. undefined = la base aún no tiene la columna. */
   parent_account_id?: string | null;
   /** Apps del negocio, o las que usa la cuenta que cuelga (migración 081). */
