@@ -66,6 +66,8 @@ export type MemberArea =
   | "ventas"
   | "gerencia"
   | "contabilidad"
+  | "administracion"
+  | "tecnica"
   | "promueve";
 
 export const MEMBER_AREAS: MemberArea[] = [
@@ -75,6 +77,8 @@ export const MEMBER_AREAS: MemberArea[] = [
   "ventas",
   "gerencia",
   "contabilidad",
+  "administracion",
+  "tecnica",
   "promueve",
 ];
 

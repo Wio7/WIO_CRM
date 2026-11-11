@@ -36,6 +36,13 @@ describe("canEnterApp — otras apps (misma regla)", () => {
     expect(canEnterApp("caja", v({ area: "gerencia" }))).toBe(true);
     expect(canEnterApp("caja", v({ area: "cobranzas" }))).toBe(false);
   });
+  it("caja: administracion entra igual que contabilidad; cobranzas no", () => {
+    expect(canEnterApp("caja", v({ area: "administracion" }))).toBe(true);
+    expect(canEnterApp("cobranzas", v({ area: "administracion" }))).toBe(false);
+    for (const app of ["marketing", "gerencia", "tecnica"] as const) {
+      expect(canEnterApp(app, v({ area: "administracion" }))).toBe(false);
+    }
+  });
   it("dueño y super admin entran a todas", () => {
     for (const app of Object.keys(APPS) as (keyof typeof APPS)[]) {
       expect(canEnterApp(app, v({ isOwner: true }))).toBe(true);
@@ -63,6 +70,9 @@ describe("appDeArea — la app propia", () => {
   it("contabilidad cae en Caja mientras no exista su app", () => {
     expect(appDeArea("contabilidad")?.ruta).toBe("/caja");
   });
+  it("administracion cae en Caja", () => {
+    expect(appDeArea("administracion")?.ruta).toBe("/caja");
+  });
   it("legal y ventas viven en otro repo: sin ruta aquí", () => {
     expect(appDeArea("legal")).toBeNull();
     expect(appDeArea("ventas")).toBeNull();
@@ -77,6 +87,9 @@ describe("entradaApp", () => {
   it("contabilidad ve 'otra área' con botón a Caja", () => {
     const r = entradaApp("cobranzas", v({ area: "contabilidad" }));
     expect(r).toEqual({ ok: false, destino: { href: "/caja", etiqueta: "Ir a mi app" } });
+  });
+  it("administracion ve 'otra área' con botón a Caja en Cobranzas", () => {
+    expect(entradaApp("cobranzas", v({ area: "administracion" }))).toEqual({ ok: false, destino: { href: "/caja", etiqueta: "Ir a mi app" } });
   });
   it("quien no tiene app aquí va al ERP web", () => {
     const r = entradaApp("cobranzas", v({ area: "legal" }));

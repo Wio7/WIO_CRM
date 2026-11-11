@@ -14,8 +14,8 @@ export interface AppDef {
 
 export const APPS: Record<AppKey, AppDef> = {
   cobranzas: { areas: ["cobranzas", "gerencia"], ruta: "/cobranzas" },
-  // Contabilidad aún no tiene app propia: su Caja es lo que le corresponde.
-  caja: { areas: ["contabilidad", "gerencia"], ruta: "/caja" },
+  // Contabilidad y Administración aún no tienen app propia: su Caja es lo que les corresponde.
+  caja: { areas: ["contabilidad", "administracion", "gerencia"], ruta: "/caja" },
   // Aún sin ruta en este repo (F6 a F8): se activan al construirlas.
   marketing: { areas: ["marketing"], ruta: "/marketing" },
   gerencia: { areas: ["gerencia"], ruta: "/gerencia" },

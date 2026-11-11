@@ -15,6 +15,7 @@ export const AREA_KEYS = [
   "legal",
   "cobranzas",
   "contabilidad",
+  "administracion",
   "marketing",
   "tecnica",
   "sin_area",
@@ -30,6 +31,7 @@ export const AREA_LABEL: Record<RamaKey, string> = {
   legal: "Legal",
   cobranzas: "Cobranzas",
   contabilidad: "Contabilidad",
+  administracion: "Administración",
   marketing: "Marketing",
   tecnica: "Área técnica",
   sin_area: "Sin área",
@@ -58,6 +60,8 @@ export interface Destino {
   sinErp?: boolean;
   /** null = el área todavía no tiene app ("App en camino"). */
   app: AppDestino | null;
+  /** Color de acento del grupo en el árbol (solo Administración: celeste). */
+  acento?: "celeste";
   /** Encendida o apagada según accounts.disabled_modules. */
   estado: "activa" | "apagada";
 }
@@ -122,6 +126,18 @@ export function destinoDeArea(area: AreaKey, cuenta: CuentaDestino, origen?: str
       return {
         ...base,
         erpHref: "/payment-plans",
+        estado: estadoDe("/payment-plans"),
+        app: app ? interna(cajaMenuLabel(cuenta.name, cuenta.brand_name), app.ruta, origen) : null,
+      };
+    }
+    case "administracion": {
+      // Lleva la Caja Ica (conciliación, abonos, pagos por validar): los mismos
+      // datos que Contabilidad (084/087) y la misma app Caja, pero grupo aparte.
+      const app = appDeArea("administracion");
+      return {
+        ...base,
+        erpHref: "/payment-plans",
+        acento: "celeste",
         estado: estadoDe("/payment-plans"),
         app: app ? interna(cajaMenuLabel(cuenta.name, cuenta.brand_name), app.ruta, origen) : null,
       };
