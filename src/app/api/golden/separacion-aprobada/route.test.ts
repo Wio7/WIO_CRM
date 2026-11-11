@@ -4,7 +4,8 @@ const getRequestAuth = vi.fn();
 const consultar = vi.fn();
 const notifyTeam = vi.fn();
 const insert = vi.fn();
-const eqDelete = vi.fn(async () => ({}));
+const eqEvento = vi.fn(async () => ({}));
+const eqDelete = vi.fn(() => ({ eq: eqEvento }));
 
 vi.mock("@/lib/supabase/request-auth", () => ({ getRequestAuth: (...a: unknown[]) => getRequestAuth(...a) }));
 vi.mock("@/lib/cors", () => ({ corsPreflight: () => new Response(null), withCors: (_r: Request, res: Response) => res }));
@@ -20,7 +21,7 @@ vi.mock("@/lib/flows/admin-client", () => ({
 }));
 vi.mock("@/lib/golden/aviso-separacion", async (importarOriginal) => ({
   ...(await importarOriginal<typeof import("@/lib/golden/aviso-separacion")>()),
-  consultarSeparacionAprobada: (...a: unknown[]) => consultar(...a),
+  consultarAvisoSeparacion: (...a: unknown[]) => consultar(...a),
 }));
 
 const { POST } = await import("./route");
@@ -39,10 +40,11 @@ const sesion = (rol: string | null = "agent") =>
     },
   });
 
-const aprobada = (resuelta = new Date().toISOString()) =>
+const ahora = () => new Date().toISOString();
+const aprobada = (resuelta = ahora()) =>
   consultar.mockResolvedValue({
     estado: "aprobada",
-    solicitud: { proyecto: "colinas-2", lote: "H-26", asesor: "Carlos", resuelta },
+    solicitud: { proyecto: "colinas-2", lote: "H-26", asesor: "Carlos", resuelta, creada: resuelta, actualizado: resuelta },
   });
 
 beforeEach(() => {
@@ -115,5 +117,63 @@ describe("POST /api/golden/separacion-aprobada", () => {
     const res = await POST(pedido({ solicitud_id: ID }));
     expect(await res.json()).toEqual({ ok: true, enviados: 0 });
     expect(eqDelete).toHaveBeenCalledWith("solicitud_id", ID);
+    expect(eqEvento).toHaveBeenCalledWith("evento", "aprobada");
+  });
+
+  it("sin evento en el cuerpo (cliente anterior): consulta y avisa como aprobada", async () => {
+    await POST(pedido({ solicitud_id: ID }));
+    expect(consultar).toHaveBeenCalledWith(ID, "aprobada");
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ solicitud_id: ID, evento: "aprobada" }));
+  });
+
+  it.each([
+    ["solicitada", "Lote en proceso"],
+    ["aprobada", "Lote separado"],
+    ["vendida", "Lote vendido"],
+  ])("evento %s: lo confirma en el catálogo, reserva (solicitud, evento) y titula %s", async (evento, titulo) => {
+    const res = await POST(pedido({ solicitud_id: ID, evento, nombre_proyecto: "Colinas 2" }));
+    expect(await res.json()).toEqual({ ok: true, enviados: 4 });
+    expect(consultar).toHaveBeenCalledWith(ID, evento);
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ solicitud_id: ID, evento }));
+    const [, push] = notifyTeam.mock.calls[0] as [unknown, Record<string, string>];
+    expect(push).toMatchObject({ title: titulo, body: "Colinas 2 · H-26 (Carlos)", url: "/#/lotes/colinas-2" });
+  });
+
+  it("evento desconocido: 400 y no consulta", async () => {
+    expect((await POST(pedido({ solicitud_id: ID, evento: "rechazada" }))).status).toBe(400);
+    expect(consultar).not.toHaveBeenCalled();
+  });
+
+  it("el lote no está en esa etapa (venta sin vender, p. ej.): 409 not_in_stage y no avisa", async () => {
+    consultar.mockResolvedValue({ estado: "no_aprobada" });
+    const res = await POST(pedido({ solicitud_id: ID, evento: "vendida" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ ok: false, reason: "not_in_stage" });
+    expect(notifyTeam).not.toHaveBeenCalled();
+  });
+
+  it("la venta se mide desde la última actualización del lote, no desde la aprobación vieja", async () => {
+    consultar.mockResolvedValue({
+      estado: "aprobada",
+      solicitud: {
+        proyecto: "colinas-2", lote: "H-26", asesor: "Carlos",
+        resuelta: new Date(Date.now() - 5 * 3600_000).toISOString(), actualizado: ahora(),
+      },
+    });
+    expect((await POST(pedido({ solicitud_id: ID, evento: "vendida" }))).status).toBe(200);
+    consultar.mockResolvedValue({
+      estado: "aprobada",
+      solicitud: {
+        proyecto: "colinas-2", lote: "H-26", asesor: "Carlos", resuelta: ahora(),
+        actualizado: new Date(Date.now() - 5 * 3600_000).toISOString(),
+      },
+    });
+    expect((await POST(pedido({ solicitud_id: ID, evento: "vendida" }))).status).toBe(409);
+  });
+
+  it("el cuerpo no puede traer el texto del aviso: título y cuerpo salen del catálogo", async () => {
+    await POST(pedido({ solicitud_id: ID, evento: "solicitada", title: "Falso", body: "Falso", lote: "Z-1" }));
+    const [, push] = notifyTeam.mock.calls[0] as [unknown, Record<string, string>];
+    expect(JSON.stringify(push)).not.toMatch(/Falso|Z-1/);
   });
 });
