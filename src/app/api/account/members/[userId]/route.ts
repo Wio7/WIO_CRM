@@ -102,7 +102,7 @@ async function changeMember(
     }
     if (cambiaArea && !isArea(body?.area)) {
       return NextResponse.json(
-        { error: "'area' must be marketing, legal, cobranzas, ventas or null" },
+        { error: "'area' must be one of the known areas (marketing, legal, cobranzas, ventas, gerencia, contabilidad, promueve) or null" },
         { status: 400 },
       );
     }

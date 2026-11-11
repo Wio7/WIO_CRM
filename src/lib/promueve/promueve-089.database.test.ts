@@ -1,5 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { readFileSync } from "node:fs";
+import { hashCodigo } from "./registro";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // PostgreSQL desechable en memoria (sin credenciales ni BD real). Mismos
@@ -9,8 +10,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const db = new PGlite();
 const sql = (name: string) => readFileSync(`supabase/migrations/${name}.sql`, "utf8");
 
-const ALEJANDRO = "289a80e1-9d61-4e83-9b93-c91e1b843851";
-const GOLDEN = "d74b5dfd-2999-4e2c-9a0e-10b3d540898b";
 
 beforeAll(async () => {
   await db.exec(`
@@ -106,5 +105,12 @@ describe.sequential("089: área Promueve", () => {
     // El script termina en ROLLBACK: no deja datos.
     const left = await db.query("SELECT 1 FROM auth.users WHERE email LIKE 't089-%'");
     expect(left.rows).toHaveLength(0);
+  });
+
+  it("el hash de la base coincide con el del servidor (mismo código, mismo SHA-256)", async () => {
+    for (const codigo of ["golden-2026x", "ab12 cd34 ef56", "AB12CD34EF56"]) {
+      const r = await db.query<{ h: string }>("SELECT public.promueve_hash_code($1) AS h", [codigo]);
+      expect(r.rows[0].h).toBe(hashCodigo(codigo));
+    }
   });
 });

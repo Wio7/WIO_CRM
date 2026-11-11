@@ -81,6 +81,7 @@ interface Member {
   email: string | null;
   avatar_url: string | null;
   role: AccountRole;
+  area?: string | null;
   joined_at: string;
   is_primary_owner?: boolean;
 }
@@ -393,6 +394,12 @@ export function MembersTab() {
                         {isSelf && (
                           <Badge className="bg-muted text-muted-foreground border-border text-[10px] uppercase tracking-wide">
                             You
+                          </Badge>
+                        )}
+                        {/* Asesor externo: sin correo de empresa ni planilla (089). */}
+                        {member.area === 'promueve' && (
+                          <Badge className="border-amber-500/40 bg-amber-500/10 text-amber-300 text-[10px]">
+                            Promueve (externo)
                           </Badge>
                         )}
                       </div>

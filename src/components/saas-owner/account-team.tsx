@@ -28,6 +28,7 @@ const AREA_LABEL: Record<string, string> = {
   ventas: "Jefatura de ventas",
   gerencia: "Gerencia",
   contabilidad: "Contabilidad",
+  promueve: "Promueve (externo)",
 };
 
 // Qué app de la familia corresponde a cada área (migración 046): legal va a

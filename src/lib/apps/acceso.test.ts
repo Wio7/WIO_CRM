@@ -44,6 +44,18 @@ describe("canEnterApp — otras apps (misma regla)", () => {
   });
 });
 
+describe("Promueve (externo)", () => {
+  it("no entra a ninguna app ni con permisos de dueño", () => {
+    for (const app of Object.keys(APPS) as (keyof typeof APPS)[]) {
+      expect(canEnterApp(app, v({ area: "promueve" }))).toBe(false);
+      expect(canEnterApp(app, v({ area: "promueve", isOwner: true }))).toBe(false);
+    }
+  });
+  it("no tiene app propia en este repo", () => {
+    expect(appDeArea("promueve")).toBeNull();
+  });
+});
+
 describe("appDeArea — la app propia", () => {
   it("cobranzas tiene app en este repo", () => {
     expect(appDeArea("cobranzas")?.ruta).toBe("/cobranzas");

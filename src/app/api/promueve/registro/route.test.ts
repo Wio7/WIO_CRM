@@ -4,7 +4,7 @@ import { hashCodigo } from "@/lib/promueve/registro";
 
 const rpc = vi.fn();
 const createUser = vi.fn();
-const deleteUser = vi.fn(async () => ({ error: null }));
+const deleteUser = vi.fn(async (id: string) => ({ error: null, id }));
 const borrarCuenta = vi.fn();
 const perfil = vi.fn();
 let limite = { success: true as boolean };
@@ -20,8 +20,8 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/flows/admin-client", () => ({
   supabaseAdmin: () => ({
-    rpc: (...a: unknown[]) => rpc(...a),
-    auth: { admin: { createUser: (...a: unknown[]) => createUser(...a), deleteUser: (...a: unknown[]) => deleteUser(...a) } },
+    rpc: (nombre: string, args: unknown) => rpc(nombre, args),
+    auth: { admin: { createUser: (a: unknown) => createUser(a), deleteUser: (a: string) => deleteUser(a) } },
     from: (tabla: string) =>
       tabla === "profiles"
         ? { select: () => ({ eq: () => ({ maybeSingle: perfil }) }) }
@@ -49,7 +49,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   llaves.length = 0;
   limite = { success: true };
-  rpc.mockImplementation(async (nombre: string) =>
+  rpc.mockImplementation(async (nombre: unknown) =>
     nombre === "promueve_check_code" ? { data: "cuenta-golden", error: null } : { data: "cuenta-golden", error: null },
   );
   createUser.mockResolvedValue({ data: { user: { id: "u-nuevo" } }, error: null });
@@ -101,7 +101,7 @@ describe("POST /api/promueve/registro", () => {
   });
 
   it("si el registro del perfil falla, borra la cuenta personal y el usuario de Auth", async () => {
-    rpc.mockImplementation(async (nombre: string) =>
+    rpc.mockImplementation(async (nombre: unknown) =>
       nombre === "promueve_check_code"
         ? { data: "cuenta-golden", error: null }
         : { data: null, error: { code: "XX000", message: "boom" } },
@@ -113,7 +113,7 @@ describe("POST /api/promueve/registro", () => {
   });
 
   it("si otro se ganó el último uso del código, lo dice y no deja al usuario", async () => {
-    rpc.mockImplementation(async (nombre: string) =>
+    rpc.mockImplementation(async (nombre: unknown) =>
       nombre === "promueve_check_code"
         ? { data: "cuenta-golden", error: null }
         : { data: null, error: { code: "22023", message: "Código no válido" } },
