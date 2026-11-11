@@ -129,6 +129,17 @@ body[data-golden-app] .text-red-400 { color: var(--bad); }
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
+/* Rótulo de la demostración: en celular va en una franja bajo la cabecera para no quitarle sitio al título. */
+.gapp-chip-laptop { display: none; }
+.gapp-demo-strip {
+  padding: 6px 16px;
+  background: var(--gold-soft);
+  border-bottom: 1px solid #ecd7a2;
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
 .gapp-icon-btn {
   display: grid;
   place-items: center;
@@ -304,6 +315,9 @@ body[data-golden-app] .text-red-400 { color: var(--bad); }
   .gapp-topbar .gapp-eyebrow,
   .gapp-topbar .gapp-icon-btn { display: none; }
   .gapp-topbar-title { font-size: 28px; letter-spacing: -0.015em; }
+  .gapp-chip-laptop { display: inline-block; }
+  .gapp-demo-strip { display: none; }
+  .gcard-mini:first-child { grid-column: auto; }
   .gapp-chip-demo { border-color: var(--gold); color: var(--warn); background: var(--gold-soft); }
   .gapp-main { padding: 24px 36px 40px; }
 }
@@ -342,6 +356,7 @@ body[data-golden-app] .text-red-400 { color: var(--bad); }
   gap: 8px;
   margin-top: 16px;
 }
+.gcard-mini:first-child { grid-column: 1 / -1; }
 .gcard-mini {
   padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);

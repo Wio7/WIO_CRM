@@ -100,7 +100,6 @@ export function GoldenShell({ app, icono: Icono, secciones, loginPath, equipo, b
 
   return envolver(
     <GoldenFrame
-      app={app}
       nombre={nombre}
       subtitulo={subtituloApp(account?.name, account?.brand_name)}
       icono={Icono}

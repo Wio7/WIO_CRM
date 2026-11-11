@@ -15,8 +15,8 @@ export async function GET() {
       start_url: "/cobranzas",
       scope: "/cobranzas",
       display: "standalone",
-      background_color: "#f7f8f6",
-      theme_color: "#0b3d3a",
+      background_color: "#f5f1ea",
+      theme_color: "#1d0b0f",
       icons: [
         { src: "/cobranzas/icono/192", sizes: "192x192", type: "image/png" },
         { src: "/cobranzas/icono/512", sizes: "512x512", type: "image/png" },

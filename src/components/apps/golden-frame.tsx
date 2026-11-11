@@ -58,8 +58,6 @@ export function GoldenBody({ app, children }: { app: string; children: ReactNode
 }
 
 export interface GoldenFrameProps {
-  /** Identificador de la app (cobranzas, caja...): va en body[data-app]. */
-  app: string;
   nombre: string;
   /** Subtítulo dorado de la marca (solo cuentas Golden); null = ninguno. */
   subtitulo: string | null;
@@ -77,7 +75,6 @@ export interface GoldenFrameProps {
 }
 
 export function GoldenFrame({
-  app,
   nombre,
   subtitulo,
   icono: Icono,
@@ -140,7 +137,7 @@ export function GoldenFrame({
             <div className="gapp-topbar-title" role="heading" aria-level={1}>{titulo}</div>
           </div>
           <div className="gapp-topbar-actions">
-            {rotuloDemo && <span className="gapp-chip-demo">{rotuloDemo}</span>}
+            {rotuloDemo && <span className="gapp-chip-demo gapp-chip-laptop">{rotuloDemo}</span>}
             {onSignOut && (
               <button type="button" onClick={onSignOut} aria-label="Cerrar sesión" className="gapp-icon-btn">
                 <LogOut size={18} />
@@ -149,6 +146,7 @@ export function GoldenFrame({
           </div>
         </header>
 
+        {rotuloDemo && <div className="gapp-demo-strip">{rotuloDemo}</div>}
         <main className="gapp-main">{children}</main>
       </div>
 

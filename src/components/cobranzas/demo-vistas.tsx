@@ -12,7 +12,7 @@ import { CalendarDays, Check, ClipboardList, FileText, HandCoins, MessageCircle 
 import { GoldenBody, GoldenFrame, type SeccionApp } from "@/components/apps/golden-frame";
 import { ResumenMoraCard } from "@/components/cobranzas/resumen-mora";
 import { fechaLima, type Debtor, type Tramo } from "@/lib/collections";
-import { formatCurrency } from "@/lib/currency";
+import { dinero as formatCurrency } from "@/lib/cobranzas/dinero";
 import {
   GESTIONES_DEMO,
   HOY_DEMO,
@@ -36,7 +36,6 @@ export function DemoCobranzasShell({ children }: { children: React.ReactNode }) 
   return (
     <GoldenBody app="cobranzas">
       <GoldenFrame
-        app="cobranzas"
         nombre="Golden Cobranzas"
         subtitulo="GOLDEN · DREAM HABITAT"
         icono={HandCoins}
@@ -76,7 +75,7 @@ export function MorososDemo() {
 
   return (
     <div className="space-y-5">
-      <ResumenMoraCard resumen={resumen} tramo={tramo} onTramo={setTramo} />
+      <ResumenMoraCard resumen={resumen} tramo={tramo} onTramo={setTramo} formatear={formatCurrency} />
       <p className="text-sm" style={{ color: "var(--ink-3)" }}>
         Clientes con cuotas vencidas al {fechaLima(HOY_DEMO)}, del atraso más antiguo al más reciente.
       </p>
