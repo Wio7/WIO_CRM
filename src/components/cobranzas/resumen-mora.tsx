@@ -5,7 +5,7 @@
 // vez sirven de filtro. La usan la app (/cobranzas) y la demo.
 
 import { TRAMOS, type Tramo } from "@/lib/collections";
-import { formatCurrency } from "@/lib/currency";
+import { dinero } from "@/lib/cobranzas/dinero";
 import type { ResumenMora } from "@/lib/cobranzas/resumen";
 
 interface Props {
@@ -18,14 +18,14 @@ interface Props {
   formatear?: (valor: number, moneda: string) => string;
 }
 
-export function ResumenMoraCard({ resumen, tramo, onTramo, moraPorMoneda = {}, formatear = formatCurrency }: Props) {
+export function ResumenMoraCard({ resumen, tramo, onTramo, moraPorMoneda = {}, formatear = dinero }: Props) {
   const [principal, ...otras] = resumen.porMoneda;
   const clientes = resumen.porMoneda.reduce((n, m) => n + m.clientes, 0);
   const mora = principal ? moraPorMoneda[principal.currency] ?? 0 : 0;
 
   return (
     <section className="gcard-hero" aria-label="Resumen de la mora">
-      <p className="gcard-hero-label">Total vencido{principal ? ` (${principal.currency})` : ""}</p>
+      <p className="gcard-hero-label">Total vencido</p>
       <p className="gcard-hero-value">{principal ? formatear(principal.monto, principal.currency) : "—"}</p>
       <p className="gcard-hero-sub">
         {principal ? `${principal.clientes} cliente${principal.clientes === 1 ? "" : "s"}` : "Nadie con cuotas vencidas"}

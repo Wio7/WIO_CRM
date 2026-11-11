@@ -286,7 +286,7 @@ export function DelDiaDemo() {
   return (
     <div className="space-y-5">
       <section className="gcard-hero" aria-label="Cobrado en el día">
-        <p className="gcard-hero-label">Cobrado el {fechaLima(HOY_DEMO)} (PEN)</p>
+        <p className="gcard-hero-label">Cobrado el {fechaLima(HOY_DEMO)}</p>
         <p className="gcard-hero-value">{formatCurrency(soles, "PEN")}</p>
         <p className="gcard-hero-sub">{plural(PAGOS_DEL_DIA_DEMO.length, "pago registrado", "pagos registrados")}</p>
       </section>
