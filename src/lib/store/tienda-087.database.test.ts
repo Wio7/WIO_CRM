@@ -19,6 +19,7 @@ const PROD_A1 = "a0870000-0000-4000-8000-0000000000a1";
 const PROD_A2 = "a0870000-0000-4000-8000-0000000000a2";
 const PROD_OFF = "a0870000-0000-4000-8000-0000000000a3";
 const PROD_B1 = "b0870000-0000-4000-8000-0000000000b1";
+const OLD = "c0870000-0000-4000-8000-00000000000c";
 
 const input = (items: object[], extra: object = {}) =>
   JSON.stringify({
@@ -74,7 +75,9 @@ beforeAll(async () => {
       BEGIN NEW.updated_at = now(); RETURN NEW; END $$;
     CREATE TABLE accounts(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text,
       owner_user_id uuid REFERENCES auth.users,
-      status text NOT NULL DEFAULT 'active', viewers_are_clients boolean NOT NULL DEFAULT false);
+      status text NOT NULL DEFAULT 'active', viewers_are_clients boolean NOT NULL DEFAULT false,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      disabled_modules text[] NOT NULL DEFAULT ARRAY[]::text[]);
     CREATE TABLE profiles(id uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
       user_id uuid PRIMARY KEY REFERENCES auth.users ON DELETE CASCADE,
       account_id uuid NOT NULL REFERENCES accounts ON DELETE CASCADE,
@@ -127,6 +130,9 @@ beforeAll(async () => {
   ]) {
     await db.exec(sql(m));
   }
+  // Cuenta anterior al módulo: la 087 le apaga la Tienda (una sola vez).
+  await db.exec(`INSERT INTO accounts (id, name, created_at, disabled_modules)
+    VALUES ('${OLD}', 'Antigua', '2026-01-01', ARRAY['/coupons']);`);
   await db.exec(sql("087_tienda"));
   await db.exec(sql("087_tienda"));
 
@@ -255,6 +261,15 @@ describe.sequential("087: tienda", () => {
         db.exec(`INSERT INTO store_products (account_id, name, price) VALUES ('${A}', 'Colado', 1)`),
       ).rejects.toThrow();
     });
+  });
+
+  it("apaga la Tienda solo en cuentas anteriores al modulo, sin duplicarla", async () => {
+    const r = await db.query<{ id: string; disabled_modules: string[] }>(
+      `SELECT id, disabled_modules FROM accounts WHERE id IN ('${OLD}', '${A}') ORDER BY name`,
+    );
+    const byId = Object.fromEntries(r.rows.map((x) => [x.id, x.disabled_modules]));
+    expect(byId[OLD]).toEqual(["/coupons", "/store"]);
+    expect(byId[A]).toEqual([]);
   });
 
   it("my_module_access suma tienda", async () => {

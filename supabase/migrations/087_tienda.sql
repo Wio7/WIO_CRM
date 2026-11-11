@@ -334,6 +334,16 @@ ALTER FUNCTION public.my_module_access() OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.my_module_access() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.my_module_access() TO authenticated;
 
+-- La Tienda es opcional: las cuentas que ya existían antes de este módulo
+-- la tienen apagada (sus dueños y gerentes no deben ver un menú nuevo).
+-- El corte por fecha evita volver a apagarla en cuentas nuevas si se
+-- corre de nuevo. Para encenderla en una cuenta: quitar '/store' de
+-- accounts.disabled_modules (el seed de la tienda lo hace).
+UPDATE public.accounts
+   SET disabled_modules = array_append(disabled_modules, '/store')
+ WHERE created_at < TIMESTAMPTZ '2026-11-11 00:00:00-05'
+   AND NOT ('/store' = ANY (disabled_modules));
+
 COMMENT ON TABLE public.store_orders IS
   'Pedidos de la Tienda. Se crean solo con store_create_order (service_role, API pública); el personal cambia estado y notas.';
 
