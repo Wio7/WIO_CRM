@@ -130,16 +130,16 @@ describe("destinoDeArea promueve", () => {
 });
 
 describe("destinoDeArea administracion", () => {
-  it("administracion: lleva la Caja, ERP en cuotas y acento celeste", () => {
+  it("administracion: lleva su app (Caja Ica), ERP en cuotas y acento celeste", () => {
     expect(destinoDeArea("administracion", golden, ORIGEN)).toMatchObject({
       key: "administracion",
       label: "Administración",
       erpHref: "/payment-plans",
       acento: "celeste",
       estado: "activa",
-      app: { nombre: "Golden Caja", url: `${ORIGEN}/caja` },
+      app: { nombre: "Golden Administración", url: `${ORIGEN}/administracion` },
     });
-    expect(destinoDeArea("administracion", otra, ORIGEN).app?.nombre).toBe("Caja chica");
+    expect(destinoDeArea("administracion", otra, ORIGEN).app?.nombre).toBe("Administración");
   });
 
   it("solo administracion lleva acento; las demas no", () => {

@@ -14,6 +14,11 @@ describe("nombre de cada app por cuenta", () => {
       expect(label).not.toMatch(/wio/i);
     }
   });
+  it("Administración: Golden Administración o Administración, nunca Wio", () => {
+    expect(nombreApp("administracion", "Golden Habitat")).toBe("Golden Administración");
+    expect(nombreApp("administracion", "Broker Home")).toBe("Administración");
+    expect(nombreApp("administracion", null)).not.toMatch(/wio/i);
+  });
   it("sirve para las próximas apps", () => {
     expect(nombreApp("marketing", "Golden Habitat")).toBe("Golden Marketing");
     expect(nombreApp("tecnica", "Otra")).toBe("Área técnica");

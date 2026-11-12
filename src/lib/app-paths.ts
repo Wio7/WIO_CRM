@@ -1,22 +1,27 @@
 // Rutas de app a las que se puede volver tras iniciar sesión (parámetro `next`).
 // Lo que no esté aquí cae a /dashboard, así `next` no sirve de redirección abierta.
 // Cada app nueva (Fase F) se suma aquí y en APP_LOGINS si tiene login propio.
-export const APP_PATHS = ["/caja", "/collections", "/cobranzas"] as const;
+export const APP_PATHS = ["/caja", "/collections", "/cobranzas", "/administracion"] as const;
 
 /** Apps con pantalla de login propia dentro de su scope (en Android no se abre con barras de navegador). */
 const APP_LOGINS: Record<string, string> = {
   "/cobranzas": "/cobranzas/login",
+  "/administracion": "/administracion/login",
 };
 
 /** Archivos de una app que se abren sin sesión: su login, su manifiesto, sus íconos y sus demostraciones (datos inventados, no escriben nada). */
-const APP_PUBLIC = ["/cobranzas/login", "/cobranzas/manifest.webmanifest", "/cobranzas/demo", "/caja/demo"];
+const APP_PUBLIC = [
+  "/cobranzas/login", "/cobranzas/manifest.webmanifest", "/cobranzas/demo",
+  "/administracion/login", "/administracion/manifest.webmanifest", "/administracion/demo",
+  "/caja/demo",
+];
 /** Carpetas públicas de una app (íconos). */
-const APP_PUBLIC_DIRS = ["/cobranzas/icono/", "/cobranzas/demo/"];
+const APP_PUBLIC_DIRS = ["/cobranzas/icono/", "/cobranzas/demo/", "/administracion/icono/", "/administracion/demo/"];
 
 /** Rutas que piden sesión (se compara por prefijo, como siempre). */
 const PROTECTED_PREFIXES = [
   "/dashboard", "/inbox", "/contacts", "/pipelines", "/broadcasts", "/automations", "/settings",
-  "/caja", "/collections", "/cobranzas", "/cuentas",
+  "/caja", "/collections", "/cobranzas", "/administracion", "/cuentas",
 ];
 
 const dentroDe = (path: string, base: string) => path === base || path.startsWith(base + "/");
@@ -34,6 +39,11 @@ export function isProtectedPath(pathname: string): boolean {
 export function appLoginPath(pathname: string): string {
   const base = Object.keys(APP_LOGINS).find((b) => dentroDe(pathname, b));
   return base ? APP_LOGINS[base] : "/login";
+}
+
+/** Si `pathname` es la pantalla de login de una app, la ruta de inicio de esa app (si no, null). */
+export function appDeLogin(pathname: string): string | null {
+  return Object.keys(APP_LOGINS).find((b) => APP_LOGINS[b] === pathname) ?? null;
 }
 
 export function safeNextPath(next: string | null, fallback = "/dashboard"): string {
