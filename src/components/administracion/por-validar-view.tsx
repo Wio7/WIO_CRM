@@ -144,7 +144,7 @@ export function PorValidarView({ movimientos, pagos, acciones, hrefVouchers }: P
                         <td>{textoPago(v)}</td>
                         <td>{fechaLima(v.paidOn)}</td>
                         <td>{v.metodo ?? "—"}</td>
-                        <td style={{ textAlign: "right" }} className="font-semibold">{dinero(v.amount, v.moneda)}</td>
+                        <td style={{ textAlign: "right" }} className="whitespace-nowrap font-semibold">{dinero(v.amount, v.moneda)}</td>
                       </tr>
                     );
                   })}

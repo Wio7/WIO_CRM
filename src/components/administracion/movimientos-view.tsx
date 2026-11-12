@@ -75,9 +75,9 @@ export function MovimientosView({ movimientos }: { movimientos: MovimientoGuarda
                       {m.propio && <span className="block text-xs" style={{ color: "var(--ink-3)" }}>Traspaso entre cuentas propias</span>}
                     </td>
                     <td><ChipTipo tipo={m.tipo} /></td>
-                    <td style={{ textAlign: "right" }} className="font-semibold">{m.deposito > 0 ? dinero(m.deposito, "PEN") : ""}</td>
-                    <td style={{ textAlign: "right" }}>{m.retiro > 0 ? dinero(-m.retiro, "PEN") : ""}</td>
-                    <td style={{ textAlign: "right", color: "var(--ink-3)" }}>{m.saldo === null ? "" : dinero(m.saldo, "PEN")}</td>
+                    <td style={{ textAlign: "right" }} className="whitespace-nowrap font-semibold">{m.deposito > 0 ? dinero(m.deposito, "PEN") : ""}</td>
+                    <td style={{ textAlign: "right" }} className="whitespace-nowrap">{m.retiro > 0 ? dinero(-m.retiro, "PEN") : ""}</td>
+                    <td style={{ textAlign: "right", color: "var(--ink-3)" }} className="whitespace-nowrap">{m.saldo === null ? "" : dinero(m.saldo, "PEN")}</td>
                     <td><ChipEstado estado={m.estado} /></td>
                   </tr>
                 ))}

@@ -57,7 +57,7 @@ export function ResumenView({ mes, onMes, resumen, faltaConciliar, vacio, hrefEs
             <span className="gcard-mini-value block">{dinero(propios, "PEN")}</span>
           </div>
           <div className="gcard-mini">
-            <span className="gcard-mini-label">Comisiones (las paga la empresa) · {resumen.comisiones.n}</span>
+            <span className="gcard-mini-label">Comisiones (las paga la empresa)</span>
             <span className="gcard-mini-value block">{dinero(resumen.comisiones.monto, "PEN")}</span>
           </div>
           <div className={`gcard-mini ${faltaConciliar > 0 ? "gcard-mini--aviso" : ""}`}>

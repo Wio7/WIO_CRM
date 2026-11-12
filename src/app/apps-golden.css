@@ -474,14 +474,15 @@ body[data-golden-app] .text-red-400 { color: var(--bad); }
   text-decoration: none;
 }
 .gbtn { background: var(--guinda); color: #fff; }
-.gbtn:disabled { opacity: 0.55; }
+.gbtn:disabled { opacity: 0.7; }
 .gbtn-line { border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
-.gbtn-line:disabled { opacity: 0.55; }
+.gbtn-line:disabled { opacity: 0.7; }
 @media (min-width: 768px) { .gbtn, .gbtn-line { min-height: 34px; padding: 0 12px; font-size: 13px; } }
 
 /* Selector de mes. */
 .gmes { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.gmes-nombre { font-family: var(--g-font-display); font-size: 18px; font-weight: 500; text-transform: capitalize; }
+.gmes-nombre { font-family: var(--g-font-display); font-size: 18px; font-weight: 500; }
+.gmes-nombre::first-letter { text-transform: uppercase; }
 
 /* Aviso "Próximamente" y avisos de la pantalla. */
 .gsoon {
