@@ -30,3 +30,11 @@ describe("formato de la app de Administración", () => {
     expect(sumarDias("2026-01-01", -1)).toBe("2025-12-31");
   });
 });
+
+describe("mesesEntre", () => {
+  it("lista los meses que toca un periodo", async () => {
+    const { mesesEntre } = await import("./formato");
+    expect(mesesEntre("2026-10-01", "2026-10-31")).toEqual(["2026-10"]);
+    expect(mesesEntre("2026-12-15", "2027-02-02")).toEqual(["2026-12", "2027-01", "2027-02"]);
+  });
+});

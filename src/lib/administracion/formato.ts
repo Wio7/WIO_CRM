@@ -46,3 +46,10 @@ export function sumarDias(fecha: string, dias: number): string {
   const t = new Date(Date.UTC(y, m - 1, d + dias));
   return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
 }
+
+/** Meses (aaaa-mm) que toca un rango de fechas, de menor a mayor. */
+export function mesesEntre(desde: string, hasta: string): string[] {
+  const salida: string[] = [];
+  for (let m = desde.slice(0, 7); m <= hasta.slice(0, 7) && salida.length < 36; m = sumarMes(m, 1)) salida.push(m);
+  return salida;
+}
