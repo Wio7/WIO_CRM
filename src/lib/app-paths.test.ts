@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { appLoginPath, isAppPublicPath, isProtectedPath, safeNextPath } from "./app-paths";
+import { appDeLogin, appLoginPath, isAppPublicPath, isProtectedPath, safeNextPath } from "./app-paths";
 
 describe("safeNextPath", () => {
   it("acepta rutas de app permitidas", () => {
@@ -65,6 +65,33 @@ describe("isAppPublicPath", () => {
     expect(isAppPublicPath("/cobranzas")).toBe(false);
     expect(isAppPublicPath("/cobranzas/loginx")).toBe(false);
     expect(isAppPublicPath("/cobranzas/cliente/abc")).toBe(false);
+  });
+});
+
+describe("app de Administración", () => {
+  it("vuelve a su app tras el login y tiene login propio", () => {
+    expect(safeNextPath("/administracion/estado-de-cuenta")).toBe("/administracion/estado-de-cuenta");
+    expect(safeNextPath("/administracionevil")).toBe("/dashboard");
+    expect(safeNextPath("/administracion/login", "/administracion")).toBe("/administracion");
+    expect(appLoginPath("/administracion")).toBe("/administracion/login");
+    expect(appLoginPath("/administracion/por-validar")).toBe("/administracion/login");
+    expect(appLoginPath("/administracionevil")).toBe("/login");
+  });
+  it("su login, manifiesto, íconos y demo son públicos; lo demás pide sesión", () => {
+    for (const p of ["/administracion/login", "/administracion/manifest.webmanifest", "/administracion/icono/192", "/administracion/demo", "/administracion/demo/estado-de-cuenta"]) {
+      expect(isAppPublicPath(p), p).toBe(true);
+      expect(isProtectedPath(p), p).toBe(false);
+    }
+    for (const p of ["/administracion", "/administracion/estado-de-cuenta", "/administracion/por-validar", "/administracion/loginx", "/administracion/demoX"]) {
+      expect(isAppPublicPath(p), p).toBe(false);
+      expect(isProtectedPath(p), p).toBe(true);
+    }
+  });
+  it("appDeLogin dice a qué app pertenece una pantalla de login", () => {
+    expect(appDeLogin("/administracion/login")).toBe("/administracion");
+    expect(appDeLogin("/cobranzas/login")).toBe("/cobranzas");
+    expect(appDeLogin("/login")).toBeNull();
+    expect(appDeLogin("/administracion")).toBeNull();
   });
 });
 

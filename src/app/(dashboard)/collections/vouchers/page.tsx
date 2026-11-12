@@ -168,7 +168,7 @@ export default function VouchersPage() {
     <div className="space-y-6">
       <div>
         <Link href={paths.base} className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-3 w-3" /> Cobranzas
+          <ArrowLeft className="h-3 w-3" /> {paths.volver ?? "Cobranzas"}
         </Link>
         <h1 className="flex items-center gap-2 text-2xl font-semibold">
           <FileText className="h-6 w-6 text-primary" /> Vouchers por revisar

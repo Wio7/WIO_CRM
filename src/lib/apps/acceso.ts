@@ -3,18 +3,26 @@
 // app de Cobranzas. Puro y con pruebas; lo reusan las apps que vienen
 // (Contabilidad, Marketing, Gerencia, Técnica): basta una fila en APPS.
 
-export type AppKey = "cobranzas" | "caja" | "marketing" | "gerencia" | "tecnica";
+export type AppKey = "cobranzas" | "administracion" | "caja" | "marketing" | "gerencia" | "tecnica";
 
 export interface AppDef {
   /** Áreas (profiles.area) que entran. Dueño y super admin entran siempre. */
   areas: readonly string[];
   /** Ruta de la app dentro de este repo. */
   ruta: string;
+  /**
+   * Áreas para las que esta es SU app (a donde se las manda si caen en otra).
+   * Si falta, son las mismas de `areas`. Contabilidad entra a Administración
+   * pero su app sigue siendo la Caja.
+   */
+  propia?: readonly string[];
 }
 
 export const APPS: Record<AppKey, AppDef> = {
   cobranzas: { areas: ["cobranzas", "gerencia"], ruta: "/cobranzas" },
-  // Contabilidad y Administración aún no tienen app propia: su Caja es lo que les corresponde.
+  // Administración (F5): la Caja Ica. Entra también contabilidad (mismos datos, 092); su app propia sigue siendo la Caja.
+  administracion: { areas: ["administracion", "contabilidad"], ruta: "/administracion", propia: ["administracion"] },
+  // Contabilidad aún no tiene app propia: su Caja es lo que le corresponde.
   caja: { areas: ["contabilidad", "administracion", "gerencia"], ruta: "/caja" },
   // Aún sin ruta en este repo (F6 a F8): se activan al construirlas.
   marketing: { areas: ["marketing"], ruta: "/marketing" },
@@ -23,7 +31,7 @@ export const APPS: Record<AppKey, AppDef> = {
 };
 
 /** Apps que ya existen como ruta en este repo (el resto no se ofrece como destino). */
-const EXISTENTES: readonly AppKey[] = ["cobranzas", "caja"];
+const EXISTENTES: readonly AppKey[] = ["cobranzas", "administracion", "caja"];
 
 /**
  * Áreas de gente de afuera de la empresa (089): asesores externos que venden
@@ -51,7 +59,7 @@ export function canEnterApp(app: AppKey, viewer: Viewer): boolean {
 /** La app de un área, si existe aquí. Para áreas con varias, la primera que exista. */
 export function appDeArea(area: string | null): (AppDef & { key: AppKey }) | null {
   if (!area) return null;
-  const key = EXISTENTES.find((k) => APPS[k].areas.includes(area));
+  const key = EXISTENTES.find((k) => (APPS[k].propia ?? APPS[k].areas).includes(area));
   return key ? { key, ...APPS[key] } : null;
 }
 

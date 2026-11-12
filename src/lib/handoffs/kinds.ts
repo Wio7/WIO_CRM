@@ -5,7 +5,8 @@
 // ============================================================
 
 export type HandoffKind = "pase_legal" | "postventa_desde_cobranzas" | "postventa_desde_legal";
-export type HandoffModule = "cobranzas" | "legal" | "postventa";
+// "administracion" aún no envía ni recibe ningún tipo (llega con F5b); su bandeja se abre vacía.
+export type HandoffModule = "cobranzas" | "legal" | "postventa" | "administracion";
 export type HandoffTopic = "ubicacion" | "avance_obra" | "entrega" | "documentos" | "otro";
 
 export const HANDOFF_KINDS: Record<

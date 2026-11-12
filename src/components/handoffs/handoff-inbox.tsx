@@ -29,7 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-const AREA: Record<HandoffModule, string> = { cobranzas: "Cobranzas", legal: "Legal", postventa: "Postventa" };
+const AREA: Record<HandoffModule, string> = { cobranzas: "Cobranzas", legal: "Legal", postventa: "Postventa", administracion: "Administración" };
 
 const fechaHora = (iso: string) =>
   new Date(iso).toLocaleString("es-PE", {

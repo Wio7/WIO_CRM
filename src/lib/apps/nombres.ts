@@ -3,8 +3,9 @@
 // demás cuentas el nombre genérico del área. (La Caja conserva su propio
 // cajaMenuLabel en src/lib/cash/menu.ts.)
 
-const AREA: Record<"cobranzas" | "marketing" | "gerencia" | "tecnica", { golden: string; generico: string }> = {
+const AREA: Record<"cobranzas" | "administracion" | "marketing" | "gerencia" | "tecnica", { golden: string; generico: string }> = {
   cobranzas: { golden: "Golden Cobranzas", generico: "Cobranzas" },
+  administracion: { golden: "Golden Administración", generico: "Administración" },
   marketing: { golden: "Golden Marketing", generico: "Marketing" },
   gerencia: { golden: "Golden Gerencia", generico: "Gerencia" },
   tecnica: { golden: "Golden Área técnica", generico: "Área técnica" },

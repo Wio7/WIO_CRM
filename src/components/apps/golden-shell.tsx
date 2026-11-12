@@ -2,7 +2,7 @@
 
 // Marco de entrada de las apps de área: decide quién pasa (cargando, sin sesión,
 // "Esta app es de otra área") y, si entra, pinta el marco Golden. Cada app
-// (Cobranzas ahora; Administración, Marketing, Gerencia y Técnica después)
+// (Cobranzas y Administración; Marketing, Gerencia y Técnica después)
 // solo declara su nombre, su ícono y sus secciones.
 
 import type { ComponentType, ReactNode } from "react";
@@ -19,7 +19,7 @@ import type { AppKey } from "@/lib/apps/acceso";
 import { GoldenBody, GoldenFrame, type SeccionApp } from "@/components/apps/golden-frame";
 
 type Icono = ComponentType<{ className?: string; size?: number }>;
-export type AreaApp = Extract<AppKey, "cobranzas" | "marketing" | "gerencia" | "tecnica">;
+export type AreaApp = Extract<AppKey, "cobranzas" | "administracion" | "marketing" | "gerencia" | "tecnica">;
 
 export interface GoldenShellProps {
   app: AreaApp;

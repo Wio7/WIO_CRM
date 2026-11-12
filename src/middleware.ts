@@ -1,6 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { appLoginPath, isProtectedPath, safeNextPath } from '@/lib/app-paths'
+import { appDeLogin, appLoginPath, isProtectedPath, safeNextPath } from '@/lib/app-paths'
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -49,11 +49,12 @@ export async function middleware(request: NextRequest) {
   // they can accept the invitation in one click. Without this,
   // a forwarded invite link to someone who's already signed in
   // would silently drop them on /dashboard.
-  // La app de Cobranzas tiene su login dentro de su scope; con sesión abierta
-  // vuelve a la ruta pedida o, sin ella, a la app (no al ERP).
-  if (user && request.nextUrl.pathname === '/cobranzas/login') {
+  // Cada app (Cobranzas, Administración) tiene su login dentro de su scope; con
+  // sesión abierta vuelve a la ruta pedida o, sin ella, a la app (no al ERP).
+  const appHome = appDeLogin(request.nextUrl.pathname)
+  if (user && appHome) {
     const url = request.nextUrl.clone()
-    url.pathname = safeNextPath(request.nextUrl.searchParams.get('next'), '/cobranzas')
+    url.pathname = safeNextPath(request.nextUrl.searchParams.get('next'), appHome)
     url.search = ''
     return withRefreshedCookies(NextResponse.redirect(url))
   }

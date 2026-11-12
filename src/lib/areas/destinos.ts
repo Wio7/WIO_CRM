@@ -132,14 +132,14 @@ export function destinoDeArea(area: AreaKey, cuenta: CuentaDestino, origen?: str
     }
     case "administracion": {
       // Lleva la Caja Ica (conciliación, abonos, pagos por validar): los mismos
-      // datos que Contabilidad (084/087) y la misma app Caja, pero grupo aparte.
+      // datos que Contabilidad (084/087), con su app propia (F5) y grupo aparte.
       const app = appDeArea("administracion");
       return {
         ...base,
         erpHref: "/payment-plans",
         acento: "celeste",
         estado: estadoDe("/payment-plans"),
-        app: app ? interna(cajaMenuLabel(cuenta.name, cuenta.brand_name), app.ruta, origen) : null,
+        app: app ? interna(nombreApp("administracion", cuenta.name, cuenta.brand_name), app.ruta, origen) : null,
       };
     }
     case "marketing":

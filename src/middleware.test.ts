@@ -122,6 +122,22 @@ describe("middleware — refreshed auth cookies survive redirects", () => {
   });
 });
 
+describe("middleware — app de Administración", () => {
+  it("sin sesión va al login de la app con next; con sesión el login vuelve a la app", async () => {
+    mockUser = null;
+    const res = await middleware(new NextRequest("https://app.test/administracion/estado-de-cuenta"));
+    const loc = new URL(res.headers.get("location")!);
+    expect(loc.pathname).toBe("/administracion/login");
+    expect(loc.searchParams.get("next")).toBe("/administracion/estado-de-cuenta");
+    for (const p of ["/administracion/login", "/administracion/manifest.webmanifest", "/administracion/demo"]) {
+      expect((await middleware(new NextRequest("https://app.test" + p))).headers.get("location")).toBeNull();
+    }
+    mockUser = { id: "user-1" };
+    expect((await middleware(new NextRequest("https://app.test/administracion/login"))).headers.get("location")).toBe("https://app.test/administracion");
+    expect((await middleware(new NextRequest("https://app.test/administracion/login?next=/administracion/por-validar"))).headers.get("location")).toBe("https://app.test/administracion/por-validar");
+  });
+});
+
 describe("middleware — app de Cobranzas", () => {
   it("sin sesión, una ruta de la app va al login de la app con next", async () => {
     mockUser = null;
