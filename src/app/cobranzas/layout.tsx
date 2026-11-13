@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { nombreAppCobranzas } from "@/lib/cobranzas/cuenta-servidor";
 import { clasesFuentesGolden } from "@/lib/apps/fuentes";
+import { nombreApp } from "@/lib/apps/nombres";
 
 // App propia de Cobranzas (Fase F4): sin el menú del ERP, con su manifiesto
 // (scope /cobranzas) y su nombre armado desde la cuenta.
@@ -9,7 +10,9 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: { absolute: nombre },
     description: "Cuotas vencidas, vouchers y gestiones de cobranza.",
-    manifest: "/cobranzas/manifest.webmanifest",
+    manifest: nombre === nombreApp("cobranzas", "golden")
+      ? "/cobranzas/manifest.webmanifest?cuenta=golden"
+      : "/cobranzas/manifest.webmanifest",
     icons: { icon: "/cobranzas-icon.svg", apple: "/cobranzas/icono/180" },
     appleWebApp: { capable: true, title: nombre, statusBarStyle: "default" },
     robots: { index: false, follow: false },
