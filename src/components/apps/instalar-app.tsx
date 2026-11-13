@@ -8,6 +8,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { EVENTO_INSTALABLE } from "@/components/apps/captura-instalar";
 import { PASOS_INSTALAR, plataformaInstalar, type PlataformaInstalar } from "@/lib/apps/instalar";
 
 interface AvisoInstalar extends Event {
@@ -22,46 +23,39 @@ function abiertaComoApp(): boolean {
   );
 }
 
-// Nada a qué suscribirse: si está instalada solo cambia en la próxima visita.
-const sinSuscripcion = () => () => {};
+type VentanaInstalar = Window & { __avisoInstalar?: AvisoInstalar | null; __appInstalada?: boolean };
+
+// Lo que dejó el script temprano (CapturaInstalar): el aviso de Chrome, si llegó.
+function suscribir(cambio: () => void) {
+  window.addEventListener(EVENTO_INSTALABLE, cambio);
+  return () => window.removeEventListener(EVENTO_INSTALABLE, cambio);
+}
+const leerAviso = () => (window as VentanaInstalar).__avisoInstalar ?? null;
+const leerInstalada = () => abiertaComoApp() || (window as VentanaInstalar).__appInstalada === true;
 
 export function useInstalarApp(scope: string | undefined) {
-  // false en el servidor, así el HTML del servidor y la hidratación coinciden.
-  const enNavegador = useSyncExternalStore(sinSuscripcion, () => !abiertaComoApp(), () => false);
-  const [instalada, setInstalada] = useState(false);
-  const [aviso, setAviso] = useState<AvisoInstalar | null>(null);
+  // En el servidor: sin aviso y "instalada", así el HTML y la hidratación coinciden.
+  const aviso = useSyncExternalStore(suscribir, leerAviso, () => null);
+  const yaInstalada = useSyncExternalStore(suscribir, leerInstalada, () => true);
+  const [aceptada, setAceptada] = useState(false);
   const [pasos, setPasos] = useState<PlataformaInstalar | null>(null);
-  const visible = Boolean(scope) && enNavegador && !instalada;
+  const visible = Boolean(scope) && !yaInstalada && !aceptada;
 
+  // Respaldo por si la página llegó sin el script temprano (navegación interna).
   useEffect(() => {
-    if (!scope || abiertaComoApp()) return;
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/app-sw.js", { scope }).catch(() => {
-        // Sin service worker igual quedan los pasos a mano.
-      });
-    }
-    const alAviso = (e: Event) => {
-      e.preventDefault();
-      setAviso(e as AvisoInstalar);
-    };
-    const alInstalar = () => {
-      setInstalada(true);
-      setAviso(null);
-    };
-    window.addEventListener("beforeinstallprompt", alAviso);
-    window.addEventListener("appinstalled", alInstalar);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", alAviso);
-      window.removeEventListener("appinstalled", alInstalar);
-    };
+    if (!scope || abiertaComoApp() || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/app-sw.js", { scope }).catch(() => {
+      // Sin service worker igual quedan los pasos a mano.
+    });
   }, [scope]);
 
   async function instalar() {
     if (aviso) {
       await aviso.prompt();
       const { outcome } = await aviso.userChoice;
-      setAviso(null);
-      if (outcome === "accepted") setInstalada(true);
+      (window as VentanaInstalar).__avisoInstalar = null;
+      window.dispatchEvent(new Event(EVENTO_INSTALABLE));
+      if (outcome === "accepted") setAceptada(true);
       return;
     }
     setPasos(plataformaInstalar(navigator.userAgent, navigator.maxTouchPoints ?? 0));
