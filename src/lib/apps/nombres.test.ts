@@ -7,6 +7,10 @@ describe("nombre de cada app por cuenta", () => {
     expect(nombreApp("cobranzas", "Golden Habitat · Inmobiliaria")).toBe("Cobranzas Golden");
     expect(nombreApp("cobranzas", "Cuenta", "GOLDEN HABITAT")).toBe("Cobranzas Golden");
   });
+  it("la cuenta Aurex de Bryce ve lo mismo que Golden", () => {
+    expect(nombreApp("cobranzas", "Aurex")).toBe("Cobranzas Golden");
+    expect(nombreApp("cobranzas", "Aurex Vital Control")).toBe("Cobranzas");
+  });
   it("las demás ven 'Cobranzas' y nunca Wio Suite", () => {
     for (const nombre of ["Broker Home", "", null, undefined]) {
       const label = nombreApp("cobranzas", nombre as string);

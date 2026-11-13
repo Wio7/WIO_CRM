@@ -16,6 +16,9 @@ export function nombreApp(
   accountName?: string | null,
   brandName?: string | null,
 ): string {
-  const esGolden = /golden/i.test(accountName ?? "") || /golden/i.test(brandName ?? "");
+  // "Aurex" es la cuenta propia de Bryce (dueño de la plataforma): revisa las
+  // apps de Golden y debe verlas igual que el equipo de Golden (Bryce, 2026-11-13).
+  const esGolden =
+    /golden/i.test(accountName ?? "") || /golden/i.test(brandName ?? "") || /^aurex$/i.test((accountName ?? "").trim());
   return esGolden ? AREA[app].golden : AREA[app].generico;
 }
