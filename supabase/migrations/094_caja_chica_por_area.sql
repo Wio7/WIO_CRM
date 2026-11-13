@@ -26,9 +26,10 @@
 --   SELECT p.proname, md5(p.prosrc) FROM pg_proc p
 --    WHERE p.proname IN ('cash_management_panel', 'cash_classify_entry')
 --      AND p.pronamespace = 'public'::regnamespace;
---   Deben salir:
---     cash_management_panel  50c532aa2eefebf4258fceeddafcd6b7
---     cash_classify_entry    ca966f29cb027b63f75a240b073fd429
+--   Deben salir (la 087 del repo; con saltos de línea de Windows si se pegó
+--   desde un archivo con CRLF, que es lo que hay en wioCRM, visto 2026-11-13):
+--     cash_management_panel  50c532aa2eefebf4258fceeddafcd6b7  (CRLF: 85e7a0edde8c5a8b2ab94817d7621088)
+--     cash_classify_entry    ca966f29cb027b63f75a240b073fd429  (CRLF: a23c1d195fa6fee00fb1de9aaf472092)
 --   Si no coinciden, NO aplicar: la base real se desvía del repo.
 --
 -- Idempotente — se puede volver a correr.
