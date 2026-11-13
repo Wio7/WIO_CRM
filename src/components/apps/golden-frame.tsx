@@ -10,7 +10,9 @@
 
 import { useEffect, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
-import { LogOut } from "lucide-react";
+import { Download, LogOut } from "lucide-react";
+
+import { PasosInstalar, useInstalarApp } from "@/components/apps/instalar-app";
 
 import { clasesFuentesGolden } from "@/lib/apps/fuentes";
 import { seccionActiva, type SeccionDef } from "@/lib/apps/secciones";
@@ -69,6 +71,8 @@ export interface GoldenFrameProps {
   /** Pie de la barra lateral: enlace al ERP web (dueño / super admin). */
   erpHref?: string;
   onSignOut?: () => void;
+  /** Ruta de la app (ej. "/cobranzas"): muestra "Instalar app" con ese scope. */
+  instalarScope?: string;
   /** Rótulo de la demostración (en vez de los botones de sesión). */
   rotuloDemo?: string;
   children: ReactNode;
@@ -83,9 +87,11 @@ export function GoldenFrame({
   badges = {},
   erpHref,
   onSignOut,
+  instalarScope,
   rotuloDemo,
   children,
 }: GoldenFrameProps) {
+  const instalarApp = useInstalarApp(instalarScope);
   const activa = seccionActiva(pathname, secciones);
   const titulo = activa?.largo ?? nombre;
   const badge = (href: string) => (badges[href] > 0 ? <span className="gapp-badge">{badges[href]}</span> : null);
@@ -118,6 +124,11 @@ export function GoldenFrame({
               Abrir el ERP web
             </Link>
           )}
+          {instalarApp.visible && (
+            <button type="button" onClick={instalarApp.instalar} className="gapp-foot-link">
+              <Download size={16} /> Instalar app
+            </button>
+          )}
           {onSignOut && (
             <button type="button" onClick={onSignOut} className="gapp-foot-link">
               <LogOut size={16} /> Cerrar sesión
@@ -138,6 +149,11 @@ export function GoldenFrame({
           </div>
           <div className="gapp-topbar-actions">
             {rotuloDemo && <span className="gapp-chip-demo gapp-chip-laptop">{rotuloDemo}</span>}
+            {instalarApp.visible && (
+              <button type="button" onClick={instalarApp.instalar} aria-label="Instalar app" title="Instalar app" className="gapp-icon-btn">
+                <Download size={18} />
+              </button>
+            )}
             {onSignOut && (
               <button type="button" onClick={onSignOut} aria-label="Cerrar sesión" className="gapp-icon-btn">
                 <LogOut size={18} />
@@ -148,6 +164,7 @@ export function GoldenFrame({
 
         {rotuloDemo && <div className="gapp-demo-strip">{rotuloDemo}</div>}
         <main className="gapp-main">{children}</main>
+        <PasosInstalar nombre={nombre} pasos={instalarApp.pasos} onClose={instalarApp.cerrarPasos} />
       </div>
 
       {/* CELULAR: barra inferior */}

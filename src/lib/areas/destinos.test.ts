@@ -43,7 +43,7 @@ describe("destinoDeArea", () => {
   it("cobranzas: app interna con el origen actual y nombre segun la cuenta", () => {
     expect(destinoDeArea("cobranzas", golden, ORIGEN)).toMatchObject({
       erpHref: "/collections",
-      app: { nombre: "Golden Cobranzas", url: `${ORIGEN}/cobranzas` },
+      app: { nombre: "Cobranzas Golden", url: `${ORIGEN}/cobranzas` },
     });
     expect(destinoDeArea("cobranzas", otra, ORIGEN).app?.nombre).toBe("Cobranzas");
   });
@@ -75,7 +75,7 @@ describe("destinoDeArea", () => {
 
   it("detecta Golden tambien por brand_name", () => {
     const d = destinoDeArea("cobranzas", { name: "Cuenta", brand_name: "Golden X", disabled_modules: [] }, ORIGEN);
-    expect(d.app?.nombre).toBe("Golden Cobranzas");
+    expect(d.app?.nombre).toBe("Cobranzas Golden");
   });
 
   it("sin origen, la app interna queda como ruta", () => {

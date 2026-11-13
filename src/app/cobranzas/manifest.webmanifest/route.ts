@@ -1,16 +1,19 @@
 import { nombreAppCobranzas } from "@/lib/cobranzas/cuenta-servidor";
+import { nombreApp } from "@/lib/apps/nombres";
 
 export const dynamic = "force-dynamic";
 
-// El navegador pide el manifiesto con la cookie de sesión (misma origen), así
-// el nombre sale de la cuenta. Sin sesión, nombre genérico.
-export async function GET() {
-  const nombre = await nombreAppCobranzas();
+// Chrome pide el manifiesto SIN la cookie de sesión, así que la página le
+// pasa ?cuenta=golden (lo decide el layout con la sesión). Sin eso, se intenta
+// con la sesión y si no hay, nombre genérico.
+export async function GET(req: Request) {
+  const cuenta = new URL(req.url).searchParams.get("cuenta");
+  const nombre = cuenta === "golden" ? nombreApp("cobranzas", "golden") : await nombreAppCobranzas();
   return Response.json(
     {
       id: "/cobranzas",
       name: nombre,
-      short_name: nombre.replace(/^Golden /, ""),
+      short_name: nombre,
       lang: "es-PE",
       start_url: "/cobranzas",
       scope: "/cobranzas",

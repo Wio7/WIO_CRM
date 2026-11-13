@@ -36,7 +36,7 @@ export function DemoCobranzasShell({ children }: { children: React.ReactNode }) 
   return (
     <GoldenBody app="cobranzas">
       <GoldenFrame
-        nombre="Golden Cobranzas"
+        nombre="Cobranzas Golden"
         subtitulo="GOLDEN · DREAM HABITAT"
         icono={HandCoins}
         secciones={SECCIONES_DEMO}

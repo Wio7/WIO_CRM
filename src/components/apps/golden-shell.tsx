@@ -108,6 +108,7 @@ export function GoldenShell({ app, icono: Icono, secciones, loginPath, equipo, b
       badges={badges}
       erpHref={isOwner || isSuperAdmin ? "/dashboard" : undefined}
       onSignOut={signOut}
+      instalarScope={`/${app}`}
     >
       {sinAcceso ? <p className="py-16 text-center text-sm text-muted-foreground">{sinAcceso}</p> : children}
     </GoldenFrame>,

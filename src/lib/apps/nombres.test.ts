@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { nombreApp } from "./nombres";
 
 describe("nombre de cada app por cuenta", () => {
-  it("Golden ve 'Golden Cobranzas'", () => {
-    expect(nombreApp("cobranzas", "Golden Habitat · Inmobiliaria")).toBe("Golden Cobranzas");
-    expect(nombreApp("cobranzas", "Cuenta", "GOLDEN HABITAT")).toBe("Golden Cobranzas");
+  it("Golden ve 'Cobranzas Golden'", () => {
+    expect(nombreApp("cobranzas", "Golden Habitat · Inmobiliaria")).toBe("Cobranzas Golden");
+    expect(nombreApp("cobranzas", "Cuenta", "GOLDEN HABITAT")).toBe("Cobranzas Golden");
   });
   it("las demás ven 'Cobranzas' y nunca Wio Suite", () => {
     for (const nombre of ["Broker Home", "", null, undefined]) {
