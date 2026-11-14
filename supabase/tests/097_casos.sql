@@ -84,14 +84,14 @@ DECLARE v jsonb; v_acc uuid := current_setting('t097.acc')::uuid;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000002', true);
   v := public.gerencia_my_access();
-  IF v->>'rol' <> 'gerencia' OR (v->>'accountId')::uuid <> v_acc THEN RAISE EXCEPTION 'FALLO my_access gerente: %', v; END IF;
+  IF v->>'rol' IS DISTINCT FROM 'gerencia' OR (v->>'accountId')::uuid IS DISTINCT FROM v_acc THEN RAISE EXCEPTION 'FALLO my_access gerente: %', v; END IF;
 
   PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000001', true);
-  IF public.gerencia_my_access()->>'rol' <> 'gerencia' THEN RAISE EXCEPTION 'FALLO: el dueño debe tener rol gerencia'; END IF;
+  IF public.gerencia_my_access()->>'rol' IS DISTINCT FROM 'gerencia' THEN RAISE EXCEPTION 'FALLO: el dueño debe tener rol gerencia'; END IF;
 
   PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000003', true);
   v := public.gerencia_my_access();
-  IF v->'rol' <> 'null'::jsonb THEN RAISE EXCEPTION 'FALLO my_access cobranzas: %', v; END IF;
+  IF v->'rol' IS DISTINCT FROM 'null'::jsonb THEN RAISE EXCEPTION 'FALLO my_access cobranzas: %', v; END IF;
 END $$;
 
 -- 2. El gerente pone, cambia y borra metas
@@ -102,7 +102,7 @@ BEGIN
   PERFORM public.gerencia_set_goal('2026-11-01', NULL, 'cobranza', 5000000);
   PERFORM public.gerencia_set_goal('2026-11-01', v_p1, 'cobranza', 2000000);
   g := public.gerencia_goals('2026-11-01');
-  IF jsonb_array_length(g) <> 2 THEN RAISE EXCEPTION 'FALLO: se esperaban 2 metas, %', g; END IF;
+  IF jsonb_array_length(g) IS DISTINCT FROM 2 THEN RAISE EXCEPTION 'FALLO: se esperaban 2 metas, %', g; END IF;
   IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(g) x WHERE x->'projectId' = 'null'::jsonb AND x->>'kind' = 'cobranza' AND (x->>'value')::bigint = 5000000)
      OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(g) x WHERE x->>'projectId' = v_p1::text AND (x->>'value')::bigint = 2000000) THEN
     RAISE EXCEPTION 'FALLO: contenido de metas %', g; END IF;
@@ -111,24 +111,24 @@ BEGIN
   PERFORM public.gerencia_set_goal('2026-11-01', NULL, 'cobranza', 6000000);
   PERFORM public.gerencia_set_goal('2026-11-01', v_p1, 'cobranza', 2500000);
   g := public.gerencia_goals('2026-11-01');
-  IF jsonb_array_length(g) <> 2 OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(g) x WHERE x->'projectId' = 'null'::jsonb AND (x->>'value')::bigint = 6000000) THEN
+  IF jsonb_array_length(g) IS DISTINCT FROM 2 OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(g) x WHERE x->'projectId' = 'null'::jsonb AND (x->>'value')::bigint = 6000000) THEN
     RAISE EXCEPTION 'FALLO: repetir debe actualizar, %', g; END IF;
 
   -- Meta de ventas (unidades) y otro mes no se mezclan.
   PERFORM public.gerencia_set_goal('2026-11-01', NULL, 'ventas', 8);
   PERFORM public.gerencia_set_goal('2026-12-01', NULL, 'cobranza', 100);
   g := public.gerencia_goals('2026-11-01');
-  IF jsonb_array_length(g) <> 3 OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(g) x WHERE x->>'kind' = 'ventas' AND (x->>'value')::bigint = 8) THEN
+  IF jsonb_array_length(g) IS DISTINCT FROM 3 OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(g) x WHERE x->>'kind' = 'ventas' AND (x->>'value')::bigint = 8) THEN
     RAISE EXCEPTION 'FALLO: ventas o mes, %', g; END IF;
-  IF jsonb_array_length(public.gerencia_goals('2026-12-01')) <> 1 THEN RAISE EXCEPTION 'FALLO: metas de diciembre'; END IF;
+  IF jsonb_array_length(public.gerencia_goals('2026-12-01')) IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'FALLO: metas de diciembre'; END IF;
 
   -- 0 y NULL borran.
   PERFORM public.gerencia_set_goal('2026-11-01', v_p1, 'cobranza', 0);
   PERFORM public.gerencia_set_goal('2026-11-01', NULL, 'ventas', NULL);
   g := public.gerencia_goals('2026-11-01');
-  IF jsonb_array_length(g) <> 1 THEN RAISE EXCEPTION 'FALLO: borrar con 0/NULL, %', g; END IF;
+  IF jsonb_array_length(g) IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'FALLO: borrar con 0/NULL, %', g; END IF;
   PERFORM public.gerencia_set_goal('2026-11-01', NULL, 'cobranza', 0);
-  IF jsonb_array_length(public.gerencia_goals('2026-11-01')) <> 0 THEN RAISE EXCEPTION 'FALLO: borrar la meta total'; END IF;
+  IF jsonb_array_length(public.gerencia_goals('2026-11-01')) IS DISTINCT FROM 0 THEN RAISE EXCEPTION 'FALLO: borrar la meta total'; END IF;
 END $$;
 
 -- 3. Validaciones: tipo, proyecto ajeno, mes normalizado
@@ -146,7 +146,7 @@ BEGIN
 
   PERFORM public.gerencia_set_goal('2026-11-17', NULL, 'cobranza', 123);
   g := public.gerencia_goals('2026-11-30');
-  IF jsonb_array_length(g) <> 1 OR (g->0->>'value')::bigint <> 123 THEN RAISE EXCEPTION 'FALLO: mes no normalizado, %', g; END IF;
+  IF jsonb_array_length(g) IS DISTINCT FROM 1 OR (g->0->>'value')::bigint IS DISTINCT FROM 123 THEN RAISE EXCEPTION 'FALLO: mes no normalizado, %', g; END IF;
   IF NOT EXISTS (SELECT 1 FROM public.management_goals WHERE month = '2026-11-01' AND amount_cents = 123) THEN
     RAISE EXCEPTION 'FALLO: el mes debía guardarse como primer día'; END IF;
 END $$;
@@ -171,11 +171,11 @@ BEGIN
   -- Gerente de la otra cuenta: no ve las de Golden y sus metas no pisan las de Golden.
   PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000012', true);
   IF EXISTS (SELECT 1 FROM public.management_goals) THEN RAISE EXCEPTION 'FALLO: la otra cuenta ve metas de Golden'; END IF;
-  IF jsonb_array_length(public.gerencia_goals('2026-11-01')) <> 0 THEN RAISE EXCEPTION 'FALLO: goals de la otra cuenta'; END IF;
+  IF jsonb_array_length(public.gerencia_goals('2026-11-01')) IS DISTINCT FROM 0 THEN RAISE EXCEPTION 'FALLO: goals de la otra cuenta'; END IF;
   PERFORM public.gerencia_set_goal('2026-11-01', NULL, 'cobranza', 999);
-  IF (SELECT count(*) FROM public.management_goals) <> 1 THEN RAISE EXCEPTION 'FALLO: la otra cuenta debe ver solo la suya'; END IF;
+  IF (SELECT count(*) FROM public.management_goals) IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'FALLO: la otra cuenta debe ver solo la suya'; END IF;
   PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000002', true);
-  IF (public.gerencia_goals('2026-11-01')->0->>'value')::bigint <> 123 THEN RAISE EXCEPTION 'FALLO: la meta de Golden fue pisada'; END IF;
+  IF (public.gerencia_goals('2026-11-01')->0->>'value')::bigint IS DISTINCT FROM 123 THEN RAISE EXCEPTION 'FALLO: la meta de Golden fue pisada'; END IF;
 END $$;
 RESET ROLE;
 
