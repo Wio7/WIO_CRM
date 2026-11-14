@@ -38,8 +38,9 @@
 --
 -- Gasto vigente (criterio de 087 cash_management_panel / 095): kind 'expense',
 -- sin ser anulación, sin que exista otra fila con reversal_of apuntando a él,
--- y sin transferencia entre cajas. Rubro 'marketing', cualquier caja de la
--- cuenta, por occurred_on.
+-- y sin transferencia entre cajas. Rubro 'marketing', solo la caja principal
+-- de la cuenta (id = cuenta; las cajas de otros negocios del dueño no
+-- cuentan, decisión de Bryce 2026-11-13), por occurred_on.
 --
 -- Fuera de una sesión de usuario (auth.uid() NULL: SQL Editor, service role)
 -- el trigger de piezas no aplica los candados de rol.
