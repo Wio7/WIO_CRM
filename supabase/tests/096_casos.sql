@@ -100,6 +100,14 @@ BEGIN
                                    counterparty, occurred_on, created_by, actor_name)
   VALUES ('0960c000-0000-4000-8000-000000000703', v_acc, v_acc, gen_random_uuid(), 'expense', 700,
           'Obra 096', 'Ferretería', v_today, v_owner, 'Dueño 096');
+  -- Gasto de marketing en la caja de otro negocio del dueño: NO cuenta.
+  INSERT INTO public.cash_companies (id, account_id, name, created_by)
+  VALUES ('0960c000-0000-4000-8000-000000000990', v_acc, 'Otro negocio 096', v_owner);
+  PERFORM set_config('cash.rubro', 'marketing', true);
+  INSERT INTO public.cash_entries (id, account_id, company_id, request_id, kind, amount_cents, concept,
+                                   counterparty, occurred_on, created_by, actor_name)
+  VALUES ('0960c000-0000-4000-8000-000000000704', v_acc, '0960c000-0000-4000-8000-000000000990', gen_random_uuid(),
+          'expense', 9000, 'Publicidad de otro negocio 096', 'Meta', v_today, v_owner, 'Dueño 096');
 END $$;
 
 SET LOCAL ROLE authenticated;
@@ -241,6 +249,14 @@ BEGIN
   PERFORM public.marketing_review_piece('0960c000-0000-4000-8000-000000000801', true, 'Listo');
   SELECT * INTO p FROM public.marketing_pieces WHERE id = '0960c000-0000-4000-8000-000000000801';
   IF p.status <> 'aprobada' THEN RAISE EXCEPTION 'FALLO aprobar: %', p.status; END IF;
+
+  -- Si el equipo cambia el texto de una pieza aprobada, vuelve a revisión.
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000003', true);
+  UPDATE public.marketing_pieces SET caption = 'Texto cambiado después de aprobar' WHERE id = '0960c000-0000-4000-8000-000000000801';
+  SELECT * INTO p FROM public.marketing_pieces WHERE id = '0960c000-0000-4000-8000-000000000801';
+  IF p.status <> 'en_revision' THEN RAISE EXCEPTION 'FALLO: pieza aprobada cambiada quedó %', p.status; END IF;
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000002', true);
+  PERFORM public.marketing_review_piece('0960c000-0000-4000-8000-000000000801', true, 'Listo de nuevo');
 
   PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000003', true);
   UPDATE public.marketing_pieces SET status = 'publicada' WHERE id = '0960c000-0000-4000-8000-000000000801';

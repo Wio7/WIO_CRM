@@ -191,6 +191,14 @@ BEGIN
         IF OLD.status = 'publicada' AND v_role IS DISTINCT FROM 'jefe' THEN
           RAISE EXCEPTION 'Solo el jefe de marketing reabre una pieza publicada' USING ERRCODE = '42501'; END IF;
       END IF;
+      -- Si el equipo cambia el contenido de una pieza ya aprobada, vuelve a revisión:
+      -- el jefe tiene que ver la versión que se publica.
+      IF v_role IS DISTINCT FROM 'jefe' AND OLD.status = 'aprobada' AND NEW.status = 'aprobada'
+         AND (NEW.title IS DISTINCT FROM OLD.title OR NEW.caption IS DISTINCT FROM OLD.caption
+              OR NEW.media_path IS DISTINCT FROM OLD.media_path OR NEW.network IS DISTINCT FROM OLD.network
+              OR NEW.format IS DISTINCT FROM OLD.format) THEN
+        NEW.status := 'en_revision';
+      END IF;
     END IF;
   END IF;
   IF NEW.status = 'publicada' THEN
@@ -379,8 +387,11 @@ BEGIN
            SELECT 1 FROM public.reservation_units ru JOIN public.real_estate_units u ON u.id = ru.unit_id
             WHERE ru.reservation_id = r.id AND u.project_id = p_project));
 
+  -- Solo la caja principal de la cuenta (id = cuenta, migración 065): las cajas
+  -- de otros negocios del dueño no cuentan como gasto de marketing de Golden.
   SELECT COALESCE(sum(e.amount_cents), 0) INTO v_spend FROM public.cash_entries e
-   WHERE e.account_id = a AND e.kind = 'expense' AND e.reversal_of IS NULL AND e.rubro = 'marketing'
+   WHERE e.account_id = a AND e.company_id = a
+     AND e.kind = 'expense' AND e.reversal_of IS NULL AND e.rubro = 'marketing'
      AND NOT EXISTS (SELECT 1 FROM public.cash_entries x WHERE x.reversal_of = e.id)
      AND to_jsonb(e)->>'transfer_id' IS NULL
      AND e.occurred_on >= v_mes AND e.occurred_on < v_next
@@ -407,7 +418,8 @@ BEGIN
                      WHERE c.account_id = a AND (c.created_at AT TIME ZONE 'America/Lima')::date >= m.d
                        AND (c.created_at AT TIME ZONE 'America/Lima')::date < (m.d + interval '1 month')::date),
           'spendCents', (SELECT COALESCE(sum(e.amount_cents), 0) FROM public.cash_entries e
-                          WHERE e.account_id = a AND e.kind = 'expense' AND e.reversal_of IS NULL AND e.rubro = 'marketing'
+                          WHERE e.account_id = a AND e.company_id = a
+                            AND e.kind = 'expense' AND e.reversal_of IS NULL AND e.rubro = 'marketing'
                             AND NOT EXISTS (SELECT 1 FROM public.cash_entries x WHERE x.reversal_of = e.id)
                             AND to_jsonb(e)->>'transfer_id' IS NULL
                             AND e.occurred_on >= m.d AND e.occurred_on < (m.d + interval '1 month')::date
