@@ -34,7 +34,17 @@
 --   - marketing_summary: p_project filtra el gasto y las separaciones; los
 --     leads (leadsTotal, por canal, costo por lead) NO se filtran porque un
 --     lead aún no separado no tiene proyecto (filtrarlos daría un costo por
---     lead falso). Es el caso "no hay relación" del contrato para los leads.
+--     lead falso), y con filtro de proyecto costPerLeadCents va en null.
+--   Límite conocido (confirmado 2026-11-14): las separaciones que se hacen en la
+--   Golden App viven en la base del CATÁLOGO (gh_lotes_solicitudes, ver 088),
+--   no en reservations; aquí solo cuentan las separaciones de wioCRM.
+--
+-- Candados (revisión superpowers + EGM, 2026-11-14): created_by lo fija la
+-- sesión y no se cambia (piezas y tareas); published_at lo pone la base; si el
+-- equipo cambia el contenido de una pieza aprobada vuelve a 'en_revision' (aunque
+-- pida publicarla en el mismo UPDATE) y no puede cambiar una publicada; en
+-- Storage el equipo solo sube o borra en piezas no aprobadas ni publicadas; el
+-- rol exige ser miembro activo de la cuenta (cuenta activa, sin viewer ni promueve).
 --
 -- Gasto vigente (criterio de 087 cash_management_panel / 095): kind 'expense',
 -- sin ser anulación, sin que exista otra fila con reversal_of apuntando a él,
@@ -66,14 +76,18 @@ CREATE TABLE IF NOT EXISTS public.marketing_members (
 -- 2. Rol de marketing
 -- ------------------------------------------------------------
 -- Rol de un usuario concreto (uso interno: no se concede a authenticated para
--- que nadie consulte el rol de otras personas). Mismo criterio que
--- is_owner_or_gerencia, pero por usuario.
+-- que nadie consulte el rol de otras personas). Exige ser miembro activo de la
+-- cuenta (como is_account_member 'agent'); jefe = dueño, área gerencia o fila 'jefe'.
 CREATE OR REPLACE FUNCTION public.marketing_role_of(p_account uuid, p_user uuid)
 RETURNS text
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
   SELECT CASE
     WHEN p_account IS NULL OR p_user IS NULL THEN NULL
-    WHEN NOT EXISTS (SELECT 1 FROM public.profiles p WHERE p.user_id = p_user AND p.account_id = p_account) THEN NULL
+    -- Mismo candado que is_account_member(…, 'agent') (089): cuenta activa, sin
+    -- clientes viewer ni área promueve.
+    WHEN NOT EXISTS (SELECT 1 FROM public.profiles p JOIN public.accounts ac ON ac.id = p.account_id
+                      WHERE p.user_id = p_user AND p.account_id = p_account AND ac.status = 'active'
+                        AND p.account_role <> 'viewer' AND COALESCE(p.area, '') <> 'promueve') THEN NULL
     WHEN EXISTS (SELECT 1 FROM public.profiles p
                   WHERE p.user_id = p_user AND p.account_id = p_account
                     AND (p.account_role = 'owner' OR p.area = 'gerencia'))
@@ -168,6 +182,7 @@ CREATE OR REPLACE FUNCTION public.marketing_pieces_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 DECLARE
   v_role text;
+  v_cambio boolean;
 BEGIN
   IF auth.uid() IS NOT NULL THEN
     v_role := public.marketing_role(NEW.account_id);
@@ -192,14 +207,25 @@ BEGIN
         IF OLD.status = 'publicada' AND v_role IS DISTINCT FROM 'jefe' THEN
           RAISE EXCEPTION 'Solo el jefe de marketing reabre una pieza publicada' USING ERRCODE = '42501'; END IF;
       END IF;
-      -- Si el equipo cambia el contenido de una pieza ya aprobada, vuelve a revisión:
-      -- el jefe tiene que ver la versión que se publica.
-      IF v_role IS DISTINCT FROM 'jefe' AND OLD.status = 'aprobada' AND NEW.status = 'aprobada'
-         AND (NEW.title IS DISTINCT FROM OLD.title OR NEW.caption IS DISTINCT FROM OLD.caption
-              OR NEW.media_path IS DISTINCT FROM OLD.media_path OR NEW.network IS DISTINCT FROM OLD.network
-              OR NEW.format IS DISTINCT FROM OLD.format) THEN
-        NEW.status := 'en_revision';
+      -- Contenido de una pieza ya revisada: el equipo no toca una publicada, y si cambia
+      -- una aprobada (aunque en el mismo UPDATE pida publicarla) vuelve a revisión: el
+      -- jefe tiene que ver la versión que se publica.
+      IF v_role IS DISTINCT FROM 'jefe' THEN
+        v_cambio := NEW.title IS DISTINCT FROM OLD.title OR NEW.caption IS DISTINCT FROM OLD.caption
+                 OR NEW.media_path IS DISTINCT FROM OLD.media_path OR NEW.media_type IS DISTINCT FROM OLD.media_type
+                 OR NEW.network IS DISTINCT FROM OLD.network OR NEW.format IS DISTINCT FROM OLD.format;
+        IF OLD.status = 'publicada' AND v_cambio THEN
+          RAISE EXCEPTION 'Una pieza publicada no se cambia' USING ERRCODE = '42501'; END IF;
+        IF OLD.status = 'aprobada' AND v_cambio THEN
+          NEW.status := 'en_revision'; END IF;
       END IF;
+    END IF;
+    -- Quién creó la pieza: lo fija la sesión y no se cambia después.
+    IF TG_OP = 'INSERT' THEN NEW.created_by := auth.uid(); ELSE NEW.created_by := OLD.created_by; END IF;
+    -- Fecha de publicación: la pone la base, no el cliente.
+    IF NEW.status = 'publicada' THEN
+      IF TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'publicada' THEN NEW.published_at := now();
+      ELSE NEW.published_at := OLD.published_at; END IF;
     END IF;
   END IF;
   IF NEW.status = 'publicada' THEN
@@ -289,6 +315,29 @@ DROP TRIGGER IF EXISTS marketing_tasks_updated ON public.marketing_tasks;
 CREATE TRIGGER marketing_tasks_updated BEFORE UPDATE ON public.marketing_tasks
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
+-- Quién creó la tarea lo fija la sesión y no se cambia (la regla de borrado depende de eso);
+-- una tarea no cambia de cuenta.
+CREATE OR REPLACE FUNCTION public.marketing_tasks_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF auth.uid() IS NOT NULL THEN
+    IF TG_OP = 'INSERT' THEN
+      NEW.created_by := auth.uid();
+    ELSE
+      IF NEW.account_id IS DISTINCT FROM OLD.account_id THEN
+        RAISE EXCEPTION 'No se puede cambiar de cuenta una tarea' USING ERRCODE = '42501'; END IF;
+      NEW.created_by := OLD.created_by;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+ALTER FUNCTION public.marketing_tasks_guard() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.marketing_tasks_guard() FROM PUBLIC, anon;
+DROP TRIGGER IF EXISTS marketing_tasks_guard ON public.marketing_tasks;
+CREATE TRIGGER marketing_tasks_guard BEFORE INSERT OR UPDATE ON public.marketing_tasks
+  FOR EACH ROW EXECUTE FUNCTION public.marketing_tasks_guard();
+
 ALTER TABLE public.marketing_tasks ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.marketing_tasks FROM anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.marketing_tasks TO authenticated;
@@ -312,8 +361,10 @@ CREATE OR REPLACE FUNCTION public.marketing_piece_task() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
-    INSERT INTO public.marketing_tasks (account_id, title, kind, assignee, due_on, piece_id, created_by)
-    VALUES (NEW.account_id, NEW.title, 'pieza', NEW.assignee, NEW.scheduled_on, NEW.id, NEW.created_by);
+    INSERT INTO public.marketing_tasks (account_id, title, kind, status, assignee, due_on, piece_id, created_by)
+    VALUES (NEW.account_id, NEW.title, 'pieza',
+            CASE WHEN NEW.status = 'publicada' THEN 'listo' ELSE 'por_hacer' END,
+            NEW.assignee, NEW.scheduled_on, NEW.id, NEW.created_by);
   ELSIF NEW.status = 'publicada' AND OLD.status IS DISTINCT FROM 'publicada' THEN
     UPDATE public.marketing_tasks SET status = 'listo' WHERE piece_id = NEW.id AND status <> 'listo';
   END IF;
@@ -335,7 +386,34 @@ CREATE TRIGGER marketing_pieces_task_upd AFTER UPDATE OF status ON public.market
 -- ------------------------------------------------------------
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('marketing', 'marketing', false, 52428800, ARRAY['image/*', 'video/*'])
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public, file_size_limit = EXCLUDED.file_size_limit,
+                               allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+-- ¿Puede quien llama subir o borrar este archivo? Ruta {cuenta}/{pieza}/{archivo}.
+-- El jefe, en cualquier pieza de su cuenta. El equipo, solo en piezas de su cuenta
+-- que aún no están aprobadas ni publicadas (así no cambia lo que el jefe ya vio).
+CREATE OR REPLACE FUNCTION public.marketing_storage_can_write(p_name text)
+RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+  v_parts text[] := string_to_array(p_name, '/');
+  v_acc uuid;
+  v_piece uuid;
+  v_role text;
+  v_status text;
+  v_re constant text := '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+BEGIN
+  IF array_length(v_parts, 1) <> 3 OR v_parts[1] !~* v_re OR v_parts[2] !~* v_re THEN RETURN false; END IF;
+  v_acc := v_parts[1]::uuid;
+  v_piece := v_parts[2]::uuid;
+  v_role := public.marketing_role(v_acc);
+  IF v_role IS NULL THEN RETURN false; END IF;
+  SELECT status INTO v_status FROM public.marketing_pieces WHERE id = v_piece AND account_id = v_acc;
+  IF v_status IS NULL THEN RETURN false; END IF;
+  RETURN v_role = 'jefe' OR v_status NOT IN ('aprobada', 'publicada');
+END;
+$$;
+ALTER FUNCTION public.marketing_storage_can_write(text) OWNER TO postgres;
 
 -- Ruta {account_id}/{piece_id}/{archivo}: el primer tramo es la cuenta.
 DROP POLICY IF EXISTS marketing_storage_select ON storage.objects;
@@ -345,14 +423,10 @@ CREATE POLICY marketing_storage_select ON storage.objects FOR SELECT TO authenti
     THEN public.marketing_role(((storage.foldername(name))[1])::uuid) IS NOT NULL ELSE false END);
 DROP POLICY IF EXISTS marketing_storage_insert ON storage.objects;
 CREATE POLICY marketing_storage_insert ON storage.objects FOR INSERT TO authenticated
-  WITH CHECK (bucket_id = 'marketing' AND CASE
-    WHEN (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-    THEN public.marketing_role(((storage.foldername(name))[1])::uuid) IS NOT NULL ELSE false END);
+  WITH CHECK (bucket_id = 'marketing' AND public.marketing_storage_can_write(name));
 DROP POLICY IF EXISTS marketing_storage_delete ON storage.objects;
 CREATE POLICY marketing_storage_delete ON storage.objects FOR DELETE TO authenticated
-  USING (bucket_id = 'marketing' AND CASE
-    WHEN (storage.foldername(name))[1] ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-    THEN public.marketing_role(((storage.foldername(name))[1])::uuid) IS NOT NULL ELSE false END);
+  USING (bucket_id = 'marketing' AND public.marketing_storage_can_write(name));
 
 -- ------------------------------------------------------------
 -- 6. Resumen y leads (solo el jefe)
@@ -412,7 +486,8 @@ BEGIN
                GROUP BY 1) t), '[]'::jsonb),
     'separaciones', v_sep,
     'spendCents', v_spend,
-    'costPerLeadCents', CASE WHEN v_leads > 0 THEN round(v_spend::numeric / v_leads)::bigint END,
+    -- Con filtro de proyecto los leads son de toda la cuenta: el costo por lead sería engañoso.
+    'costPerLeadCents', CASE WHEN p_project IS NULL AND v_leads > 0 THEN round(v_spend::numeric / v_leads)::bigint END,
     'costPerSeparacionCents', CASE WHEN v_sep > 0 THEN round(v_spend::numeric / v_sep)::bigint END,
     'byMonth', (SELECT jsonb_agg(jsonb_build_object('month', to_char(m.d, 'YYYY-MM'),
           'leads', (SELECT count(*) FROM public.contacts c
@@ -492,11 +567,13 @@ REVOKE ALL ON FUNCTION public.marketing_role_of(uuid, uuid) FROM PUBLIC, anon, a
 REVOKE ALL ON FUNCTION public.marketing_role(uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.marketing_my_access() FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.marketing_review_piece(uuid, boolean, text) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.marketing_storage_can_write(text) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.marketing_summary(date, uuid) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.marketing_leads(date, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.marketing_role(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.marketing_my_access() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.marketing_review_piece(uuid, boolean, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.marketing_storage_can_write(text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.marketing_summary(date, uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.marketing_leads(date, uuid) TO authenticated;
 

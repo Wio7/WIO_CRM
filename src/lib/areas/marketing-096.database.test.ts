@@ -41,7 +41,7 @@ beforeAll(async () => {
     CREATE TABLE contacts(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       account_id uuid NOT NULL REFERENCES accounts ON DELETE CASCADE, user_id uuid, phone text, name text,
       created_at timestamptz DEFAULT now(), lead_source text, campaign_name text, ad_id text, utm_campaign text);
-    CREATE TABLE conversations(id uuid PRIMARY KEY, account_id uuid REFERENCES accounts ON DELETE CASCADE,
+    CREATE TABLE conversations(id uuid PRIMARY KEY, user_id uuid NOT NULL, account_id uuid REFERENCES accounts ON DELETE CASCADE,
       contact_id uuid, assigned_agent_id uuid, created_at timestamptz DEFAULT now());
     CREATE TABLE real_estate_projects(id uuid PRIMARY KEY, account_id uuid REFERENCES accounts ON DELETE CASCADE,
       name text);
@@ -55,7 +55,7 @@ beforeAll(async () => {
       unit_id uuid NOT NULL REFERENCES real_estate_units ON DELETE CASCADE,
       created_at timestamptz NOT NULL DEFAULT now());
     CREATE TABLE broadcasts(id uuid PRIMARY KEY, user_id uuid, account_id uuid REFERENCES accounts ON DELETE CASCADE,
-      name text NOT NULL, scheduled_at timestamptz, status text NOT NULL DEFAULT 'draft',
+      name text NOT NULL, template_name text NOT NULL, scheduled_at timestamptz, status text NOT NULL DEFAULT 'draft',
       total_recipients integer DEFAULT 0, read_count integer DEFAULT 0, replied_count integer DEFAULT 0,
       created_at timestamptz DEFAULT now());
     CREATE SCHEMA storage;

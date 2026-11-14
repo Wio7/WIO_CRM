@@ -70,10 +70,11 @@ BEGIN
          (v_old, v_acc, v_owner, '+51900000004', 'Lead Viejo', now() - interval '65 days', 'web', NULL, NULL, NULL);
   INSERT INTO public.reservations (id, account_id, contact_id, status) VALUES (v_res, v_acc, v_c1, 'aprobada');
   INSERT INTO public.reservation_units (reservation_id, unit_id) VALUES (v_res, v_u1);
-  INSERT INTO public.conversations (id, account_id, contact_id, assigned_agent_id, created_at)
-  VALUES ('0960c000-0000-4000-8000-000000000501', v_acc, v_c1, v_eq, now());
-  INSERT INTO public.broadcasts (id, user_id, account_id, name, status, total_recipients, read_count, replied_count)
-  VALUES ('0960c000-0000-4000-8000-000000000601', v_owner, v_acc, 'Difusión 096', 'sent', 100, 60, 10);
+  -- conversations.user_id y broadcasts.template_name son NOT NULL en la base real (001).
+  INSERT INTO public.conversations (id, user_id, account_id, contact_id, assigned_agent_id, created_at)
+  VALUES ('0960c000-0000-4000-8000-000000000501', v_owner, v_acc, v_c1, v_eq, now());
+  INSERT INTO public.broadcasts (id, user_id, account_id, name, template_name, status, total_recipients, read_count, replied_count)
+  VALUES ('0960c000-0000-4000-8000-000000000601', v_owner, v_acc, 'Difusión 096', 'plantilla_096', 'sent', 100, 60, 10);
 
   -- Caja: gasto de marketing vigente 10.00 (proyecto), gasto de marketing 5.00 que se anula,
   -- gasto de obra 7.00 (no es marketing).
@@ -158,14 +159,17 @@ BEGIN
   IF jsonb_array_length(v->'byMonth') <> 12 THEN RAISE EXCEPTION 'FALLO byMonth'; END IF;
   IF (v->'broadcasts'->0->>'total')::int <> 100 OR (v->'broadcasts'->0->>'read')::int <> 60 THEN
     RAISE EXCEPTION 'FALLO difusiones: %', v->'broadcasts'; END IF;
-  -- Con el proyecto: el gasto y la separación siguen; los leads no se filtran.
+  -- Con el proyecto: el gasto y la separación siguen; los leads no se filtran,
+  -- así que el costo por lead no se calcula (sería engañoso).
   v := public.marketing_summary(NULL, '0960c000-0000-4000-8000-000000000101');
   IF (v->>'spendCents')::bigint <> 1000 OR (v->>'separaciones')::int <> 1 OR (v->>'leadsTotal')::int <> 3 THEN
     RAISE EXCEPTION 'FALLO filtro de proyecto: %', v; END IF;
+  IF v->'costPerLeadCents' <> 'null'::jsonb THEN
+    RAISE EXCEPTION 'FALLO: costo por lead con filtro de proyecto debe ser null (%)', v->'costPerLeadCents'; END IF;
 
   l := public.marketing_leads(NULL, NULL);
   IF jsonb_array_length(l) <> 4 THEN RAISE EXCEPTION 'FALLO leads sin mes: % (esperado 4)', jsonb_array_length(l); END IF;
-  l := public.marketing_leads(CURRENT_DATE, NULL);
+  l := public.marketing_leads((now() AT TIME ZONE 'America/Lima')::date, NULL);
   IF jsonb_array_length(l) <> 3 THEN RAISE EXCEPTION 'FALLO leads del mes: %', jsonb_array_length(l); END IF;
   SELECT x INTO l FROM jsonb_array_elements(l) x WHERE x->>'name' = 'Lead Uno';
   IF l->>'channel' <> 'meta_ads' OR l->>'campaign' <> 'Campaña 096' OR l->>'adId' <> 'ad-1'
@@ -273,6 +277,60 @@ BEGIN
   BEGIN UPDATE public.marketing_pieces SET status = 'borrador' WHERE id = '0960c000-0000-4000-8000-000000000801';
   EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
   IF v_st IS DISTINCT FROM '42501' THEN RAISE EXCEPTION 'FALLO: el equipo reabrió una publicada (%)', v_st; END IF;
+  -- Tampoco cambia el contenido de una pieza publicada.
+  v_st := NULL;
+  BEGIN UPDATE public.marketing_pieces SET caption = 'Cambio después de publicar' WHERE id = '0960c000-0000-4000-8000-000000000801';
+  EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
+  IF v_st IS DISTINCT FROM '42501' THEN RAISE EXCEPTION 'FALLO: el equipo cambió una pieza publicada (%)', v_st; END IF;
+END $$;
+
+-- 5b. Publicar con contenido nuevo en el mismo UPDATE vuelve a revisión; published_at no se falsifica;
+--     created_by no se cambia ni se inventa; una pieza creada ya publicada deja su tarea en 'listo'.
+DO $$
+DECLARE v_acc uuid := current_setting('t096.acc')::uuid; p record; t record; v_task uuid;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000002', true);
+  INSERT INTO public.marketing_pieces (id, account_id, title, network, scheduled_on, assignee)
+  VALUES ('0960c000-0000-4000-8000-000000000803', v_acc, 'Post de feria', 'facebook', CURRENT_DATE + 5,
+          '0960c000-0000-4000-8000-000000000003');
+  PERFORM public.marketing_review_piece('0960c000-0000-4000-8000-000000000803', true, NULL);
+
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000003', true);
+  UPDATE public.marketing_pieces SET status = 'publicada', caption = 'Texto que el jefe no vio'
+   WHERE id = '0960c000-0000-4000-8000-000000000803';
+  SELECT * INTO p FROM public.marketing_pieces WHERE id = '0960c000-0000-4000-8000-000000000803';
+  IF p.status <> 'en_revision' THEN RAISE EXCEPTION 'FALLO: se publicó contenido no aprobado (%)', p.status; END IF;
+
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000002', true);
+  PERFORM public.marketing_review_piece('0960c000-0000-4000-8000-000000000803', true, NULL);
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000003', true);
+  UPDATE public.marketing_pieces SET status = 'publicada', published_at = '2020-01-01'
+   WHERE id = '0960c000-0000-4000-8000-000000000803';
+  SELECT * INTO p FROM public.marketing_pieces WHERE id = '0960c000-0000-4000-8000-000000000803';
+  IF p.status <> 'publicada' OR p.published_at < now() - interval '1 day' THEN
+    RAISE EXCEPTION 'FALLO: published_at falsificado (%)', p.published_at; END IF;
+
+  -- created_by: el equipo no se apropia de una tarea del jefe para borrarla, ni firma como otro.
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000002', true);
+  INSERT INTO public.marketing_tasks (account_id, title) VALUES (v_acc, 'Tarea del jefe') RETURNING id INTO v_task;
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000003', true);
+  UPDATE public.marketing_tasks SET created_by = '0960c000-0000-4000-8000-000000000003' WHERE id = v_task;
+  DELETE FROM public.marketing_tasks WHERE id = v_task;
+  SELECT * INTO t FROM public.marketing_tasks WHERE id = v_task;
+  IF t.id IS NULL OR t.created_by <> '0960c000-0000-4000-8000-000000000002' THEN
+    RAISE EXCEPTION 'FALLO: el equipo se apropió de la tarea del jefe (%)', t; END IF;
+  INSERT INTO public.marketing_tasks (account_id, title, created_by)
+  VALUES (v_acc, 'Firmada como otro', '0960c000-0000-4000-8000-000000000002') RETURNING id INTO v_task;
+  SELECT * INTO t FROM public.marketing_tasks WHERE id = v_task;
+  IF t.created_by <> '0960c000-0000-4000-8000-000000000003' THEN
+    RAISE EXCEPTION 'FALLO: tarea creada a nombre de otro (%)', t.created_by; END IF;
+
+  -- El jefe crea una pieza ya publicada: su tarea queda 'listo'.
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000002', true);
+  INSERT INTO public.marketing_pieces (id, account_id, title, network, scheduled_on, status)
+  VALUES ('0960c000-0000-4000-8000-000000000805', v_acc, 'Estado ya publicado', 'whatsapp', CURRENT_DATE, 'publicada');
+  SELECT * INTO t FROM public.marketing_tasks WHERE piece_id = '0960c000-0000-4000-8000-000000000805';
+  IF t.status <> 'listo' THEN RAISE EXCEPTION 'FALLO: tarea de pieza publicada quedó %', t.status; END IF;
 END $$;
 
 -- 6. Cobranzas no ve piezas ni tareas, no crea, no llama resumen ni leads ni revisión
@@ -325,16 +383,52 @@ DECLARE v_st text; v_acc uuid := current_setting('t096.acc')::uuid;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM storage.buckets WHERE id = 'marketing' AND public = false AND file_size_limit = 52428800) THEN
     RAISE EXCEPTION 'FALLO: falta el bucket privado marketing'; END IF;
+  -- El equipo sube el archivo de un borrador suyo.
   PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000003', true);
-  INSERT INTO storage.objects (bucket_id, name) VALUES ('marketing', v_acc::text || '/pieza-1/foto.png');
-  IF NOT EXISTS (SELECT 1 FROM storage.objects WHERE name = v_acc::text || '/pieza-1/foto.png') THEN
+  INSERT INTO public.marketing_pieces (id, account_id, title, network, scheduled_on)
+  VALUES ('0960c000-0000-4000-8000-000000000804', v_acc, 'Borrador con foto', 'instagram', CURRENT_DATE + 7);
+  INSERT INTO storage.objects (bucket_id, name)
+  VALUES ('marketing', v_acc::text || '/0960c000-0000-4000-8000-000000000804/foto.png');
+  IF NOT EXISTS (SELECT 1 FROM storage.objects WHERE name = v_acc::text || '/0960c000-0000-4000-8000-000000000804/foto.png') THEN
     RAISE EXCEPTION 'FALLO: el equipo no ve el archivo que subió'; END IF;
+  -- No sube en una carpeta que no es una pieza.
+  BEGIN INSERT INTO storage.objects (bucket_id, name) VALUES ('marketing', v_acc::text || '/pieza-1/foto.png');
+  EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
+  IF v_st IS NULL THEN RAISE EXCEPTION 'FALLO: el equipo subió fuera de una pieza'; END IF;
+  -- No cambia el archivo de una pieza aprobada o publicada (la 803 está publicada).
+  v_st := NULL;
+  BEGIN INSERT INTO storage.objects (bucket_id, name)
+        VALUES ('marketing', v_acc::text || '/0960c000-0000-4000-8000-000000000803/nueva.png');
+  EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
+  IF v_st IS NULL THEN RAISE EXCEPTION 'FALLO: el equipo cambió el archivo de una pieza publicada'; END IF;
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000002', true);
+  INSERT INTO storage.objects (bucket_id, name)
+  VALUES ('marketing', v_acc::text || '/0960c000-0000-4000-8000-000000000803/final.png');
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000003', true);
+  DELETE FROM storage.objects WHERE name = v_acc::text || '/0960c000-0000-4000-8000-000000000803/final.png';
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000002', true);
+  IF NOT EXISTS (SELECT 1 FROM storage.objects WHERE name = v_acc::text || '/0960c000-0000-4000-8000-000000000803/final.png') THEN
+    RAISE EXCEPTION 'FALLO: el equipo borró el archivo de una pieza publicada'; END IF;
+
   PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000004', true);
   IF EXISTS (SELECT 1 FROM storage.objects WHERE bucket_id = 'marketing') THEN
     RAISE EXCEPTION 'FALLO: cobranzas ve archivos de marketing'; END IF;
-  BEGIN INSERT INTO storage.objects (bucket_id, name) VALUES ('marketing', v_acc::text || '/pieza-1/otra.png');
+  v_st := NULL;
+  BEGIN INSERT INTO storage.objects (bucket_id, name)
+        VALUES ('marketing', v_acc::text || '/0960c000-0000-4000-8000-000000000804/otra.png');
   EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
   IF v_st IS NULL THEN RAISE EXCEPTION 'FALLO: cobranzas subió a marketing'; END IF;
+END $$;
+
+-- 9. Una cuenta suspendida no da rol de marketing al equipo.
+RESET ROLE;
+UPDATE public.accounts SET status = 'suspended' WHERE id = current_setting('t096.acc')::uuid;
+SET LOCAL ROLE authenticated;
+DO $$
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '0960c000-0000-4000-8000-000000000003', true);
+  IF public.marketing_my_access()->'role' <> 'null'::jsonb THEN
+    RAISE EXCEPTION 'FALLO: el equipo conserva el rol con la cuenta suspendida'; END IF;
 END $$;
 RESET ROLE;
 
