@@ -310,3 +310,171 @@ $$;
 ALTER FUNCTION public.gerencia_cobranza(date, uuid) OWNER TO postgres;
 REVOKE ALL ON FUNCTION public.gerencia_cobranza(date, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.gerencia_cobranza(date, uuid) TO authenticated;
+
+-- ------------------------------------------------------------
+-- 6. Portada de gerencia: cifras del mes, alertas y áreas
+-- Cobrado, cartera y morosidad salen de gerencia_cobranza (una sola regla:
+-- el mes cuenta planes no cancelados, la cartera solo planes activos); aquí
+-- no se vuelve a calcular. Gasto de caja = todas las cajas de la cuenta, sin
+-- reversiones ni traspasos entre cajas (mismo criterio que la 094). Leads y
+-- separaciones por día de Lima; la separación rechazada no cuenta.
+-- Alertas, en este orden y solo las que aplican: cartera90 (rojo),
+-- meta_cobranza (rojo, solo mes actual), banco, traspasos, caja (ámbar).
+-- Áreas, siempre 5: cobranzas (vouchers por revisar + traspasos recibidos),
+-- legal y postventa (traspasos recibidos), administracion (movimientos por
+-- conciliar), marketing (piezas en revisión). masAntiguoDias: desde el
+-- registro pendiente más antiguo (día de Lima); null si no hay pendientes o
+-- si no hay fecha (los vouchers no la tienen).
+-- ------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.gerencia_resumen(p_month date DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+DECLARE
+  a uuid;
+  v_today date := (now() AT TIME ZONE 'America/Lima')::date;
+  v_month date; v_prev date; v_next date; v_dias integer;
+  v_cur jsonb; v_pre jsonb;
+  v_cobrado bigint; v_cobrado_prev bigint; v_meta bigint;
+  v_total bigint; v_vencida bigint; v_c90 bigint; v_c90_clientes integer;
+  v_gasto bigint; v_gasto_prev bigint;
+  v_leads integer; v_leads_prev integer; v_sep integer; v_sep_prev integer; v_meta_ventas integer;
+  v_vouchers integer;
+  v_h_cob integer; v_h_cob_old date; v_h_leg integer; v_h_leg_old date; v_h_pos integer; v_h_pos_old date;
+  v_h_viejos integer;
+  v_b_pend integer; v_b_old date; v_b_viejos integer;
+  v_m_pend integer; v_m_old date;
+  v_morosidad numeric;
+  v_alertas jsonb := '[]'::jsonb;
+  v_areas jsonb;
+  v_pend_total integer;
+BEGIN
+  SELECT account_id INTO a FROM public.profiles WHERE user_id = auth.uid();
+  IF a IS NULL OR NOT public.is_owner_or_gerencia(a) THEN
+    RAISE EXCEPTION 'Solo gerencia' USING ERRCODE = '42501';
+  END IF;
+  v_month := date_trunc('month', COALESCE(p_month, v_today))::date;
+  v_prev := (v_month - interval '1 month')::date;
+  v_next := (v_month + interval '1 month')::date;
+  v_dias := v_next - v_month;
+
+  -- Cobranza (mismo criterio que gerencia_cobranza).
+  v_cur := public.gerencia_cobranza(v_month, NULL);
+  v_pre := public.gerencia_cobranza(v_prev, NULL);
+  v_cobrado := (v_cur #>> '{mes,cobradoTotalCents}')::bigint;
+  v_cobrado_prev := (v_pre #>> '{mes,cobradoTotalCents}')::bigint;
+  v_meta := (v_cur #>> '{mes,metaCents}')::bigint;
+  v_total := (v_cur #>> '{cartera,totalCents}')::bigint;
+  v_vencida := (v_cur #>> '{cartera,vencidaCents}')::bigint;
+  v_morosidad := CASE WHEN v_total > 0 THEN round(100.0 * v_vencida / v_total, 1) END;
+  SELECT (t->>'cents')::bigint, (t->>'clientes')::integer
+    INTO v_c90, v_c90_clientes
+    FROM jsonb_array_elements(v_cur->'tramos') t WHERE t->>'tramo' = '+90';
+  v_c90 := COALESCE(v_c90, 0);
+  v_c90_clientes := COALESCE(v_c90_clientes, 0);
+
+  -- Gasto de caja: todas las cajas de la cuenta, sin reversiones ni traspasos.
+  SELECT COALESCE(SUM(e.amount_cents) FILTER (WHERE e.occurred_on >= v_month AND e.occurred_on < v_next), 0)::bigint,
+         COALESCE(SUM(e.amount_cents) FILTER (WHERE e.occurred_on >= v_prev AND e.occurred_on < v_month), 0)::bigint
+    INTO v_gasto, v_gasto_prev
+    FROM public.cash_entries e
+   WHERE e.account_id = a AND e.kind = 'expense' AND e.reversal_of IS NULL
+     AND NOT EXISTS (SELECT 1 FROM public.cash_entries x WHERE x.reversal_of = e.id)
+     AND to_jsonb(e)->>'transfer_id' IS NULL
+     AND e.occurred_on >= v_prev AND e.occurred_on < v_next;
+
+  -- Leads y separaciones (día de Lima).
+  SELECT count(*) FILTER (WHERE (c.created_at AT TIME ZONE 'America/Lima')::date >= v_month
+                            AND (c.created_at AT TIME ZONE 'America/Lima')::date < v_next)::integer,
+         count(*) FILTER (WHERE (c.created_at AT TIME ZONE 'America/Lima')::date >= v_prev
+                            AND (c.created_at AT TIME ZONE 'America/Lima')::date < v_month)::integer
+    INTO v_leads, v_leads_prev
+    FROM public.contacts c WHERE c.account_id = a;
+  SELECT count(*) FILTER (WHERE (r.created_at AT TIME ZONE 'America/Lima')::date >= v_month
+                            AND (r.created_at AT TIME ZONE 'America/Lima')::date < v_next)::integer,
+         count(*) FILTER (WHERE (r.created_at AT TIME ZONE 'America/Lima')::date >= v_prev
+                            AND (r.created_at AT TIME ZONE 'America/Lima')::date < v_month)::integer
+    INTO v_sep, v_sep_prev
+    FROM public.reservations r WHERE r.account_id = a AND r.status <> 'rechazada';
+  SELECT g.units INTO v_meta_ventas
+    FROM public.management_goals g
+   WHERE g.account_id = a AND g.month = v_month AND g.kind = 'ventas' AND g.project_id IS NULL;
+
+  -- Áreas.
+  SELECT count(*)::integer INTO v_vouchers
+    FROM public.installments i WHERE i.account_id = a AND i.status = 'pendiente' AND i.voucher_path IS NOT NULL;
+  SELECT count(*) FILTER (WHERE h.to_module = 'cobranzas')::integer,
+         MIN((h.created_at AT TIME ZONE 'America/Lima')::date) FILTER (WHERE h.to_module = 'cobranzas'),
+         count(*) FILTER (WHERE h.to_module = 'legal')::integer,
+         MIN((h.created_at AT TIME ZONE 'America/Lima')::date) FILTER (WHERE h.to_module = 'legal'),
+         count(*) FILTER (WHERE h.to_module = 'postventa')::integer,
+         MIN((h.created_at AT TIME ZONE 'America/Lima')::date) FILTER (WHERE h.to_module = 'postventa'),
+         count(*) FILTER (WHERE (h.created_at AT TIME ZONE 'America/Lima')::date < v_today - 3)::integer
+    INTO v_h_cob, v_h_cob_old, v_h_leg, v_h_leg_old, v_h_pos, v_h_pos_old, v_h_viejos
+    FROM public.module_handoffs h WHERE h.account_id = a AND h.status = 'pendiente';
+  SELECT count(*) FILTER (WHERE m.estado = 'por_conciliar')::integer,
+         MIN(m.fecha) FILTER (WHERE m.estado = 'por_conciliar'),
+         count(*) FILTER (WHERE m.estado IN ('por_conciliar', 'revisar') AND m.fecha < v_today - 7)::integer
+    INTO v_b_pend, v_b_old, v_b_viejos
+    FROM public.bank_statement_movements m WHERE m.account_id = a;
+  SELECT count(*)::integer, MIN((p.updated_at AT TIME ZONE 'America/Lima')::date)
+    INTO v_m_pend, v_m_old
+    FROM public.marketing_pieces p WHERE p.account_id = a AND p.status = 'en_revision';
+
+  v_areas := jsonb_build_array(
+    jsonb_build_object('area', 'cobranzas', 'pendientes', v_vouchers + v_h_cob, 'masAntiguoDias', v_today - v_h_cob_old),
+    jsonb_build_object('area', 'legal', 'pendientes', v_h_leg, 'masAntiguoDias', v_today - v_h_leg_old),
+    jsonb_build_object('area', 'postventa', 'pendientes', v_h_pos, 'masAntiguoDias', v_today - v_h_pos_old),
+    jsonb_build_object('area', 'administracion', 'pendientes', v_b_pend, 'masAntiguoDias', v_today - v_b_old),
+    jsonb_build_object('area', 'marketing', 'pendientes', v_m_pend, 'masAntiguoDias', v_today - v_m_old));
+  v_pend_total := v_vouchers + v_h_cob + v_h_leg + v_h_pos + v_b_pend + v_m_pend;
+
+  -- Alertas (orden fijo).
+  IF v_c90 > 0 THEN
+    v_alertas := v_alertas || jsonb_build_array(jsonb_build_object(
+      'clave', 'cartera90', 'nivel', 'rojo', 'titulo', 'Cartera con más de 90 días',
+      'detalle', 'S/ ' || to_char(v_c90 / 100.0, 'FM999,999,999,990.00') || ' en ' || v_c90_clientes || ' clientes',
+      'ruta', '/cobranza?tramo=%2B90'));
+  END IF;
+  IF v_meta IS NOT NULL AND v_month = date_trunc('month', v_today)::date
+     AND v_cobrado::numeric / v_meta < (extract(day FROM v_today)::numeric / v_dias) - 0.10 THEN
+    v_alertas := v_alertas || jsonb_build_array(jsonb_build_object(
+      'clave', 'meta_cobranza', 'nivel', 'rojo', 'titulo', 'Cobranza por debajo de la meta',
+      'detalle', 'Lleva ' || round(100.0 * v_cobrado / v_meta) || ' % de la meta y el mes va en el día ' ||
+                 extract(day FROM v_today)::integer || ' de ' || v_dias,
+      'ruta', '/cobranza'));
+  END IF;
+  IF v_b_viejos > 0 THEN
+    v_alertas := v_alertas || jsonb_build_array(jsonb_build_object(
+      'clave', 'banco', 'nivel', 'ambar', 'titulo', 'Movimientos del banco sin conciliar',
+      'detalle', v_b_viejos || ' con más de 7 días', 'ruta', '/areas'));
+  END IF;
+  IF v_h_viejos > 0 THEN
+    v_alertas := v_alertas || jsonb_build_array(jsonb_build_object(
+      'clave', 'traspasos', 'nivel', 'ambar', 'titulo', 'Traspasos sin atender',
+      'detalle', v_h_viejos || ' con más de 3 días', 'ruta', '/areas'));
+  END IF;
+  IF v_gasto_prev > 0 AND v_gasto > v_gasto_prev * 1.2 THEN
+    v_alertas := v_alertas || jsonb_build_array(jsonb_build_object(
+      'clave', 'caja', 'nivel', 'ambar', 'titulo', 'Gasto de caja sobre el mes anterior',
+      'detalle', 'S/ ' || to_char(v_gasto / 100.0, 'FM999,999,999,990.00') || ' contra S/ ' ||
+                 to_char(v_gasto_prev / 100.0, 'FM999,999,999,990.00') || ' del mes anterior',
+      'ruta', '/caja'));
+  END IF;
+
+  RETURN jsonb_build_object(
+    'month', v_month,
+    'kpis', jsonb_build_object(
+      'cobrado', jsonb_build_object('cents', v_cobrado, 'prevCents', v_cobrado_prev, 'metaCents', v_meta),
+      'morosidadPct', v_morosidad,
+      'cartera90Cents', v_c90,
+      'cajaGasto', jsonb_build_object('cents', v_gasto, 'prevCents', v_gasto_prev),
+      'leads', jsonb_build_object('count', v_leads, 'prevCount', v_leads_prev),
+      'separaciones', jsonb_build_object('count', v_sep, 'prevCount', v_sep_prev, 'metaUnits', v_meta_ventas),
+      'pendientesAreas', v_pend_total),
+    'alertas', v_alertas,
+    'areas', v_areas);
+END;
+$$;
+ALTER FUNCTION public.gerencia_resumen(date) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.gerencia_resumen(date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.gerencia_resumen(date) TO authenticated;

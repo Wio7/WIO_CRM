@@ -124,6 +124,9 @@ beforeAll(async () => {
   await db.exec(sql("087_caja_proyecto_rubro"));
   await db.exec(sql("089_area_promueve"));
   await db.exec(sql("092_area_administracion"));
+  // transfer_id lo agrega la caja (075, otro repo); la 097 solo lo lee con to_jsonb.
+  await db.exec("ALTER TABLE public.cash_entries ADD COLUMN IF NOT EXISTS transfer_id uuid");
+  await db.exec(sql("093_estado_cuenta_banco"));
   await db.exec(sql("094_caja_chica_por_area"));
   await db.exec(sql("095_caja_vista_area"));
   await db.exec(sql("096_marketing"));
