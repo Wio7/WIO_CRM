@@ -248,7 +248,7 @@ DECLARE
   v_p1 uuid := '0970c000-0000-4000-8000-000000000101';
   v_p2 uuid := '0970c000-0000-4000-8000-000000000102';
   v_exp_vencia bigint; v_exp_rem bigint;
-  c jsonb; m jsonb; t jsonb; v_st text;
+  c jsonb; c2 jsonb; m jsonb; t jsonb; v_st text;
 BEGIN
   PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000002', true);
   c := public.gerencia_cobranza();
@@ -264,15 +264,50 @@ BEGIN
   IF (c#>>'{cartera,planes}')::int IS DISTINCT FROM 3 THEN RAISE EXCEPTION 'FALLO: planes PEN, %', c->'cartera'; END IF;
   IF (c->>'otrasMonedas')::int IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'FALLO: otrasMonedas, %', c->'otrasMonedas'; END IF;
 
-  -- Tramos: siempre 4, en orden; A (95 días) entera en +90, F (45 días) en 31-60.
+  -- Tramos por cuota: siempre 4, en orden; A: 300 a 95 días en +90 y 300 a 10 días en 1-30; F (45 días) en 31-60.
   t := c->'tramos';
   IF jsonb_array_length(t) IS DISTINCT FROM 4
      OR t->0->>'tramo' IS DISTINCT FROM '1-30' OR t->1->>'tramo' IS DISTINCT FROM '31-60'
      OR t->2->>'tramo' IS DISTINCT FROM '61-90' OR t->3->>'tramo' IS DISTINCT FROM '+90' THEN RAISE EXCEPTION 'FALLO: tramos, %', t; END IF;
-  IF (t->3->>'cents')::bigint IS DISTINCT FROM 60000 OR (t->3->>'clientes')::int IS DISTINCT FROM 1
+  IF (t->3->>'cents')::bigint IS DISTINCT FROM 30000 OR (t->3->>'clientes')::int IS DISTINCT FROM 1
      OR (t->1->>'cents')::bigint IS DISTINCT FROM 10000 OR (t->1->>'clientes')::int IS DISTINCT FROM 1
-     OR (t->0->>'cents')::bigint IS DISTINCT FROM 0 OR (t->2->>'cents')::bigint IS DISTINCT FROM 0 THEN
+     OR (t->0->>'cents')::bigint IS DISTINCT FROM 30000 OR (t->0->>'clientes')::int IS DISTINCT FROM 1
+     OR (t->2->>'cents')::bigint IS DISTINCT FROM 0 OR (t->2->>'clientes')::int IS DISTINCT FROM 0 THEN
     RAISE EXCEPTION 'FALLO: montos por tramo, %', t; END IF;
+  -- Conciliación: la suma de los tramos es la cartera vencida.
+  IF (SELECT SUM((x->>'cents')::bigint) FROM jsonb_array_elements(t) x) IS DISTINCT FROM (c#>>'{cartera,vencidaCents}')::bigint THEN
+    RAISE EXCEPTION 'FALLO: suma de tramos <> vencidaCents, % vs %', t, c->'cartera'; END IF;
+  -- Forma: versión, asOf y total de morosos.
+  IF (c->>'version')::int IS DISTINCT FROM 1 OR c->>'asOf' IS DISTINCT FROM v_today::text
+     OR (c->>'morososTotal')::int IS DISTINCT FROM 2 THEN RAISE EXCEPTION 'FALLO: version/asOf/morososTotal, %', c->'morososTotal'; END IF;
+  -- Filtros de morosos (no tocan cartera ni tramos).
+  c2 := public.gerencia_cobranza(NULL, NULL, '+90');
+  IF jsonb_array_length(c2->'morosos') IS DISTINCT FROM 1 OR (c2->>'morososTotal')::int IS DISTINCT FROM 1
+     OR c2->'morosos'->0->>'name' IS DISTINCT FROM 'Cliente A 097'
+     OR c2->'tramos' IS DISTINCT FROM c->'tramos' OR c2->'cartera' IS DISTINCT FROM c->'cartera' THEN
+    RAISE EXCEPTION 'FALLO: filtro por tramo, %', c2; END IF;
+  c2 := public.gerencia_cobranza(NULL, NULL, NULL, 'cliente f');
+  IF jsonb_array_length(c2->'morosos') IS DISTINCT FROM 1 OR c2->'morosos'->0->>'name' IS DISTINCT FROM 'Cliente F 097' THEN
+    RAISE EXCEPTION 'FALLO: búsqueda por nombre, %', c2; END IF;
+  c2 := public.gerencia_cobranza(NULL, NULL, NULL, '900000001');
+  IF jsonb_array_length(c2->'morosos') IS DISTINCT FROM 1 OR c2->'morosos'->0->>'name' IS DISTINCT FROM 'Cliente A 097' THEN
+    RAISE EXCEPTION 'FALLO: búsqueda por teléfono, %', c2; END IF;
+  c2 := public.gerencia_cobranza(NULL, NULL, NULL, NULL, 1, 1);
+  IF jsonb_array_length(c2->'morosos') IS DISTINCT FROM 1 OR (c2->>'morososTotal')::int IS DISTINCT FROM 2
+     OR c2->'morosos'->0->>'name' IS DISTINCT FROM 'Cliente F 097' THEN RAISE EXCEPTION 'FALLO: limit/offset, %', c2; END IF;
+  c2 := public.gerencia_cobranza(NULL, NULL, '1-30', 'no existe');
+  IF jsonb_array_length(c2->'morosos') IS DISTINCT FROM 0 OR (c2->>'morososTotal')::int IS DISTINCT FROM 0 THEN
+    RAISE EXCEPTION 'FALLO: sin coincidencias, %', c2; END IF;
+  -- Tramo inválido y paginación inválida -> 22023.
+  v_st := NULL; BEGIN PERFORM public.gerencia_cobranza(NULL, NULL, '90+'); EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
+  IF v_st IS DISTINCT FROM '22023' THEN RAISE EXCEPTION 'FALLO: tramo inválido debía dar 22023 (%)', v_st; END IF;
+  v_st := NULL; BEGIN PERFORM public.gerencia_cobranza(NULL, NULL, NULL, NULL, 0, 0); EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
+  IF v_st IS DISTINCT FROM '22023' THEN RAISE EXCEPTION 'FALLO: limit 0 debía dar 22023 (%)', v_st; END IF;
+  v_st := NULL; BEGIN PERFORM public.gerencia_cobranza(NULL, NULL, NULL, NULL, 501, 0); EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
+  IF v_st IS DISTINCT FROM '22023' THEN RAISE EXCEPTION 'FALLO: limit 501 debía dar 22023 (%)', v_st; END IF;
+  v_st := NULL; BEGIN PERFORM public.gerencia_cobranza(NULL, NULL, NULL, NULL, 50, -1); EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
+  IF v_st IS DISTINCT FROM '22023' THEN RAISE EXCEPTION 'FALLO: offset negativo debía dar 22023 (%)', v_st; END IF;
+  v_st := NULL;
 
   -- Morosos: A (95 d, +90, sin pagos válidos) y F (45 d, último pago hace 40 d).
   IF jsonb_array_length(c->'morosos') IS DISTINCT FROM 2 THEN RAISE EXCEPTION 'FALLO: morosos, %', c->'morosos'; END IF;
@@ -291,15 +326,19 @@ BEGIN
   IF c->'porDia' IS DISTINCT FROM jsonb_build_array(jsonb_build_object('dia', v_today::text, 'cents', 30000)) THEN
     RAISE EXCEPTION 'FALLO: porDia, %', c->'porDia'; END IF;
   -- Lo que vencía en el mes, calculado aparte (cuotas no condonadas con vencimiento en el mes).
-  SELECT COALESCE(round(SUM(i.amount) * 100), 0)::bigint, COALESCE(round(SUM(b.remaining) * 100), 0)::bigint
+  SELECT COALESCE(round(SUM(i.amount) * 100), 0)::bigint,
+         COALESCE(round(SUM(CASE WHEN i.status = 'adelantada' THEN i.amount ELSE LEAST((
+           SELECT COALESCE(SUM(ip.amount), 0) FROM public.installment_payments ip
+            WHERE ip.installment_id = i.id AND ip.voided_at IS NULL
+              AND ip.paid_on < (date_trunc('month', v_today) + interval '1 month')::date), i.amount) END) * 100), 0)::bigint
     INTO v_exp_vencia, v_exp_rem
-    FROM public.installments i JOIN public.installment_balances b ON b.installment_id = i.id
+    FROM public.installments i
    WHERE i.account_id = current_setting('t097.acc')::uuid AND i.status <> 'condonada'
      AND i.due_date >= date_trunc('month', v_today)::date AND i.due_date < (date_trunc('month', v_today) + interval '1 month')::date
      AND i.plan_id IN (SELECT id FROM public.payment_plans WHERE currency = 'PEN');
   IF (c#>>'{mes,venciaCents}')::bigint IS DISTINCT FROM v_exp_vencia OR v_exp_vencia < 30000 THEN RAISE EXCEPTION 'FALLO: venciaCents % vs %', c->'mes', v_exp_vencia; END IF;
-  IF (c#>>'{mes,cobradoDeLoQueVenciaCents}')::bigint IS DISTINCT FROM (v_exp_vencia - v_exp_rem) THEN RAISE EXCEPTION 'FALLO: cobradoDeLoQueVencia %', c->'mes'; END IF;
-  IF (c#>>'{mes,recaudacionPct}')::numeric IS DISTINCT FROM round(100.0 * (v_exp_vencia - v_exp_rem) / v_exp_vencia, 1) THEN RAISE EXCEPTION 'FALLO: recaudacionPct %', c->'mes'; END IF;
+  IF (c#>>'{mes,cobradoDeLoQueVenciaCents}')::bigint IS DISTINCT FROM v_exp_rem THEN RAISE EXCEPTION 'FALLO: cobradoDeLoQueVencia %', c->'mes'; END IF;
+  IF (c#>>'{mes,recaudacionPct}')::numeric IS DISTINCT FROM round(100.0 * v_exp_rem / v_exp_vencia, 1) THEN RAISE EXCEPTION 'FALLO: recaudacionPct %', c->'mes'; END IF;
 
   -- Meta: sin meta -> null; con 60000 y cobrado 30000 -> 50.0.
   PERFORM public.gerencia_set_goal(v_today, NULL, 'cobranza', 0);
@@ -352,8 +391,8 @@ RESET ROLE;
 -- Tarea 3: gerencia_resumen (portada, alertas y áreas)
 -- Los contadores se comparan contra una lectura previa (delta), así el caso
 -- corre igual aunque la cuenta ya tenga datos. Fechas relativas al día de Lima.
--- Caja: gasto 130 vigente + gasto 50 revertido + gasto 70 que es traspaso entre
--- cajas (solo cuenta el primero); mes anterior con gasto 100 -> alerta caja.
+-- Caja: gasto 130 vigente + 25 en otra caja + gasto 50 revertido + gasto 70 que es
+-- traspaso entre cajas (cuentan los dos primeros: 155); mes anterior con gasto 100 -> alerta caja.
 -- Traspaso a legal pendiente de hace 4 días; movimiento de banco por conciliar
 -- de hace 8 días; pieza de marketing en revisión; voucher por revisar.
 -- ============================================================
@@ -378,16 +417,23 @@ DECLARE
   v_a2 uuid := '0970c000-0000-4000-8000-000000000502';
   v_pa uuid := '0970c000-0000-4000-8000-000000000401';
   v_ca uuid := '0970c000-0000-4000-8000-000000000301';
+  v_pd uuid := '0970c000-0000-4000-8000-000000000404';
+  v_d1 uuid := '0970c000-0000-4000-8000-000000000506';
 BEGIN
   -- Caja (todas las cajas de la cuenta).
   INSERT INTO public.cash_companies (id, account_id, name, created_by)
   VALUES (v_acc, v_acc, 'Principal 097', v_owner) ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.cash_companies (id, account_id, name, created_by)
+  VALUES ('0970c000-0000-4000-8000-000000000991', v_acc, 'Segunda caja 097', v_owner);
   PERFORM set_config('request.jwt.claim.sub', v_owner::text, true);
   PERFORM set_config('cash.rubro', 'otros', true);
   INSERT INTO public.cash_entries (id, account_id, company_id, request_id, kind, amount_cents, concept, counterparty, occurred_on, created_by, actor_name)
   VALUES ('0970c000-0000-4000-8000-000000000701', v_acc, v_acc, gen_random_uuid(), 'expense', 130, 'Gasto 097', 'Proveedor', v_today, v_owner, 'Dueño 097'),
          ('0970c000-0000-4000-8000-000000000702', v_acc, v_acc, gen_random_uuid(), 'expense', 50, 'Gasto revertido 097', 'Proveedor', v_today, v_owner, 'Dueño 097'),
          ('0970c000-0000-4000-8000-000000000703', v_acc, v_acc, gen_random_uuid(), 'expense', 100, 'Gasto mes anterior 097', 'Proveedor', v_prev, v_owner, 'Dueño 097');
+  -- Gasto de 25 en otra caja de la cuenta: gerencia ve todas, cuenta.
+  INSERT INTO public.cash_entries (account_id, company_id, request_id, kind, amount_cents, concept, counterparty, occurred_on, created_by, actor_name)
+  VALUES (v_acc, '0970c000-0000-4000-8000-000000000991', gen_random_uuid(), 'expense', 25, 'Gasto otra caja 097', 'Proveedor', v_today, v_owner, 'Dueño 097');
   INSERT INTO public.cash_entries (account_id, company_id, request_id, kind, amount_cents, concept, counterparty, occurred_on, reversal_of, created_by, actor_name)
   VALUES (v_acc, v_acc, gen_random_uuid(), 'income', 50, 'Reversión 097', 'Proveedor', v_today, '0970c000-0000-4000-8000-000000000702', v_owner, 'Dueño 097');
   INSERT INTO public.cash_entries (account_id, company_id, request_id, kind, amount_cents, concept, counterparty, occurred_on, transfer_id, created_by, actor_name)
@@ -398,6 +444,9 @@ BEGIN
   VALUES (v_acc, v_pb, v_b2, 20, v_prev);
   -- Voucher por revisar sobre la cuota de A.
   UPDATE public.installments SET voucher_path = 'v/097.jpg' WHERE id = v_a2;
+  -- Voucher sobre una cuota de un plan cancelado: no cuenta (solo planes activos).
+  UPDATE public.payment_plans SET status = 'cancelado' WHERE id = v_pd;
+  UPDATE public.installments SET voucher_path = 'v/097b.jpg' WHERE id = v_d1;
 
   -- Traspasos: uno pendiente a legal de hace 4 días; uno aceptado viejo (no cuenta).
   INSERT INTO public.module_handoffs (account_id, kind, from_module, to_module, entity_type, entity_id, status, created_at)
@@ -408,7 +457,8 @@ BEGIN
   INSERT INTO public.bank_statement_movements (account_id, fecha_hora, fecha, descripcion, tipo, deposito, huella, estado) VALUES
     (v_acc, now() - interval '8 days', v_today - 8, 'Depósito viejo 097', 'convenio', 100, 'h097-1', 'por_conciliar'),
     (v_acc, now() - interval '2 days', v_today - 2, 'Depósito reciente 097', 'convenio', 100, 'h097-2', 'por_conciliar'),
-    (v_acc, now() - interval '30 days', v_today - 30, 'Comisión 097', 'comision', 0, 'h097-3', 'no_es_cuota');
+    (v_acc, now() - interval '30 days', v_today - 30, 'Comisión 097', 'comision', 0, 'h097-3', 'no_es_cuota'),
+    (v_acc, now() - interval '1 day', v_today - 1, 'Depósito a revisar 097', 'convenio', 100, 'h097-4', 'revisar');
 
   -- Marketing: una pieza en revisión desde hace 5 días y una aprobada (no cuenta).
   INSERT INTO public.marketing_pieces (account_id, title, network, scheduled_on, status, created_by, created_at, updated_at)
@@ -448,13 +498,13 @@ BEGIN
   -- (el pago parcial de F de la tarea 2, hace 40 días, cae en el mes anterior según el día)
   IF (r#>>'{kpis,cobrado,prevCents}')::bigint IS DISTINCT FROM 2000 + (CASE WHEN date_trunc('month', v_today - 40) = date_trunc('month', v_month - 1) THEN 5000 ELSE 0 END) THEN RAISE EXCEPTION 'FALLO: cobrado mes anterior, %', r->'kpis'; END IF;
   IF (r#>>'{kpis,cobrado,metaCents}')::bigint IS DISTINCT FROM 60000 THEN RAISE EXCEPTION 'FALLO: meta de cobranza, %', r->'kpis'; END IF;
-  -- Cartera: total 980.00 (el pago del mes anterior bajó 20.00), vencida 700.00 -> 71.4 %; +90 = 600.00.
+  -- Cartera: total 980.00 (el pago del mes anterior bajó 20.00), vencida 700.00 -> 71.4 %; +90 = 300.00 (por cuota; la de 10 días de A va en 1-30).
   IF (r#>>'{kpis,morosidadPct}')::numeric IS DISTINCT FROM 71.4 THEN RAISE EXCEPTION 'FALLO: morosidadPct, %', r->'kpis'; END IF;
-  IF (r#>>'{kpis,cartera90Cents}')::bigint IS DISTINCT FROM 60000 THEN RAISE EXCEPTION 'FALLO: cartera90, %', r->'kpis'; END IF;
+  IF (r#>>'{kpis,cartera90Cents}')::bigint IS DISTINCT FROM 30000 THEN RAISE EXCEPTION 'FALLO: cartera90 (cuota de A a 95 días), %', r->'kpis'; END IF;
 
   -- Caja: solo el gasto vigente (no el revertido ni el traspaso); mes anterior 100.
-  IF (r#>>'{kpis,cajaGasto,cents}')::bigint - (b#>>'{kpis,cajaGasto,cents}')::bigint IS DISTINCT FROM 130 THEN
-    RAISE EXCEPTION 'FALLO: gasto de caja debe contar solo el no revertido ni traspaso, % vs %', r#>'{kpis,cajaGasto}', b#>'{kpis,cajaGasto}'; END IF;
+  IF (r#>>'{kpis,cajaGasto,cents}')::bigint - (b#>>'{kpis,cajaGasto,cents}')::bigint IS DISTINCT FROM 155 THEN
+    RAISE EXCEPTION 'FALLO: gasto de caja debe contar el vigente de todas las cajas, sin revertido ni traspaso, % vs %', r#>'{kpis,cajaGasto}', b#>'{kpis,cajaGasto}'; END IF;
   IF (r#>>'{kpis,cajaGasto,prevCents}')::bigint - (b#>>'{kpis,cajaGasto,prevCents}')::bigint IS DISTINCT FROM 100 THEN
     RAISE EXCEPTION 'FALLO: gasto de caja del mes anterior, %', r#>'{kpis,cajaGasto}'; END IF;
 
@@ -480,7 +530,7 @@ BEGIN
   IF (ar->1->>'pendientes')::int - (b->'areas'->1->>'pendientes')::int IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'FALLO: legal cuenta el traspaso pendiente, %', ar->1; END IF;
   IF (ar->1->>'masAntiguoDias')::int IS DISTINCT FROM 4 THEN RAISE EXCEPTION 'FALLO: legal masAntiguoDias, %', ar->1; END IF;
   IF (ar->2->>'pendientes')::int IS DISTINCT FROM (b->'areas'->2->>'pendientes')::int THEN RAISE EXCEPTION 'FALLO: postventa no cambia, %', ar->2; END IF;
-  IF (ar->3->>'pendientes')::int - (b->'areas'->3->>'pendientes')::int IS DISTINCT FROM 2 THEN RAISE EXCEPTION 'FALLO: administración cuenta 2 por conciliar, %', ar->3; END IF;
+  IF (ar->3->>'pendientes')::int - (b->'areas'->3->>'pendientes')::int IS DISTINCT FROM 3 THEN RAISE EXCEPTION 'FALLO: administración cuenta 2 por conciliar + 1 por revisar, %', ar->3; END IF;
   IF (ar->3->>'masAntiguoDias')::int IS DISTINCT FROM 8 THEN RAISE EXCEPTION 'FALLO: administración masAntiguoDias, %', ar->3; END IF;
   IF (ar->4->>'pendientes')::int - (b->'areas'->4->>'pendientes')::int IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'FALLO: marketing cuenta la pieza en revisión, %', ar->4; END IF;
   IF (ar->4->>'masAntiguoDias')::int IS DISTINCT FROM 5 THEN RAISE EXCEPTION 'FALLO: marketing masAntiguoDias, %', ar->4; END IF;
@@ -490,14 +540,25 @@ BEGIN
   -- Alertas, en orden y solo las que aplican.
   SELECT string_agg(t.x->>'clave', ',' ORDER BY t.o) INTO claves FROM jsonb_array_elements(r->'alertas') WITH ORDINALITY AS t(x, o);
   v_esperada := (30000::numeric / 60000) < (extract(day FROM v_today)::numeric / v_dias) - 0.10;
-  IF claves IS DISTINCT FROM (CASE WHEN v_esperada THEN 'cartera90,meta_cobranza,banco,traspasos,caja' ELSE 'cartera90,banco,traspasos,caja' END) THEN
+  IF claves IS DISTINCT FROM (CASE WHEN v_esperada THEN 'cartera90_nuevos,meta_cobranza,banco,traspasos,caja' ELSE 'cartera90_nuevos,banco,traspasos,caja' END) THEN
     RAISE EXCEPTION 'FALLO: alertas %, esperadas con meta_cobranza=%', claves, v_esperada; END IF;
-  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'cartera90' AND x->>'nivel' = 'rojo' AND x->>'ruta' = '/cobranza?tramo=%2B90' AND x->>'titulo' IS NOT NULL AND x->>'detalle' IS NOT NULL)
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'banco' AND x->>'nivel' = 'ambar' AND x->>'ruta' = '/areas')
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'traspasos' AND x->>'nivel' = 'ambar' AND x->>'ruta' = '/areas')
-     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'caja' AND x->>'nivel' = 'ambar' AND x->>'ruta' = '/caja') THEN
-    RAISE EXCEPTION 'FALLO: nivel o ruta de alertas, %', r->'alertas'; END IF;
-  IF v_esperada AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'meta_cobranza' AND x->>'nivel' = 'rojo' AND x->>'ruta' = '/cobranza') THEN
+  -- Forma estructurada: { clave, nivel, valor, umbral, cents, count }, sin titulo/detalle/ruta.
+  IF (r->>'version')::int IS DISTINCT FROM 1 THEN RAISE EXCEPTION 'FALLO: version del resumen'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x
+              WHERE NOT (x ?& ARRAY['clave', 'nivel', 'valor', 'umbral', 'cents', 'count']) OR x ?| ARRAY['titulo', 'detalle', 'ruta']) THEN
+    RAISE EXCEPTION 'FALLO: forma de las alertas, %', r->'alertas'; END IF;
+  -- A cruzó los 90 días hace 5 (95): 1 cliente nuevo; debe 600.00 en total.
+  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'cartera90_nuevos' AND x->>'nivel' = 'rojo'
+                    AND (x->>'valor')::int = 1 AND (x->>'umbral')::int = 90 AND (x->>'cents')::bigint = 60000 AND (x->>'count')::int = 1)
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'banco' AND x->>'nivel' = 'ambar'
+                    AND (x->>'valor')::int = 1 AND (x->>'umbral')::int = 7 AND (x->>'count')::int = 1 AND x->'cents' = 'null'::jsonb)
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'traspasos' AND x->>'nivel' = 'ambar'
+                    AND (x->>'valor')::int = 1 AND (x->>'umbral')::int = 3 AND (x->>'count')::int = 1)
+     OR NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'caja' AND x->>'nivel' = 'ambar'
+                    AND (x->>'valor')::bigint = (r#>>'{kpis,cajaGasto,cents}')::bigint AND (x->>'cents')::bigint = (x->>'valor')::bigint
+                    AND (x->>'umbral')::bigint = round((r#>>'{kpis,cajaGasto,prevCents}')::numeric * 1.2) AND x->'count' = 'null'::jsonb) THEN
+    RAISE EXCEPTION 'FALLO: contenido de alertas, %', r->'alertas'; END IF;
+  IF v_esperada AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'meta_cobranza' AND x->>'nivel' = 'rojo' AND (x->>'cents')::bigint = 30000) THEN
     RAISE EXCEPTION 'FALLO: meta_cobranza roja a /cobranza, %', r->'alertas'; END IF;
 
   -- La meta de cobranza solo alerta en el mes actual: el mes anterior no la trae.
@@ -535,6 +596,63 @@ BEGIN
   PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000003', true);
   BEGIN PERFORM public.gerencia_resumen(); EXCEPTION WHEN OTHERS THEN v_st := SQLSTATE; END;
   IF v_st IS DISTINCT FROM '42501' THEN RAISE EXCEPTION 'FALLO: cobranzas resumen debía dar 42501 (%)', v_st; END IF;
+END $$;
+RESET ROLE;
+
+-- ============================================================
+-- Ajustes de la revisión EGM: alerta cartera90_nuevos negativa y meses pasados
+-- ============================================================
+CREATE TEMP TABLE t097_prev (r jsonb);
+GRANT ALL ON t097_prev TO authenticated;
+SET LOCAL ROLE authenticated;
+DO $$
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000002', true);
+  INSERT INTO t097_prev VALUES (public.gerencia_cobranza((date_trunc('month', (now() AT TIME ZONE 'America/Lima')::date) - interval '3 days')::date));
+END $$;
+RESET ROLE;
+DO $$
+DECLARE
+  v_acc uuid := current_setting('t097.acc')::uuid;
+  v_today date := (now() AT TIME ZONE 'America/Lima')::date;
+  v_prev date := (date_trunc('month', (now() AT TIME ZONE 'America/Lima')::date) - interval '3 days')::date;
+  v_pb uuid := '0970c000-0000-4000-8000-000000000402';
+  v_i3 uuid := '0970c000-0000-4000-8000-000000000507';
+  v_i4 uuid := '0970c000-0000-4000-8000-000000000508';
+BEGIN
+  -- Cuota de 100.00 del mes anterior pagada hoy (después del cierre) y otra de 70.00 cubierta por un abono.
+  INSERT INTO public.installments (id, plan_id, account_id, number, amount, due_date, status) VALUES
+    (v_i3, v_pb, v_acc, 3, 100, v_prev, 'pendiente'),
+    (v_i4, v_pb, v_acc, 4, 70, v_prev, 'adelantada');
+  INSERT INTO public.installment_payments (account_id, plan_id, installment_id, amount, paid_on)
+  VALUES (v_acc, v_pb, v_i3, 100, v_today);
+  UPDATE public.installments SET status = 'pagada', paid_at = now(), paid_amount = 100 WHERE id = v_i3;
+  -- La cuota vencida más antigua de A pasa a 150 días: ya no cruzó los 90 en los últimos 30.
+  UPDATE public.installments SET due_date = v_today - 150 WHERE id = '0970c000-0000-4000-8000-000000000501';
+END $$;
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE
+  b jsonb; c jsonb; r jsonb;
+  v_prev date := (date_trunc('month', (now() AT TIME ZONE 'America/Lima')::date) - interval '3 days')::date;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '0970c000-0000-4000-8000-000000000002', true);
+  SELECT t.r INTO b FROM t097_prev t;
+  c := public.gerencia_cobranza(v_prev);
+  -- Mes pasado honesto: +100.00 y +70.00 vencían, solo los 70.00 (abono) estaban cobrados al cierre.
+  IF (c#>>'{mes,venciaCents}')::bigint - (b#>>'{mes,venciaCents}')::bigint IS DISTINCT FROM 17000
+     OR (c#>>'{mes,cobradoDeLoQueVenciaCents}')::bigint - (b#>>'{mes,cobradoDeLoQueVenciaCents}')::bigint IS DISTINCT FROM 7000 THEN
+    RAISE EXCEPTION 'FALLO: cobradoDeLoQueVencia de un mes pasado, % vs %', c->'mes', b->'mes'; END IF;
+  -- El pago de hoy no entra al cobrado del mes anterior.
+  IF (c#>>'{mes,cobradoTotalCents}')::bigint IS DISTINCT FROM (b#>>'{mes,cobradoTotalCents}')::bigint THEN
+    RAISE EXCEPTION 'FALLO: cobradoTotal del mes anterior cambió, % vs %', c->'mes', b->'mes'; END IF;
+  -- Foto de hoy: asOf es hoy aunque se pida otro mes.
+  IF c->>'asOf' IS DISTINCT FROM (now() AT TIME ZONE 'America/Lima')::date::text THEN RAISE EXCEPTION 'FALLO: asOf, %', c->>'asOf'; END IF;
+  -- A (cuota a 150 días) sigue en +90 por 300.00, pero ya no es "nuevo": sin alerta cartera90_nuevos.
+  r := public.gerencia_resumen();
+  IF (r#>>'{kpis,cartera90Cents}')::bigint IS DISTINCT FROM 30000 THEN RAISE EXCEPTION 'FALLO: cartera90 sigue, %', r->'kpis'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(r->'alertas') x WHERE x->>'clave' = 'cartera90_nuevos') THEN
+    RAISE EXCEPTION 'FALLO: cartera90_nuevos no debe alertar con atraso de 150 días, %', r->'alertas'; END IF;
 END $$;
 RESET ROLE;
 
