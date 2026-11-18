@@ -306,7 +306,7 @@ export function WhatsAppConfig() {
     setVerifyingRegistration(true);
     setRegistrationProbe(null);
     try {
-      const res = await fetch('/api/whatsapp/config/verify-registration', {
+      const res = await fetch('/api/whatsapp/config/verify-registration' + (config ? '?line_id=' + encodeURIComponent(config.id) : ''), {
         method: 'GET',
       });
       const data = (await res.json()) as RegistrationProbe;
@@ -574,7 +574,7 @@ export function WhatsAppConfig() {
                     : 'Not registered — Meta will not deliver events'}
                 </AlertTitle>
               </div>
-              {lines.length === 1 && (<Button
+              {config && (<Button
                 variant="outline"
                 size="sm"
                 onClick={handleVerifyRegistration}

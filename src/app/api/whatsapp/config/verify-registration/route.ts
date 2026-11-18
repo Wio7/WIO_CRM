@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { getLineById, getPrimaryLine, LineUnavailableError } from '@/lib/whatsapp/lines'
 import {
   getSubscribedApps,
   verifyPhoneNumber,
@@ -24,11 +25,14 @@ import {
  *                    /register last succeeded; NULL means the
  *                    number was saved but never actually subscribed
  *
+ * Optional `?line_id=` picks the line to check (must belong to the caller's
+ * account, else 404); without it the primary line is checked.
+ *
  * Returns 200 in every case so the UI can render diagnostic detail
  * rather than a generic error toast. The combined `live` flag is
  * what the UI badges on.
  */
-export async function GET() {
+export async function GET(request?: Request) {
   const supabase = await createClient()
   const {
     data: { user },
@@ -55,11 +59,29 @@ export async function GET() {
     })
   }
 
-  const { data: config } = await supabase
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .maybeSingle()
+  const lineId = request ? new URL(request.url).searchParams.get('line_id') : null
+  let config: (Awaited<ReturnType<typeof getPrimaryLine>> & {
+    registered_at?: string | null
+    subscribed_apps_at?: string | null
+    last_registration_error?: string | null
+  }) | null
+  try {
+    config = lineId
+      ? await getLineById(supabase, accountId, lineId)
+      : await getPrimaryLine(supabase, accountId)
+  } catch (err) {
+    if (err instanceof LineUnavailableError) {
+      return NextResponse.json({
+        live: false,
+        checks: { config_exists: true, line_connected: false },
+        message: err.message,
+      })
+    }
+    throw err
+  }
+  if (lineId && !config) {
+    return NextResponse.json({ error: 'Line not found.' }, { status: 404 })
+  }
 
   if (!config) {
     return NextResponse.json({
