@@ -22,7 +22,7 @@ const LINE_A = {
 }
 const LINE_B = {
   id: 'line-B', account_id: 'acct-1', phone_number_id: 'PNID-B',
-  access_token: 'enc-token', is_primary: false, area: 'posventa',
+  access_token: 'enc-token', is_primary: false, area: 'postventa',
 }
 
 // Toggles for the per-test scenario.
@@ -321,7 +321,7 @@ describe('POST /api/whatsapp/send — contact_id con varias líneas', () => {
     expect(conversationInserts[0]).toMatchObject({
       contact_id: 'contact-1',
       line_id: 'line-B',
-      area: 'posventa',
+      area: 'postventa',
     })
   })
 

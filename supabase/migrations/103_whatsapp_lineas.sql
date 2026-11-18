@@ -3,7 +3,7 @@
 --
 -- Hasta ahora una cuenta tenía UN número (017: UNIQUE(account_id) en
 -- whatsapp_config). Golden Habitat necesita varias líneas (ventas, legal,
--- cobranzas, posventa...), cada una con su área. Esta migración:
+-- cobranzas, postventa...), cada una con su área. Esta migración:
 --
 --   1. Convierte whatsapp_config en una tabla de líneas: quita
 --      UNIQUE(account_id) y agrega line_name, area, logo_url, is_primary y
@@ -13,30 +13,44 @@
 --      La fila única de cada cuenta pasa a ser la principal, 'Principal'.
 --   2. conversations: line_id (la línea por la que habla el contacto; un hilo
 --      por contacto y línea) y area (área dueña del hilo; NULL = sin área).
---      Las conversaciones existentes quedan en la línea principal de su cuenta.
---   3. Agrega el área 'posventa' a profiles.area (092) y a
+--      Las conversaciones existentes quedan en la línea principal de su cuenta
+--      (line_id); su area NO se rellena desde la línea: quedan con area NULL
+--      (regla de 055), así volver a correr 103 nunca cambia quién ve un chat
+--      antiguo. El área la pone solo el código al crear hilos nuevos.
+--   3. Agrega el área 'postventa' a profiles.area (092) y a
 --      account_invitations.area (091); se conservan todos los valores previos.
 --   4. can_access_conversation(cuenta, asignado, area): sobrecarga de 3
 --      argumentos. Conserva la lógica vigente (055) y suma el área de la
 --      conversación: sin área, o dueño / administrador sin área / usuario del
---      área 'gerencia' → como hoy; con área, el usuario debe tener esa área.
+--      área 'gerencia' → como hoy; con área, el usuario debe tener esa área
+--      (y en una cuenta con agents_see_only_assigned, como Golden, un agente
+--      de esa área solo ve lo asignado a él; el admin del área ve todo).
 --      Lo asignado a uno es siempre suyo. conversations_select y
 --      messages_select pasan a usarla con c.area.
+--   4c. assign_new_conversation (copia de 062): si el hilo nace con área, se
+--      reparte dentro de esa área (pick_area_agent; jefe de ventas solo en
+--      'ventas') y, si nadie la tiene, queda sin asignar. Con área NULL, igual
+--      que 062.
 --
 -- Nota: la sobrecarga vieja (uuid, uuid, account_role_enum) sigue ahí para
 -- las políticas de update/delete/modify (039). Una llamada con un literal sin
 -- tipo ('agent') se resolvería a la sobrecarga de texto: castear siempre
 -- ('agent'::account_role_enum) al llamarla desde código nuevo.
 --
---   5. set_member_area (copia de 092) acepta también 'posventa'; el resto igual.
+--   5. set_member_area (copia de 092) acepta también 'postventa'; el resto igual.
 --
 -- Llamadores: la sobrecarga de 2 args (uuid, uuid) sigue funcionando; con 3 args
 -- castear siempre el rol: 'agent'::account_role_enum (un literal sin tipo
 -- se resuelve a la sobrecarga de texto del área).
 --
--- Idempotente — se puede volver a correr. Requiere 017, 039, 055, 091, 092.
+-- Idempotente — se puede volver a correr. Requiere 017, 039, 055, 060, 062,
+-- 079, 091, 092. La corre el dueño una vez en el SQL editor de Supabase.
+-- Va en una transacción con lock_timeout de 5 s: si una tabla está bloqueada
+-- falla rápido (se vuelve a correr) en vez de frenar la app esperando el
+-- lock. Al final avisa a PostgREST que recargue el esquema.
 -- ============================================================
 BEGIN;
+SET LOCAL lock_timeout = '5s';
 
 -- ============================================================
 -- 1. whatsapp_config como tabla de líneas
@@ -54,7 +68,7 @@ ALTER TABLE public.whatsapp_config
 ALTER TABLE public.whatsapp_config DROP CONSTRAINT IF EXISTS whatsapp_config_area_check;
 ALTER TABLE public.whatsapp_config
   ADD CONSTRAINT whatsapp_config_area_check
-  CHECK (area IS NULL OR area IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion', 'posventa'));
+  CHECK (area IS NULL OR area IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion', 'postventa'));
 
 -- La fila (única hasta ahora) de cada cuenta es su línea principal. Antes del
 -- índice único; si una cuenta ya tuviera principal, no se toca.
@@ -86,13 +100,7 @@ UPDATE public.conversations c
  WHERE c.line_id IS NULL
    AND w.account_id = c.account_id
    AND w.is_primary;
-
-UPDATE public.conversations c
-   SET area = w.area
-  FROM public.whatsapp_config w
- WHERE c.area IS NULL
-   AND c.line_id = w.id
-   AND w.area IS NOT NULL;
+-- Sin relleno de conversations.area: ver el encabezado (punto 2).
 
 CREATE INDEX IF NOT EXISTS idx_conversations_line
   ON public.conversations (line_id);
@@ -101,17 +109,17 @@ CREATE INDEX IF NOT EXISTS idx_conversations_account_area
   WHERE area IS NOT NULL;
 
 -- ============================================================
--- 3. Área 'posventa' (profiles 092:43, invitaciones 091:49)
+-- 3. Área 'postventa' (profiles 092:43, invitaciones 091:49)
 -- ============================================================
 ALTER TABLE public.profiles DROP CONSTRAINT IF EXISTS profiles_area_check;
 ALTER TABLE public.profiles
   ADD CONSTRAINT profiles_area_check
-  CHECK (area IS NULL OR area IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion', 'posventa'));
+  CHECK (area IS NULL OR area IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion', 'postventa'));
 
 ALTER TABLE public.account_invitations DROP CONSTRAINT IF EXISTS account_invitations_area_check;
 ALTER TABLE public.account_invitations
   ADD CONSTRAINT account_invitations_area_check
-  CHECK (area IS NULL OR (area = 'promueve' AND role = 'agent') OR area = 'posventa');
+  CHECK (area IS NULL OR (area = 'promueve' AND role = 'agent') OR area = 'postventa');
 
 -- ============================================================
 -- 4. can_access_conversation con área
@@ -123,8 +131,9 @@ ALTER TABLE public.account_invitations
 --     área). Todas las conversaciones existentes quedan así (área NULL);
 --   · la conversación TIENE área: solo cuenta el área. Ven todo el dueño, el
 --     administrador sin área y quien tiene el área 'gerencia'; quien tiene
---     esa misma área la ve esté o no asignada. agents_see_only_assigned NO
---     se aplica (también vale en cuentas restringidas como Golden, 055).
+--     esa misma área la ve esté o no asignada, salvo un agente en una cuenta
+--     con agents_see_only_assigned (Golden, 055): ese solo ve la asignada a él.
+--     El admin de esa área la ve siempre.
 -- Rol mínimo: viewer (como el default de 055).
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.can_access_conversation(
@@ -175,7 +184,13 @@ AS $$
                  yo2.account_role = 'owner'
                  OR (yo2.account_role = 'admin' AND yo2.area IS NULL)
                  OR yo2.area = 'gerencia'
-                 OR yo2.area = p_area
+                 -- Misma área: el admin del área siempre; un agente solo si
+                 -- la cuenta no restringe a lo asignado (Golden sí, 055).
+                 OR (yo2.area = p_area
+                     AND (yo2.account_role = 'admin'
+                          OR NOT COALESCE(
+                            (SELECT a2.agents_see_only_assigned FROM accounts a2 WHERE a2.id = p_account_id),
+                            false)))
                )
           )
       END
@@ -188,10 +203,102 @@ GRANT EXECUTE ON FUNCTION public.can_access_conversation(UUID, UUID, TEXT)
   TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.can_access_conversation(UUID, UUID, TEXT) IS
-  'Acceso a una conversación (lectura): lógica de 055 + área de la conversación (103). Sin área = como antes; con área, dueño / admin sin área / gerencia / misma área. Lo asignado al usuario se ve siempre.';
+  'Acceso a una conversación (lectura): lógica de 055 + área de la conversación (103). Sin área = como antes; con área, dueño / admin sin área / gerencia / admin de la misma área / agente de la misma área si la cuenta no restringe a lo asignado. Lo asignado al usuario se ve siempre.';
 
 -- ============================================================
--- 4b. set_member_area (092 + 'posventa'; el resto igual)
+-- 4c. assign_new_conversation: copia fiel de 062 + área del hilo
+--
+-- Única diferencia: si el hilo nace con área (la de su línea), se reparte
+-- dentro de esa área y, si nadie la tiene, queda sin asignar (no cae a
+-- pick_account_agent: un chat de Legal no debe ir a un asesor de ventas).
+-- Con NEW.area NULL el comportamiento es exactamente el de 062.
+-- El trigger (079) no cambia: solo se reemplaza la función.
+-- ============================================================
+CREATE OR REPLACE FUNCTION assign_new_conversation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_restrict BOOLEAN;
+  v_auto     BOOLEAN;
+  v_area     TEXT;
+  v_elegido  UUID;
+BEGIN
+  IF NEW.assigned_agent_id IS NOT NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT agents_see_only_assigned, auto_assign_new_conversations
+    INTO v_restrict, v_auto
+    FROM accounts
+    WHERE id = NEW.account_id;
+
+  -- La abrió alguien del equipo desde el CRM: es suya.
+  IF auth.uid() IS NOT NULL THEN
+    IF COALESCE(v_restrict, false)
+       AND NOT is_account_member(NEW.account_id, 'admin') THEN
+      NEW.assigned_agent_id := auth.uid();
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF NOT COALESCE(v_auto, false) THEN
+    RETURN NEW;
+  END IF;
+
+  -- 103: el hilo con área (la de su línea) se reparte solo dentro de ella.
+  IF NEW.area IS NOT NULL THEN
+    v_area := NEW.area;
+    IF v_area = 'ventas' THEN
+      v_elegido := pick_sales_head(NEW.account_id);
+    END IF;
+    IF v_elegido IS NULL THEN
+      v_elegido := pick_area_agent(NEW.account_id, v_area);
+    END IF;
+    -- Nadie en el área: queda sin asignar (lo ven el área y gerencia).
+    NEW.assigned_agent_id := v_elegido;
+    RETURN NEW;
+  END IF;
+
+  v_area := CASE
+    WHEN NEW.contact_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM payment_plans pp
+       WHERE pp.contact_id = NEW.contact_id
+         AND pp.status IN ('activo', 'pagado')
+    ) THEN 'cobranzas'
+    ELSE 'ventas'
+  END;
+
+  -- 062: el prospecto lo califica primero el jefe de ventas.
+  IF v_area = 'ventas' THEN
+    v_elegido := pick_sales_head(NEW.account_id);
+  END IF;
+
+  IF v_elegido IS NULL THEN
+    v_elegido := pick_area_agent(NEW.account_id, v_area);
+  END IF;
+
+  -- Nadie en esa área todavía: el reparto de siempre antes que dejarlo
+  -- sin dueño, que es como nadie se entera.
+  IF v_elegido IS NULL THEN
+    v_elegido := pick_account_agent(NEW.account_id);
+  END IF;
+
+  NEW.assigned_agent_id := v_elegido;
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Nunca impedir que entre un mensaje porque el reparto falló.
+  RAISE WARNING 'assign_new_conversation failed for account %: %', NEW.account_id, SQLERRM;
+  RETURN NEW;
+END;
+$$;
+
+ALTER FUNCTION assign_new_conversation() OWNER TO postgres;
+
+-- ============================================================
+-- 4b. set_member_area (092 + 'postventa'; el resto igual)
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.set_member_area(
   p_user_id UUID,
@@ -224,7 +331,7 @@ BEGIN
   END IF;
 
   IF p_area IS NOT NULL
-     AND p_area NOT IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion', 'posventa') THEN
+     AND p_area NOT IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion', 'postventa') THEN
     RAISE EXCEPTION 'Unknown area: %', p_area USING ERRCODE = '22023';
   END IF;
 
@@ -332,5 +439,7 @@ $$;
 
 REVOKE ALL ON FUNCTION public.coexistence_conversation(UUID, UUID, UUID, UUID) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.coexistence_conversation(UUID, UUID, UUID, UUID) TO service_role;
+
+NOTIFY pgrst, 'reload schema';
 
 COMMIT;

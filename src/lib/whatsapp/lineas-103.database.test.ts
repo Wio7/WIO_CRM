@@ -10,14 +10,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const db = new PGlite();
 const sql = (name: string) => readFileSync(`supabase/migrations/${name}.sql`, "utf8");
 
-// Bloque CREATE OR REPLACE FUNCTION can_access_conversation de 055.
-function funcion055(): string {
-  const s = sql("055_privacidad_y_reparto");
-  const start = s.indexOf("CREATE OR REPLACE FUNCTION can_access_conversation(");
-  const end = s.indexOf("ALTER FUNCTION can_access_conversation", start);
-  if (start < 0 || end < 0) throw new Error("no se encontro can_access_conversation en 055");
+// Bloque CREATE OR REPLACE FUNCTION <nombre> de una migración (hasta su ALTER FUNCTION).
+function funcionDe(migracion: string, nombre: string, fin = `ALTER FUNCTION ${nombre}`): string {
+  const s = sql(migracion);
+  const start = s.indexOf(`CREATE OR REPLACE FUNCTION ${nombre}(`);
+  const end = s.indexOf(fin, start);
+  if (start < 0 || end < 0) throw new Error(`no se encontro ${nombre} en ${migracion}`);
   return s.slice(start, end);
 }
+const funcion055 = () => funcionDe("055_privacidad_y_reparto", "can_access_conversation");
 
 const ACCT = "a0000000-0000-0000-0000-000000000001";
 const U = {
@@ -54,11 +55,14 @@ beforeAll(async () => {
     CREATE TYPE account_role_enum AS ENUM ('owner', 'admin', 'agent', 'viewer');
     CREATE TABLE accounts(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text,
       status text NOT NULL DEFAULT 'active', viewers_are_clients boolean NOT NULL DEFAULT false,
-      agents_see_only_assigned boolean NOT NULL DEFAULT false);
+      agents_see_only_assigned boolean NOT NULL DEFAULT false,
+      auto_assign_new_conversations boolean NOT NULL DEFAULT false);
     CREATE TABLE profiles(id uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
       user_id uuid PRIMARY KEY REFERENCES auth.users ON DELETE CASCADE,
       account_id uuid NOT NULL REFERENCES accounts ON DELETE CASCADE,
-      account_role account_role_enum NOT NULL, area text, area_set_by uuid, area_set_at timestamptz);
+      account_role account_role_enum NOT NULL, area text, area_set_by uuid, area_set_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT clock_timestamp());
+    CREATE TABLE payment_plans(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contact_id uuid, status text);
     -- 092:43
     ALTER TABLE profiles ADD CONSTRAINT profiles_area_check
       CHECK (area IS NULL OR area IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion'));
@@ -79,7 +83,8 @@ beforeAll(async () => {
       CONSTRAINT whatsapp_config_phone_number_id_key UNIQUE (phone_number_id),
       CONSTRAINT whatsapp_config_account_id_key UNIQUE (account_id));
     CREATE TABLE conversations(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      account_id uuid REFERENCES accounts ON DELETE CASCADE, contact_id uuid, assigned_agent_id uuid);
+      account_id uuid REFERENCES accounts ON DELETE CASCADE, contact_id uuid, assigned_agent_id uuid,
+      status text NOT NULL DEFAULT 'open');
     CREATE TABLE messages(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       conversation_id uuid REFERENCES conversations ON DELETE CASCADE);
     ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
@@ -97,6 +102,12 @@ beforeAll(async () => {
     $$;
   `);
   await db.exec(funcion055());
+  // Reparto real (060, 062); pick_account_agent (089) se simula: devuelve el
+  // "comodín" para ver cuándo se cae al reparto general.
+  await db.exec(funcionDe("060_asesor_sin_area", "pick_area_agent"));
+  await db.exec(funcionDe("062_jefa_califica_y_delega", "pick_sales_head", "-- El asesor de ventas menos cargado"));
+  await db.exec(`CREATE FUNCTION pick_account_agent(p UUID) RETURNS UUID LANGUAGE sql AS $$
+    SELECT '00000000-0000-0000-0000-0000000000ff'::uuid $$;`);
   await db.exec(`
     -- 039:86-105
     CREATE POLICY conversations_select ON conversations FOR SELECT
@@ -146,6 +157,19 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
     expect(c.rows[0].area).toBeNull();
   });
 
+  it("volver a correr 103 con la linea ya con area no cambia el area de los chats antiguos (Ruling V)", async () => {
+    await db.exec(`UPDATE whatsapp_config SET area = 'ventas' WHERE phone_number_id = 'PN-1'`);
+    try {
+      await db.exec(sql("103_whatsapp_lineas"));
+      const c = await db.query<{ area: string | null }>(
+        `SELECT area FROM conversations WHERE id = 'c0000000-0000-0000-0000-000000000001'`,
+      );
+      expect(c.rows[0].area).toBeNull();
+    } finally {
+      await db.exec(`UPDATE whatsapp_config SET area = NULL WHERE phone_number_id = 'PN-1'`);
+    }
+  });
+
   it("disconnected_at existe y es NULL por defecto (desconexion suave de lineas)", async () => {
     const r = await db.query<{ disconnected_at: string | null }>(
       `SELECT disconnected_at FROM whatsapp_config WHERE phone_number_id = 'PN-1'`,
@@ -174,22 +198,22 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
     ).rejects.toThrow(/whatsapp_config_one_primary|duplicate/i);
   });
 
-  it("el area de la linea solo admite los valores validos (incluye posventa)", async () => {
+  it("el area de la linea solo admite los valores validos (incluye postventa)", async () => {
     await db.exec(`INSERT INTO whatsapp_config(user_id, account_id, phone_number_id, access_token, area)
-      VALUES ('${U.owner}', '${ACCT}', 'PN-4', 'tok', 'posventa')`);
+      VALUES ('${U.owner}', '${ACCT}', 'PN-4', 'tok', 'postventa')`);
     await expect(
       db.exec(`INSERT INTO whatsapp_config(user_id, account_id, phone_number_id, access_token, area)
         VALUES ('${U.owner}', '${ACCT}', 'PN-5', 'tok', 'inventada')`),
     ).rejects.toThrow(/check/i);
   });
 
-  it("(d) profiles.area y la invitacion aceptan posventa; conservan los valores previos", async () => {
-    await db.exec(`UPDATE profiles SET area = 'posventa' WHERE user_id = '${U.agente}'`);
+  it("(d) profiles.area y la invitacion aceptan postventa; conservan los valores previos", async () => {
+    await db.exec(`UPDATE profiles SET area = 'postventa' WHERE user_id = '${U.agente}'`);
     await db.exec(`UPDATE profiles SET area = NULL WHERE user_id = '${U.agente}'`);
     await db.exec(`UPDATE profiles SET area = 'administracion' WHERE user_id = '${U.agente}'`);
     await db.exec(`UPDATE profiles SET area = NULL WHERE user_id = '${U.agente}'`);
     await expect(db.exec(`UPDATE profiles SET area = 'inventada' WHERE user_id = '${U.agente}'`)).rejects.toThrow(/check/i);
-    await db.exec(`INSERT INTO account_invitations(account_id, role, area) VALUES ('${ACCT}', 'agent', 'posventa')`);
+    await db.exec(`INSERT INTO account_invitations(account_id, role, area) VALUES ('${ACCT}', 'agent', 'postventa')`);
     await db.exec(`INSERT INTO account_invitations(account_id, role, area) VALUES ('${ACCT}', 'agent', 'promueve')`);
     await db.exec(`INSERT INTO account_invitations(account_id, role, area) VALUES ('${ACCT}', 'agent', NULL)`);
     await expect(
@@ -197,11 +221,11 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
     ).rejects.toThrow(/check/i);
   });
 
-  it("set_member_area acepta posventa y sigue rechazando areas invalidas", async () => {
+  it("set_member_area acepta postventa y sigue rechazando areas invalidas", async () => {
     await db.exec(`SELECT set_config('request.jwt.claim.sub', '${U.owner}', false)`);
-    await db.exec(`SELECT set_member_area('${U.agente}', 'posventa')`);
+    await db.exec(`SELECT set_member_area('${U.agente}', 'postventa')`);
     let r = await db.query<{ area: string }>(`SELECT area FROM profiles WHERE user_id = '${U.agente}'`);
-    expect(r.rows[0].area).toBe("posventa");
+    expect(r.rows[0].area).toBe("postventa");
     await db.exec(`SELECT set_member_area('${U.agente}', 'administracion')`);
     await expect(db.exec(`SELECT set_member_area('${U.agente}', 'inventada')`)).rejects.toThrow(/Unknown area: inventada/);
     await db.exec(`SELECT set_member_area('${U.agente}', NULL)`);
@@ -234,7 +258,7 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
 
     it("el usuario del area gerencia ve todo", async () => {
       await setRestringido(false);
-      for (const area of ["legal", "cobranzas", "posventa", null]) {
+      for (const area of ["legal", "cobranzas", "postventa", null]) {
         expect(await puede(U.gerencia, null, area)).toBe(true);
       }
     });
@@ -267,7 +291,7 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
       expect(await puede(U.agente, null, "legal")).toBe(false);
     });
 
-    it("cuenta restringida (tipo Golden): con area solo cuenta el area, no la asignacion", async () => {
+    it("cuenta restringida (tipo Golden): con area, el admin del area ve todo y el agente solo lo suyo", async () => {
       await db.exec(`UPDATE accounts SET name = 'Golden Habitat'`);
       await setRestringido(true);
       await db.exec(`UPDATE profiles SET area = 'cobranzas' WHERE user_id = '${U.agente}'`);
@@ -275,10 +299,13 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
         // gerencia y dueno ven una conversacion legal sin asignar
         expect(await puede(U.gerencia, null, "legal")).toBe(true);
         expect(await puede(U.owner, null, "legal")).toBe(true);
-        // admin de legal y agente de legal ven la conversacion legal sin asignar o ajena
+        // admin de legal ve la conversacion legal sin asignar o ajena
         expect(await puede(U.legal, null, "legal")).toBe(true);
-        expect(await puede(U.agenteLegal, null, "legal")).toBe(true);
-        expect(await puede(U.agenteLegal, U.owner, "legal")).toBe(true);
+        expect(await puede(U.legal, U.owner, "legal")).toBe(true);
+        // agente de legal (Ruling T): solo la asignada a el, como en 055
+        expect(await puede(U.agenteLegal, null, "legal")).toBe(false);
+        expect(await puede(U.agenteLegal, U.owner, "legal")).toBe(false);
+        expect(await puede(U.agenteLegal, U.agenteLegal, "legal")).toBe(true);
         // agente de cobranzas no
         expect(await puede(U.agente, null, "legal")).toBe(false);
         expect(await puede(U.agente, U.owner, "legal")).toBe(false);
@@ -328,5 +355,86 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
     await db.exec(`RESET ROLE`);
     expect(c.rows.map((r) => r.id)).toEqual(["c0000000-0000-0000-0000-0000000000a1"]);
     expect(m.rows.map((r) => r.id)).toEqual(["d0000000-0000-0000-0000-0000000000a1"]);
+  });
+
+  // C1 / Ruling T: cuenta restringida con reparto automatico (Golden).
+  describe("cuenta restringida: area de la linea y reparto (assign_new_conversation de 103)", () => {
+    const V = {
+      jefe: "00000000-0000-0000-0000-0000000000b1",
+      asesorA: "00000000-0000-0000-0000-0000000000b2",
+      asesorB: "00000000-0000-0000-0000-0000000000b3",
+      cobrador: "00000000-0000-0000-0000-0000000000b4",
+    };
+    const CONTACTO_CON_PLAN = "e0000000-0000-0000-0000-000000000001";
+    const CONTACTO_NUEVO = "e0000000-0000-0000-0000-000000000002";
+
+    async function asignadoAl(area: string | null, contacto: string): Promise<string | null> {
+      await db.exec(`SELECT set_config('request.jwt.claim.sub', '', false)`); // webhook: sin auth.uid()
+      const r = await db.query<{ assigned_agent_id: string | null }>(
+        `INSERT INTO conversations(account_id, contact_id, area) VALUES ($1, $2, $3) RETURNING assigned_agent_id`,
+        [ACCT, contacto, area],
+      );
+      return r.rows[0].assigned_agent_id;
+    }
+
+    it("prepara la cuenta: jefe de ventas, dos asesores, un cobrador; trigger como 079", async () => {
+      await db.exec(`
+        INSERT INTO auth.users(id, email) VALUES
+          ('${V.jefe}', 'j@t'), ('${V.asesorA}', 'aa@t'), ('${V.asesorB}', 'ab@t'), ('${V.cobrador}', 'c@t');
+        INSERT INTO profiles(user_id, account_id, account_role, area) VALUES
+          ('${V.jefe}', '${ACCT}', 'admin', 'ventas'),
+          ('${V.asesorA}', '${ACCT}', 'agent', 'ventas'),
+          ('${V.asesorB}', '${ACCT}', 'agent', 'ventas'),
+          ('${V.cobrador}', '${ACCT}', 'agent', 'cobranzas');
+        INSERT INTO payment_plans(contact_id, status) VALUES ('${CONTACTO_CON_PLAN}', 'activo');
+        UPDATE accounts SET agents_see_only_assigned = true, auto_assign_new_conversations = true;
+        CREATE TRIGGER assign_new_conversation BEFORE INSERT ON conversations
+          FOR EACH ROW WHEN (current_setting('wio.coexistence_sync', true) IS DISTINCT FROM 'on')
+          EXECUTE FUNCTION assign_new_conversation();
+      `);
+    });
+
+    it("escenario 1: un asesor de ventas no ve el chat de ventas de otro asesor", async () => {
+      expect(await puede(V.asesorA, V.asesorB, "ventas")).toBe(false);
+      expect(await puede(V.asesorA, null, "ventas")).toBe(false);
+      expect(await puede(V.asesorB, V.asesorB, "ventas")).toBe(true);
+      // el jefe de ventas (admin del area) ve todo ventas
+      expect(await puede(V.jefe, V.asesorB, "ventas")).toBe(true);
+      expect(await puede(V.jefe, null, "ventas")).toBe(true);
+      // en una cuenta sin restriccion, el area si abre los chats del area
+      await setRestringido(false);
+      try {
+        expect(await puede(V.asesorA, V.asesorB, "ventas")).toBe(true);
+      } finally {
+        await setRestringido(true);
+      }
+    });
+
+    it("escenario 2: un chat de Legal se asigna dentro de Legal, nunca a ventas ni cobranzas", async () => {
+      const elegido = await asignadoAl("legal", CONTACTO_CON_PLAN);
+      expect([U.legal, U.agenteLegal]).toContain(elegido);
+      for (const u of [V.jefe, V.asesorA, V.cobrador]) {
+        expect(await puede(u, elegido, "legal")).toBe(false);
+      }
+    });
+
+    it("area sin nadie: el chat queda sin asignar (no cae a pick_account_agent)", async () => {
+      expect(await asignadoAl("marketing", CONTACTO_NUEVO)).toBeNull();
+    });
+
+    it("area ventas: lo recibe primero el jefe de ventas", async () => {
+      expect(await asignadoAl("ventas", CONTACTO_CON_PLAN)).toBe(V.jefe);
+    });
+
+    it("area NULL: exactamente como 062 (plan -> cobranzas; si no, jefe de ventas; sin nadie -> reparto general)", async () => {
+      expect(await asignadoAl(null, CONTACTO_CON_PLAN)).toBe(V.cobrador);
+      expect(await asignadoAl(null, CONTACTO_NUEVO)).toBe(V.jefe);
+      await db.exec(`UPDATE profiles SET area = NULL WHERE user_id = '${V.cobrador}'`);
+      try {
+        expect(await asignadoAl(null, CONTACTO_CON_PLAN)).toBe("00000000-0000-0000-0000-0000000000ff");
+      } finally {
+        await db.exec(`UPDATE profiles SET area = 'cobranzas' WHERE user_id = '${V.cobrador}'`);
+      }
+    });
   });
 });

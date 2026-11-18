@@ -206,7 +206,7 @@ describe('resolveConversationByPhone', () => {
 describe('resolveConversationByPhone — líneas', () => {
   const newLog = () => ({ inserts: [] as Record<string, unknown>[], filters: [] as unknown[][] });
   const lineB = {
-    'line-B': { id: 'line-B', account_id: 'acct', area: 'posventa', is_primary: false, user_id: 'owner-1' },
+    'line-B': { id: 'line-B', account_id: 'acct', area: 'postventa', is_primary: false, user_id: 'owner-1' },
   };
 
   it('un contacto con hilos en dos líneas no crea un tercero: busca por línea', async () => {
@@ -251,7 +251,7 @@ describe('resolveConversationByPhone — líneas', () => {
     const res = await resolveConversationByPhone(db, 'acct', '+14155550123', null, 'line-B');
     expect(res.conversationId).toBe('cv-new');
     expect(log.inserts).toEqual([
-      expect.objectContaining({ contact_id: 'c1', line_id: 'line-B', area: 'posventa' }),
+      expect.objectContaining({ contact_id: 'c1', line_id: 'line-B', area: 'postventa' }),
     ]);
   });
 

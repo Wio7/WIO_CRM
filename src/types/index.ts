@@ -69,7 +69,7 @@ export type MemberArea =
   | "administracion"
   | "tecnica"
   | "promueve"
-  | "posventa";
+  | "postventa";
 
 export const MEMBER_AREAS: MemberArea[] = [
   "marketing",
@@ -81,7 +81,7 @@ export const MEMBER_AREAS: MemberArea[] = [
   "administracion",
   "tecnica",
   "promueve",
-  "posventa",
+  "postventa",
 ];
 
 export interface AccountMember {

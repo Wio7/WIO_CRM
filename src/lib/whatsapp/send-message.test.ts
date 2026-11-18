@@ -147,7 +147,7 @@ const LINE_A = {
 };
 const LINE_B = {
   id: 'line-B', account_id: 'acct-1', phone_number_id: 'PNID-B', access_token: 'tok-B',
-  is_primary: false, area: 'posventa', user_id: 'u1',
+  is_primary: false, area: 'postventa', user_id: 'u1',
 };
 
 function dbWithLines(
