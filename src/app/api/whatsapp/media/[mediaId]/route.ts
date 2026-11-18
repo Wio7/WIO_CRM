@@ -3,7 +3,7 @@ import { getRequestAuth } from '@/lib/supabase/request-auth'
 import { corsPreflight, withCors } from '@/lib/cors'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
-import { resolveSendLine } from '@/lib/whatsapp/lines'
+import { LineUnavailableError, resolveSendLine } from '@/lib/whatsapp/lines'
 
 type MediaRouteContext = { params: Promise<{ mediaId: string }> }
 
@@ -61,7 +61,15 @@ async function handleGet(
     // Fetch and decrypt the WhatsApp line: the one in `?line_id=` (the
     // inbox passes the conversation's line) or the account's primary.
     const lineId = new URL(request.url).searchParams.get('line_id')
-    const config = await resolveSendLine(supabase, accountId, { lineId })
+    let config
+    try {
+      config = await resolveSendLine(supabase, accountId, { lineId })
+    } catch (err) {
+      if (err instanceof LineUnavailableError) {
+        return NextResponse.json({ error: err.message }, { status: 503 })
+      }
+      throw err
+    }
 
     if (!config) {
       return NextResponse.json(

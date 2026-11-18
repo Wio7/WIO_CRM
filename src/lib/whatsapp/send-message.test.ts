@@ -150,7 +150,11 @@ const LINE_B = {
   is_primary: false, area: 'posventa', user_id: 'u1',
 };
 
-function dbWithLines(lines: (typeof LINE_A)[], conversationLineId: string | null): SupabaseClient {
+function dbWithLines(
+  lines: (typeof LINE_A)[],
+  conversationLineId: string | null,
+  lineReadError: { message: string } | null = null,
+): SupabaseClient {
   return {
     from(table: string) {
       let eqId: string | null = null;
@@ -172,6 +176,7 @@ function dbWithLines(lines: (typeof LINE_A)[], conversationLineId: string | null
           };
         }
         if (table === 'whatsapp_config') {
+          if (lineReadError && eqId) return { data: null, error: lineReadError };
           const row = eqId
             ? lines.find((l) => l.id === eqId)
             : [...lines].sort((x, y) => Number(y.is_primary) - Number(x.is_primary))[0];
@@ -227,5 +232,35 @@ describe('sendMessageToConversation — línea de la conversación', () => {
     await expect(
       sendMessageToConversation(dbWithLines([], null), 'acct-1', params),
     ).rejects.toMatchObject({ code: 'whatsapp_not_configured', status: 400 });
+  });
+});
+
+describe('sendMessageToConversation — nunca cae a la principal si falla la línea del hilo', () => {
+  const params = { conversationId: 'cv-1', messageType: 'text', contentText: 'hola' };
+
+  it('hilo con line_id y error al leer la línea: no llama a Graph y falla con line_unavailable', async () => {
+    sendTextMessage.mockClear();
+    await expect(
+      sendMessageToConversation(
+        dbWithLines([LINE_A, LINE_B], 'line-B', { message: 'timeout' }),
+        'acct-1',
+        params,
+      ),
+    ).rejects.toMatchObject({ code: 'line_unavailable', status: 503 });
+    expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('hilo con line_id cuya línea ya no existe: tampoco sale por la principal', async () => {
+    sendTextMessage.mockClear();
+    await expect(
+      sendMessageToConversation(dbWithLines([LINE_A], 'line-B'), 'acct-1', params),
+    ).rejects.toMatchObject({ code: 'line_unavailable' });
+    expect(sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it('hilo con line_id NULL sigue usando la principal', async () => {
+    sendTextMessage.mockClear();
+    await sendMessageToConversation(dbWithLines([LINE_B, LINE_A], null), 'acct-1', params);
+    expect(sendTextMessage).toHaveBeenCalledWith(expect.objectContaining({ phoneNumberId: 'PNID-A' }));
   });
 });

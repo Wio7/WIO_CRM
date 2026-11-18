@@ -28,7 +28,7 @@ import {
   type MediaKind,
 } from '@/lib/whatsapp/meta-api';
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
-import { getLineById, getPrimaryLine } from '@/lib/whatsapp/lines';
+import { getLineById, getPrimaryLine, LineUnavailableError } from '@/lib/whatsapp/lines';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { notifyClient } from '@/lib/push/send';
 import {
@@ -331,10 +331,26 @@ export async function sendMessageToConversation(
 
   // Línea de WhatsApp de la conversación (la respuesta sale por el mismo
   // número por el que escribió el cliente); sin línea, la principal.
-  const config =
-    (conversation.line_id
-      ? await getLineById(db, accountId, conversation.line_id)
-      : null) ?? (await getPrimaryLine(db, accountId));
+  // Si el hilo tiene line_id y esa línea falla o ya no existe, NO se cae a la
+  // principal: saldría desde otro número.
+  let config;
+  if (conversation.line_id) {
+    try {
+      config = await getLineById(db, accountId, conversation.line_id);
+    } catch (err) {
+      if (!(err instanceof LineUnavailableError)) throw err;
+      throw new SendMessageError('line_unavailable', err.message, 503);
+    }
+    if (!config) {
+      throw new SendMessageError(
+        'line_unavailable',
+        'La línea de WhatsApp de esta conversación no está disponible',
+        503
+      );
+    }
+  } else {
+    config = await getPrimaryLine(db, accountId);
+  }
 
   if (!config) {
     // No WhatsApp number connected. If this contact reads their messages

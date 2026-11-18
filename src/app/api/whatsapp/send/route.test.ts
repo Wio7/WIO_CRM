@@ -14,6 +14,7 @@ const messageInserts: Array<Record<string, unknown>> = []
 // que el hilo se busca por contacto Y línea.
 const conversationFilters: unknown[][] = []
 let conversationLookupError: { message: string } | null = null
+let noLines = false
 
 const LINE_A = {
   id: 'line-A', account_id: 'acct-1', phone_number_id: 'PNID-A',
@@ -60,6 +61,7 @@ function makeSupabaseMock() {
             error: conversationLookupError,
           }
         case 'whatsapp_config':
+          if (noLines) return { data: null, error: null }
           if (eqId === 'line-B') return { data: LINE_B, error: null }
           if (eqId && eqId !== 'line-A') return { data: null, error: null }
           return { data: LINE_A, error: null }
@@ -198,6 +200,7 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
     messageInserts.length = 0
     conversationFilters.length = 0
     conversationLookupError = null
+    noLines = false
     existingConversation = null
     createdConversation = null
     contactRow = CONTACT
@@ -342,6 +345,39 @@ describe('POST /api/whatsapp/send — contact_id con varias líneas', () => {
     const res = await postContactTemplate()
     expect(res.status).toBe(500)
     expect(conversationInserts).toHaveLength(0)
+    expect(sendTemplateMessage).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/whatsapp/send — cuenta sin ninguna línea', () => {
+  beforeEach(() => {
+    conversationInserts.length = 0
+    messageInserts.length = 0
+    conversationFilters.length = 0
+    conversationLookupError = null
+    noLines = true
+    existingConversation = null
+    createdConversation = null
+    contactRow = CONTACT
+    supabaseMock = makeSupabaseMock()
+    sendTemplateMessage.mockClear()
+  })
+
+  afterEach(() => {
+    noLines = false
+  })
+
+  it('abre el hilo como antes (sin line_id) y deja decidir al núcleo de envío, sin 400 previo', async () => {
+    const res = await postContactTemplate()
+    const json = await res.json()
+
+    // El hilo se creó: la ruta ya no corta antes de abrirlo.
+    expect(conversationInserts).toHaveLength(1)
+    expect(conversationInserts[0]).toMatchObject({ account_id: 'acct-1', contact_id: 'contact-1' })
+    expect(conversationInserts[0]).not.toHaveProperty('line_id')
+    // El núcleo es quien responde (aquí, el error de siempre al no haber línea).
+    expect(res.status).toBe(400)
+    expect(json.error).toMatch(/WhatsApp not configured/)
     expect(sendTemplateMessage).not.toHaveBeenCalled()
   })
 })

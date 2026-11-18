@@ -4,6 +4,18 @@
 // `decrypt` de '@/lib/whatsapp/encryption' (como send-message.ts).
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+/**
+ * La conversación (o el envío) apunta a una línea concreta y no se pudo
+ * leer: error de la base o la fila ya no existe. NUNCA se sustituye por la
+ * línea principal, que mandaría el mensaje desde otro número.
+ */
+export class LineUnavailableError extends Error {
+  constructor(message = 'La línea de WhatsApp de esta conversación no está disponible') {
+    super(message);
+    this.name = 'LineUnavailableError';
+  }
+}
+
 export type WhatsAppLine = {
   id: string;
   account_id: string;
@@ -52,20 +64,28 @@ export async function getLineForConversation(
   db: SupabaseClient,
   conversationId: string,
 ): Promise<WhatsAppLine | null> {
-  const { data: conv } = await db
+  const { data: conv, error: convError } = await db
     .from('conversations')
     .select('account_id, line_id')
     .eq('id', conversationId)
     .maybeSingle();
+  if (convError) {
+    throw new LineUnavailableError(`No se pudo leer la conversación: ${convError.message}`);
+  }
   if (!conv) return null;
   const { account_id, line_id } = conv as { account_id: string; line_id: string | null };
   if (!line_id) return getPrimaryLine(db, account_id);
-  const { data } = await db
+  const { data, error } = await db
     .from('whatsapp_config')
     .select('*')
     .eq('id', line_id)
     .maybeSingle();
-  return (data as WhatsAppLine | null) ?? null;
+  if (error || !data) {
+    throw new LineUnavailableError(
+      error ? `No se pudo leer la línea: ${error.message}` : undefined,
+    );
+  }
+  return data as WhatsAppLine;
 }
 
 /** Línea por phone_number_id (único globalmente, migración 013). */
@@ -87,19 +107,22 @@ export async function getLineById(
   accountId: string,
   lineId: string,
 ): Promise<WhatsAppLine | null> {
-  const { data } = await db
+  const { data, error } = await db
     .from('whatsapp_config')
     .select('*')
     .eq('id', lineId)
     .eq('account_id', accountId)
     .maybeSingle();
+  if (error) throw new LineUnavailableError(`No se pudo leer la línea: ${error.message}`);
   return (data as WhatsAppLine | null) ?? null;
 }
 
 /**
  * Línea por la que sale un envío: la de la conversación; si no hay
  * conversación, la indicada en `lineId`; si tampoco, la principal.
- * Una conversación cuya línea ya no existe cae a la principal.
+ * Solo una conversación SIN line_id usa la principal; si tiene line_id y la
+ * línea falla o no existe (o es de otra cuenta), lanza LineUnavailableError.
+ * Una conversación inexistente cae a la principal (como antes).
  */
 export async function resolveSendLine(
   db: SupabaseClient,
@@ -108,8 +131,9 @@ export async function resolveSendLine(
 ): Promise<WhatsAppLine | null> {
   if (opts.conversationId) {
     const line = await getLineForConversation(db, opts.conversationId);
-    if (line && line.account_id === accountId) return line;
-    return getPrimaryLine(db, accountId);
+    if (!line) return getPrimaryLine(db, accountId);
+    if (line.account_id !== accountId) throw new LineUnavailableError();
+    return line;
   }
   if (opts.lineId) return getLineById(db, accountId, opts.lineId);
   return getPrimaryLine(db, accountId);

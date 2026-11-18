@@ -6,6 +6,7 @@ import {
   getPrimaryLine,
   listLines,
   resolveSendLine,
+  LineUnavailableError,
   type WhatsAppLine,
 } from './lines'
 
@@ -148,13 +149,65 @@ describe('resolveSendLine', () => {
     expect(await resolveSendLine(db, 'acct-1')).toEqual(a)
   })
 
-  it('una conversación de otra cuenta no presta su línea', async () => {
+  it('una conversación de otra cuenta no presta su línea (lanza, no usa la principal)', async () => {
     const other = line({ id: 'x', account_id: 'acct-2' })
     const mine = line()
     const { db } = makeDb({
       conversations: [{ data: { account_id: 'acct-2', line_id: 'x' } }],
       whatsapp_config: [{ data: other }, { data: mine }],
     })
-    expect(await resolveSendLine(db, 'acct-1', { conversationId: 'cv-9' })).toEqual(mine)
+    await expect(resolveSendLine(db, 'acct-1', { conversationId: 'cv-9' })).rejects.toBeInstanceOf(
+      LineUnavailableError,
+    )
+    void mine
+  })
+})
+
+describe('resolveSendLine — sin caer a la principal', () => {
+  const conv = { data: { account_id: 'acct-1', line_id: 'line-B' } }
+
+  it('conversación con line_id y error al leer la línea lanza LineUnavailableError', async () => {
+    const { db, calls } = makeDb({
+      conversations: [conv],
+      whatsapp_config: [{ data: null, error: { message: 'timeout' } }, { data: line() }],
+    })
+    await expect(resolveSendLine(db, 'acct-1', { conversationId: 'cv-1' })).rejects.toBeInstanceOf(
+      LineUnavailableError,
+    )
+    // No llegó a pedir la principal (is_primary).
+    expect(calls.some((c) => c.method === 'order' && c.args[0] === 'is_primary')).toBe(false)
+  })
+
+  it('conversación con line_id cuya línea no existe lanza LineUnavailableError', async () => {
+    const { db } = makeDb({ conversations: [conv], whatsapp_config: [{ data: null }, { data: line() }] })
+    await expect(resolveSendLine(db, 'acct-1', { conversationId: 'cv-1' })).rejects.toBeInstanceOf(
+      LineUnavailableError,
+    )
+  })
+
+  it('error al leer la conversación lanza en vez de usar la principal', async () => {
+    const { db } = makeDb({
+      conversations: [{ data: null, error: { message: 'timeout' } }],
+      whatsapp_config: [{ data: line() }],
+    })
+    await expect(resolveSendLine(db, 'acct-1', { conversationId: 'cv-1' })).rejects.toBeInstanceOf(
+      LineUnavailableError,
+    )
+  })
+
+  it('line_id NULL sigue usando la principal', async () => {
+    const a = line()
+    const { db } = makeDb({
+      conversations: [{ data: { account_id: 'acct-1', line_id: null } }],
+      whatsapp_config: [{ data: a }],
+    })
+    expect(await resolveSendLine(db, 'acct-1', { conversationId: 'cv-1' })).toEqual(a)
+  })
+
+  it('getLineById con error de la base lanza', async () => {
+    const { db } = makeDb({ whatsapp_config: [{ data: null, error: { message: 'x' } }] })
+    await expect(resolveSendLine(db, 'acct-1', { lineId: 'line-B' })).rejects.toBeInstanceOf(
+      LineUnavailableError,
+    )
   })
 })

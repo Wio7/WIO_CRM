@@ -164,27 +164,26 @@ async function handlePost(request: Request): Promise<Response> {
       const line = lineIdInput
         ? await getLineById(supabase, accountId, lineIdInput)
         : await getPrimaryLine(supabase, accountId)
-      if (!line) {
-        if (lineIdInput) {
-          return NextResponse.json({ error: 'Line not found' }, { status: 404 })
-        }
-        // Sin línea indicada y sin ninguna conectada: el mismo error de siempre.
-        return NextResponse.json(
-          {
-            error:
-              'WhatsApp not configured. Please set up your WhatsApp integration first.',
-          },
-          { status: 400 }
-        )
+      if (!line && lineIdInput) {
+        return NextResponse.json({ error: 'Line not found' }, { status: 404 })
       }
 
-      const resolved = await findOrCreateConversation(
-        supabase,
-        accountId,
-        user.id,
-        contact_id,
-        line
-      )
+      // Cuenta sin ninguna línea: el hilo se abre como antes (line_id NULL) y
+      // el núcleo de envío decide (p. ej. entrega solo en la Golden App).
+      const resolved = line
+        ? await findOrCreateConversation(
+            supabase,
+            accountId,
+            user.id,
+            contact_id,
+            line
+          )
+        : await findOrCreateLegacyConversation(
+            supabase,
+            accountId,
+            user.id,
+            contact_id
+          )
       if (!resolved) {
         return NextResponse.json(
           { error: 'Failed to open a conversation for this contact' },
@@ -243,6 +242,42 @@ async function handlePost(request: Request): Promise<Response> {
 }
 
 type SendSupabase = SupabaseClient
+
+/**
+ * Hilo del contacto en una cuenta SIN líneas de WhatsApp (line_id NULL),
+ * como antes de las líneas. Revisa el error de la consulta.
+ */
+async function findOrCreateLegacyConversation(
+  supabase: SendSupabase,
+  accountId: string,
+  userId: string,
+  contactId: string,
+): Promise<string | null> {
+  const { data: existing, error: findError } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('contact_id', contactId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  if (findError) {
+    console.error('Error looking up conversation for contact send:', findError.message)
+    return null
+  }
+  if (existing) return existing.id
+
+  const { data: created, error } = await supabase
+    .from('conversations')
+    .insert({ account_id: accountId, user_id: userId, contact_id: contactId })
+    .select('id')
+    .single()
+  if (error || !created) {
+    console.error('Error creating conversation for contact send:', error?.message)
+    return null
+  }
+  return created.id
+}
 
 /**
  * Return the contact's conversation id on this line, creating one if it
