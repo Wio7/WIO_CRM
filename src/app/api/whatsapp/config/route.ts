@@ -560,6 +560,84 @@ export async function POST(request: Request) {
 }
 
 /**
+ * PATCH /api/whatsapp/config
+ *
+ * Edita nombre, área y logo de UNA línea. No toca credenciales ni llama a
+ * Meta (por eso no pide token). Mismas validaciones que el POST; la fila se
+ * filtra por account_id en la sesión del usuario (RLS aplica además).
+ * Body: { line_id, line_name?, area?, logo_url? }. Devuelve la línea pública.
+ */
+export async function PATCH(request: Request) {
+  try {
+    const supabase = await createClient()
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const accountId = await resolveAccountId(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'Your profile is not linked to an account.' },
+        { status: 403 },
+      )
+    }
+
+    const body = await request.json().catch(() => null)
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+    }
+    const { line_id, line_name, area, logo_url } = body as Record<string, unknown>
+
+    if (typeof line_id !== 'string' || !line_id) {
+      return NextResponse.json({ error: 'line_id is required.' }, { status: 400 })
+    }
+    if (line_name !== undefined && (typeof line_name !== 'string' || !line_name.trim() || line_name.length > 80)) {
+      return NextResponse.json({ error: 'line_name must be a non-empty string up to 80 characters.' }, { status: 400 })
+    }
+    if (area !== undefined && area !== null && area !== '' && !(typeof area === 'string' && (LINE_AREAS as readonly string[]).includes(area))) {
+      return NextResponse.json({ error: 'area is not a valid area.' }, { status: 400 })
+    }
+    if (logo_url !== undefined && logo_url !== null && typeof logo_url !== 'string') {
+      return NextResponse.json({ error: 'logo_url must be a string.' }, { status: 400 })
+    }
+
+    const changes: { line_name?: string; area?: string | null; logo_url?: string | null } = {}
+    if (line_name !== undefined) changes.line_name = (line_name as string).trim()
+    if (area !== undefined) changes.area = area === '' ? null : (area as string | null)
+    if (logo_url !== undefined) changes.logo_url = (logo_url as string | null)?.trim() || null
+    if (Object.keys(changes).length === 0) {
+      return NextResponse.json({ error: 'Nada que actualizar: envía line_name, area o logo_url.' }, { status: 400 })
+    }
+
+    const { data, error } = await supabase
+      .from('whatsapp_config')
+      .update({ ...changes, updated_at: new Date().toISOString() })
+      .eq('id', line_id)
+      .eq('account_id', accountId)
+      .select('*')
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error updating whatsapp line:', error)
+      return NextResponse.json({ error: 'Failed to update line' }, { status: 500 })
+    }
+    if (!data) {
+      return NextResponse.json({ error: 'Line not found.' }, { status: 404 })
+    }
+    return NextResponse.json({ success: true, line: toPublicLine(data as LineRow) })
+  } catch (error) {
+    console.error('Error in WhatsApp config PATCH:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+/**
  * DELETE /api/whatsapp/config[?line_id=...]
  *
  * Desconecta (borra) UNA línea de la cuenta. Sin `line_id` actúa sobre la

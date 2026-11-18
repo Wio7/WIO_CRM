@@ -36,7 +36,7 @@ function loadSDK(appId: string) {
   return sdkPromise
 }
 
-export function WhatsAppEmbeddedSignup({ onConnected }: { onConnected?: () => void }) {
+export function WhatsAppEmbeddedSignup({ onConnected, title = 'Conectar mi WhatsApp', buttonLabel = 'Conectar mi WhatsApp', embedded = false }: { onConnected?: () => void; title?: string; buttonLabel?: string; embedded?: boolean }) {
   const appId = process.env.NEXT_PUBLIC_META_APP_ID
   const configId = process.env.NEXT_PUBLIC_META_ES_CONFIG_ID
   const configured = signupConfigured(appId, configId)
@@ -125,9 +125,9 @@ export function WhatsAppEmbeddedSignup({ onConnected }: { onConnected?: () => vo
     }
   }
 
-  return <Card className="mb-6">
+  return <Card className={embedded ? 'border-dashed' : 'mb-6'}>
     <CardHeader>
-      <CardTitle>Conectar mi WhatsApp</CardTitle>
+      <CardTitle>{title}</CardTitle>
       <CardDescription>Conecta WhatsApp Business con Meta sin copiar tokens y sigue usando tu celular.</CardDescription>
     </CardHeader>
     <CardContent className="space-y-4">
@@ -140,7 +140,7 @@ export function WhatsAppEmbeddedSignup({ onConnected }: { onConnected?: () => vo
           <li>Los mensajes de bienvenida y ausencia y las respuestas rápidas pasan al CRM.</li>
         </ul>
       </div>
-      <Button onClick={launch} disabled={!configured || !ready || busy}>{busy ? 'Conectando…' : 'Conectar mi WhatsApp'}</Button>
+      <Button onClick={launch} disabled={!configured || !ready || busy}>{busy ? 'Conectando…' : buttonLabel}</Button>
       {!configured && <p className="text-sm text-muted-foreground">La conexión con Meta todavía no está habilitada. Falta configurar el identificador público de la aplicación y la configuración de Embedded Signup.</p>}
       <p role="status" className="text-sm text-muted-foreground">{message}</p>
     </CardContent>

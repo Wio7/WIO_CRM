@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DELETE, GET, POST } from './route'
+import { DELETE, GET, PATCH, POST } from './route'
 
 type Row = Record<string, unknown>
 const state = vi.hoisted(() => ({
@@ -55,7 +55,7 @@ function fakeDb() {
           return { data: null, error: null }
         }
         if (isConv) return { data: null, count: matches().length, error: null }
-        if (op === 'update') { state.writes++; state.log.push(`update:${String(payload.is_primary ?? payload.status)}:${String(filters.find(([k]) => k === 'id')?.[1])}`); matches().forEach((r) => Object.assign(r, payload)); return { data: null, error: null } }
+        if (op === 'update') { state.writes++; state.log.push(`update:${String(payload.is_primary ?? payload.status)}:${String(filters.find(([k]) => k === 'id')?.[1])}`); matches().forEach((r) => Object.assign(r, payload)); return { data: matches(), error: null } }
         if (op === 'delete') { state.writes++; const m = matches(); state.rows = state.rows.filter((r) => !m.includes(r)); return { data: null, error: null } }
         const out = [...matches()]
         out.sort((a, b) => {
@@ -90,6 +90,7 @@ const line = (over: Row): Row => ({
   user_id: 'user-1', ...over,
 })
 const post = (body: Row) => POST(new Request('http://localhost/api/whatsapp/config', { method: 'POST', body: JSON.stringify(body) }))
+const patch = (body: Row) => PATCH(new Request('http://localhost/api/whatsapp/config', { method: 'PATCH', body: JSON.stringify(body) }))
 const del = (qs = '') => DELETE(new Request(`http://localhost/api/whatsapp/config${qs}`, { method: 'DELETE' }))
 
 beforeEach(() => {
@@ -293,5 +294,48 @@ describe('DELETE /api/whatsapp/config', () => {
     state.rows = [line({})]
     expect((await del('?line_id=nope')).status).toBe(404)
     expect(state.rows).toHaveLength(1)
+  })
+})
+
+describe('PATCH /api/whatsapp/config', () => {
+  it('edita nombre, área y logo sin llamar a Meta y no devuelve tokens', async () => {
+    state.rows = [line({})]
+    const res = await patch({ line_id: 'l1', line_name: '  Cobranzas Lima ', area: 'cobranzas', logo_url: 'https://x.test/l.png' })
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.line).toMatchObject({ id: 'l1', line_name: 'Cobranzas Lima', area: 'cobranzas', logo_url: 'https://x.test/l.png' })
+    expect(JSON.stringify(json)).not.toContain('tok-secret')
+    expect(json.line).not.toHaveProperty('access_token')
+    expect(json.line).not.toHaveProperty('verify_token')
+    expect(state.rows[0]).toMatchObject({ line_name: 'Cobranzas Lima', area: 'cobranzas', access_token: 'enc:tok-secret' })
+    expect(meta.verifyPhoneNumber).not.toHaveBeenCalled()
+    expect(meta.registerPhoneNumber).not.toHaveBeenCalled()
+  })
+  it('área vacía o null limpia el área; logo null limpia el logo', async () => {
+    state.rows = [line({ area: 'ventas', logo_url: 'https://x.test/l.png' })]
+    const json = await (await patch({ line_id: 'l1', area: '', logo_url: null })).json()
+    expect(json.line).toMatchObject({ area: null, logo_url: null })
+  })
+  it('valida line_id, nombre, área y logo (400) sin escribir', async () => {
+    state.rows = [line({})]
+    for (const body of [
+      {},
+      { line_id: 5 },
+      { line_id: 'l1', line_name: '   ' },
+      { line_id: 'l1', line_name: 'x'.repeat(81) },
+      { line_id: 'l1', line_name: 7 },
+      { line_id: 'l1', area: 'nada' },
+      { line_id: 'l1', logo_url: 5 },
+      { line_id: 'l1' },
+    ]) {
+      expect((await patch(body)).status).toBe(400)
+    }
+    expect(state.writes).toBe(0)
+  })
+  it('una línea de otra cuenta o inexistente da 404 y no se toca', async () => {
+    state.rows = [line({ id: 'x1', account_id: 'otra' })]
+    expect((await patch({ line_id: 'x1', line_name: 'Hack' })).status).toBe(404)
+    expect((await patch({ line_id: 'nope', line_name: 'Hack' })).status).toBe(404)
+    expect(state.rows[0].line_name).toBe('Principal')
   })
 })
