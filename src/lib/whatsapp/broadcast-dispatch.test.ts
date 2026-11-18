@@ -657,3 +657,82 @@ describe('opt-outs', () => {
     expect(h.statuses('b1')).toEqual({ pending: 2 });
   });
 });
+
+describe('línea de la difusión', () => {
+  const lineRow = (overrides: Row = {}): Row => ({
+    id: 'line-a',
+    account_id: A,
+    line_name: 'Principal',
+    phone_number_id: 'pn-a',
+    access_token: 'enc-a',
+    is_primary: true,
+    sort_order: 0,
+    disconnected_at: null,
+    ...overrides,
+  });
+  const lineB = (overrides: Row = {}): Row =>
+    lineRow({
+      id: 'line-b',
+      line_name: 'Posventa',
+      phone_number_id: 'pn-b',
+      access_token: 'enc-b',
+      is_primary: false,
+      sort_order: 1,
+      ...overrides,
+    });
+  const seed = (lines: Row[], filter: Row = { type: 'all', dispatch: 'server' }) =>
+    new Harness(
+      merge(
+        { whatsapp_config: lines },
+        { message_templates: account(A).message_templates },
+        audience(1),
+        { broadcasts: [broadcast({ audience_filter: filter })] },
+      ),
+    );
+
+  it('dos líneas sin lineId: sale por la principal', async () => {
+    const h = seed([lineB(), lineRow()]);
+    await h.run();
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]).toMatchObject({ phoneNumberId: 'pn-a', accessToken: 'dec:enc-a' });
+  });
+
+  it('audience_filter.lineId: toda la difusión sale por esa línea', async () => {
+    const h = seed([lineRow(), lineB()], { type: 'all', dispatch: 'server', lineId: 'line-b' });
+    await h.run();
+    expect(h.calls[0]).toMatchObject({ phoneNumberId: 'pn-b', accessToken: 'dec:enc-b' });
+    expect(h.row('broadcasts', 'b1').status).toBe('sent');
+  });
+
+  it('lineId de otra cuenta: la difusión falla y no se envía nada', async () => {
+    const h = seed(
+      [lineRow(), lineB({ account_id: B })],
+      { type: 'all', dispatch: 'server', lineId: 'line-b' },
+    );
+    const summary = await h.run();
+    expect(summary.outcomes[0].result).toBe('failed');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.row('broadcasts', 'b1').status).toBe('failed');
+    expect(String((h.row('broadcasts', 'b1').audience_filter as Row).stopReason)).toMatch(/no existe/);
+  });
+
+  it('línea desconectada: la difusión falla con motivo claro y no se envía nada', async () => {
+    const h = seed(
+      [lineRow(), lineB({ disconnected_at: iso(T0 - 1000) })],
+      { type: 'all', dispatch: 'server', lineId: 'line-b' },
+    );
+    const summary = await h.run();
+    expect(summary.outcomes[0].result).toBe('failed');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(String((h.row('broadcasts', 'b1').audience_filter as Row).stopReason)).toMatch(/desconectada/);
+  });
+
+  it('si la línea no se puede leer, la difusión se reintenta luego (no falla)', async () => {
+    const h = seed([lineRow()]);
+    h.db.failNext('whatsapp_config', 'select', { message: 'db down' });
+    const summary = await h.run();
+    expect(summary.outcomes[0].result).toBe('error');
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.row('broadcasts', 'b1').status).toBe('sending');
+  });
+});

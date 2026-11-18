@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveAccountLine } from '@/lib/whatsapp/lines'
+import { lineErrorResponse } from '@/lib/whatsapp/line-http'
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
 import {
@@ -134,13 +136,20 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single()
+    // Una sola línea para toda la difusión: `line_id` opcional, si no la
+    // principal. No se comprueba que la plantilla sea de la WABA de la línea
+    // porque message_templates no guarda la WABA de origen (fase 1); si Meta
+    // no la encuentra en esa WABA, el envío falla por destinatario.
+    let config
+    try {
+      config = await resolveAccountLine(supabase, accountId, body.line_id)
+    } catch (err) {
+      const response = lineErrorResponse(err)
+      if (response) return response
+      throw err
+    }
 
-    if (configError || !config) {
+    if (!config) {
       return NextResponse.json(
         {
           error:

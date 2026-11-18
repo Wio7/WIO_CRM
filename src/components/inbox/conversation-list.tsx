@@ -9,6 +9,15 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import { textoDeDelegacion } from "@/lib/inbox/delegacion";
+import {
+  conversationLineLabel,
+  matchesLineFilter,
+  showLineUi,
+  validLineSelection,
+  type ConversationLineLabel,
+} from "@/lib/inbox/line-filter";
+import { useWhatsappLines } from "@/hooks/use-whatsapp-lines";
+import { LineBadge } from "./line-badge";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
 import { Search, ChevronDown, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
@@ -68,6 +77,14 @@ export function ConversationList({
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null);
+  // Filtro "Línea": solo existe con 2+ líneas. null = Todas.
+  const { lines } = useWhatsappLines();
+  const lineUi = showLineUi(lines);
+  const [pickedLineId, setSelectedLineId] = useState<string | null>(null);
+  // Una línea quitada (o una cuenta que vuelve a tener una sola) no deja el
+  // filtro pegado: la selección vigente se deriva de las líneas actuales.
+  const selectedLineId = validLineSelection(pickedLineId, lines);
+  const selectedLine = lines.find((l) => l.id === selectedLineId) ?? null;
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -193,6 +210,10 @@ export function ConversationList({
       );
     }
 
+    if (lineUi && selectedLineId) {
+      result = result.filter((c) => matchesLineFilter(c, selectedLineId, lines));
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((c) => {
@@ -204,7 +225,7 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, search, selectedTagIds, selectedCompany]);
+  }, [conversations, filter, search, selectedTagIds, selectedCompany, lineUi, selectedLineId, lines]);
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -366,6 +387,48 @@ export function ConversationList({
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+
+          {lineUi && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className={cn(
+                  "inline-flex max-w-40 items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                  selectedLine
+                    ? "text-primary"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <span className="truncate">{selectedLine?.line_name ?? "Línea"}</span>
+                <ChevronDown className="h-3 w-3 shrink-0" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="max-h-64 w-56 border-border bg-popover"
+              >
+                <DropdownMenuItem
+                  onClick={() => setSelectedLineId(null)}
+                  className={cn(
+                    "text-sm",
+                    selectedLineId === null ? "text-primary" : "text-popover-foreground"
+                  )}
+                >
+                  Todas
+                </DropdownMenuItem>
+                {lines.map((l) => (
+                  <DropdownMenuItem
+                    key={l.id}
+                    onClick={() => setSelectedLineId(l.id)}
+                    className={cn(
+                      "text-sm",
+                      selectedLineId === l.id ? "text-primary" : "text-popover-foreground"
+                    )}
+                  >
+                    <span className="truncate">{l.line_name}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
         {hasContactFilters && (
@@ -430,6 +493,7 @@ export function ConversationList({
                 isActive={conv.id === activeConversationId}
                 onSelect={handleSelect}
                 delegacion={textoDeDelegacion(conv, nombreDe)}
+                lineLabel={conversationLineLabel(conv, lines)}
               />
             ))}
           </div>
@@ -445,6 +509,8 @@ interface ConversationItemProps {
   onSelect: (conversation: Conversation) => void;
   /** "Pasado a Alex · agendó", si el jefe de ventas ya lo pasó (062). */
   delegacion?: string | null;
+  /** Línea de la conversación; null con una sola línea en la cuenta. */
+  lineLabel?: ConversationLineLabel | null;
 }
 
 function ConversationItem({
@@ -452,6 +518,7 @@ function ConversationItem({
   isActive,
   onSelect,
   delegacion,
+  lineLabel,
 }: ConversationItemProps) {
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Unknown";
@@ -515,6 +582,7 @@ function ConversationItem({
             />
           </div>
         </div>
+        {lineLabel && <LineBadge label={lineLabel} className="mt-0.5 flex" />}
         {delegacion && (
           <p className="mt-0.5 truncate text-[10px] text-primary/80">{delegacion}</p>
         )}

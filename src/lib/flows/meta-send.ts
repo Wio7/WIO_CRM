@@ -8,6 +8,7 @@ import {
   type MediaKind,
 } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { resolveSendLine } from '@/lib/whatsapp/lines'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -152,12 +153,11 @@ export async function engineSendText(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', args.accountId)
-    .single()
-  if (configErr || !config) {
+  // Sale por la línea de la conversación (o la principal si no hay).
+  const config = await resolveSendLine(db, args.accountId, {
+    conversationId: args.conversationId,
+  })
+  if (!config) {
     throw new Error('WhatsApp not configured for this account')
   }
 
@@ -261,12 +261,11 @@ export async function engineSendMedia(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', args.accountId)
-    .single()
-  if (configErr || !config) {
+  // Sale por la línea de la conversación (o la principal si no hay).
+  const config = await resolveSendLine(db, args.accountId, {
+    conversationId: args.conversationId,
+  })
+  if (!config) {
     throw new Error('WhatsApp not configured for this account')
   }
 
@@ -413,12 +412,11 @@ async function sendInteractiveViaMeta(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', input.accountId)
-    .single()
-  if (configErr || !config) {
+  // Sale por la línea de la conversación (o la principal si no hay).
+  const config = await resolveSendLine(db, input.accountId, {
+    conversationId: input.conversationId,
+  })
+  if (!config) {
     throw new Error('WhatsApp not configured for this account')
   }
 

@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { getPrimaryLine } from '@/lib/whatsapp/lines'
 import { sendTemplateMessage, sendTextMessage } from '@/lib/whatsapp/meta-api'
 import { comoLaPersona } from '@/lib/asistentes-whatsapp/caja'
 import {
@@ -86,12 +87,8 @@ export async function GET(request: Request) {
   for (const d of destinatarios) {
     try {
       if (!numeros.has(d.account_id)) {
-        const { data: config } = await db
-          .from('whatsapp_config')
-          .select('phone_number_id, access_token')
-          .eq('account_id', d.account_id)
-          .limit(1)
-          .maybeSingle()
+        // Sin conversación de por medio: sale por la línea principal.
+        const config = await getPrimaryLine(db, d.account_id)
         numeros.set(
           d.account_id,
           config ? { phoneNumberId: config.phone_number_id, accessToken: decrypt(config.access_token) } : null,

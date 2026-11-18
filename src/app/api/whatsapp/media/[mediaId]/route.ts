@@ -3,6 +3,7 @@ import { getRequestAuth } from '@/lib/supabase/request-auth'
 import { corsPreflight, withCors } from '@/lib/cors'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { LineUnavailableError, resolveSendLine } from '@/lib/whatsapp/lines'
 
 type MediaRouteContext = { params: Promise<{ mediaId: string }> }
 
@@ -57,14 +58,20 @@ async function handleGet(
       )
     }
 
-    // Fetch and decrypt WhatsApp config
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single()
+    // Fetch and decrypt the WhatsApp line: the one in `?line_id=` (the
+    // inbox passes the conversation's line) or the account's primary.
+    const lineId = new URL(request.url).searchParams.get('line_id')
+    let config
+    try {
+      config = await resolveSendLine(supabase, accountId, { lineId })
+    } catch (err) {
+      if (err instanceof LineUnavailableError) {
+        return NextResponse.json({ error: err.message }, { status: 503 })
+      }
+      throw err
+    }
 
-    if (configError || !config) {
+    if (!config) {
       return NextResponse.json(
         { error: 'WhatsApp not configured' },
         { status: 400 }

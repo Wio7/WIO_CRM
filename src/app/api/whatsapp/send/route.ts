@@ -12,6 +12,12 @@ import {
   validateSendMessageParams,
   SendMessageError,
 } from '@/lib/whatsapp/send-message'
+import {
+  findOrCreateLineConversation,
+  getLineById,
+  getPrimaryLine,
+  type WhatsAppLine,
+} from '@/lib/whatsapp/lines'
 
 // The dashboard's outbound-send endpoint. It owns auth, per-user rate
 // limiting, and the two ways the UI targets a thread — an existing
@@ -76,6 +82,9 @@ async function handlePost(request: Request): Promise<Response> {
       // yet (Contact detail → Send template) — we find-or-create one below.
       conversation_id: conversationIdInput,
       contact_id,
+      // Línea por la que abrir el hilo cuando se parte de un contacto; sin
+      // ella, la principal. Con `conversation_id` manda la línea del hilo.
+      line_id: lineIdInput,
       message_type,
       content_text,
       media_url,
@@ -152,12 +161,29 @@ async function handlePost(request: Request): Promise<Response> {
         )
       }
 
-      const resolved = await findOrCreateConversation(
-        supabase,
-        accountId,
-        user.id,
-        contact_id
-      )
+      const line = lineIdInput
+        ? await getLineById(supabase, accountId, lineIdInput)
+        : await getPrimaryLine(supabase, accountId)
+      if (!line && lineIdInput) {
+        return NextResponse.json({ error: 'Line not found' }, { status: 404 })
+      }
+
+      // Cuenta sin ninguna línea: el hilo se abre como antes (line_id NULL) y
+      // el núcleo de envío decide (p. ej. entrega solo en la Golden App).
+      const resolved = line
+        ? await findOrCreateConversation(
+            supabase,
+            accountId,
+            user.id,
+            contact_id,
+            line
+          )
+        : await findOrCreateLegacyConversation(
+            supabase,
+            accountId,
+            user.id,
+            contact_id
+          )
       if (!resolved) {
         return NextResponse.json(
           { error: 'Failed to open a conversation for this contact' },
@@ -218,41 +244,69 @@ async function handlePost(request: Request): Promise<Response> {
 type SendSupabase = SupabaseClient
 
 /**
- * Return the contact's conversation id in this account, creating one if
- * it doesn't exist yet. Mirrors the webhook's find-or-create so an
- * inbound-then-outbound (or outbound-first) sequence converges on a single
- * thread per contact. Runs under the caller's RLS — the conversations_insert
- * policy requires account agent membership, which the caller already is.
+ * Hilo del contacto en una cuenta SIN líneas de WhatsApp (line_id NULL),
+ * como antes de las líneas. Revisa el error de la consulta.
+ */
+async function findOrCreateLegacyConversation(
+  supabase: SendSupabase,
+  accountId: string,
+  userId: string,
+  contactId: string,
+): Promise<string | null> {
+  const { data: existing, error: findError } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('contact_id', contactId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
+  if (findError) {
+    console.error('Error looking up conversation for contact send:', findError.message)
+    return null
+  }
+  if (existing) return existing.id
+
+  const { data: created, error } = await supabase
+    .from('conversations')
+    .insert({ account_id: accountId, user_id: userId, contact_id: contactId })
+    .select('id')
+    .single()
+  if (error || !created) {
+    console.error('Error creating conversation for contact send:', error?.message)
+    return null
+  }
+  return created.id
+}
+
+/**
+ * Return the contact's conversation id on this line, creating one if it
+ * doesn't exist yet. Mirrors the webhook's find-or-create (one thread per
+ * contact AND line) so an inbound-then-outbound (or outbound-first)
+ * sequence converges on a single thread per contact and line. Runs under
+ * the caller's RLS — the conversations_insert policy requires account
+ * agent membership, which the caller already is.
  */
 async function findOrCreateConversation(
   supabase: SendSupabase,
   accountId: string,
   userId: string,
   contactId: string,
+  line: WhatsAppLine,
 ): Promise<string | null> {
-  const { data: existing } = await supabase
-    .from('conversations')
-    .select('id')
-    .eq('account_id', accountId)
-    .eq('contact_id', contactId)
-    .maybeSingle()
-
-  if (existing) return existing.id
-
-  const { data: created, error } = await supabase
-    .from('conversations')
-    .insert({
-      account_id: accountId,
-      user_id: userId,
-      contact_id: contactId,
+  try {
+    const { id } = await findOrCreateLineConversation(supabase, {
+      accountId,
+      userId,
+      contactId,
+      line,
     })
-    .select('id')
-    .single()
-
-  if (error) {
-    console.error('Error creating conversation for contact send:', error.message)
+    return id
+  } catch (err) {
+    console.error(
+      'Error opening conversation for contact send:',
+      err instanceof Error ? err.message : err,
+    )
     return null
   }
-
-  return created.id
 }

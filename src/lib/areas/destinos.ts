@@ -18,6 +18,7 @@ export const AREA_KEYS = [
   "administracion",
   "marketing",
   "tecnica",
+  "postventa",
   "sin_area",
 ] as const;
 
@@ -34,6 +35,7 @@ export const AREA_LABEL: Record<RamaKey, string> = {
   administracion: "Administración",
   marketing: "Marketing",
   tecnica: "Área técnica",
+  postventa: "Posventa",
   sin_area: "Sin área",
   tienda: "Tienda",
 };
@@ -155,6 +157,9 @@ export function destinoDeArea(area: AreaKey, cuenta: CuentaDestino, origen?: str
         app: propia && propia.key === area ? interna(nombreApp(area, cuenta.name, cuenta.brand_name), propia.ruta, origen) : null,
       };
     }
+    case "postventa":
+      // La atención de postventa vive en la app de la cuenta; aún sin app propia en este repo.
+      return { ...base, erpHref: "/dashboard", estado: "activa", app: null };
     case "sin_area":
       return { ...base, erpHref: "/dashboard", estado: "activa", app: null };
   }

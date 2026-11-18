@@ -268,8 +268,8 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         await processCoexistenceChange(supabaseAdmin(), change.field, change.value, {
           findContact: (accountId, userId, phone) =>
             findOrCreateContact(accountId, userId, phone, '', { lead_source: 'whatsapp' }, true),
-          findConversation: (accountId, userId, contactId) =>
-            findOrCreateConversation(accountId, userId, contactId, true),
+          findConversation: (accountId, userId, contactId, line) =>
+            findOrCreateConversation(accountId, userId, contactId, line, true),
         })
         continue
       }
@@ -344,7 +344,9 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // the admin who saved the WhatsApp config.
           config.user_id,
           decryptedAccessToken,
-          phoneNumberId
+          phoneNumberId,
+          // La línea es la fila que coincide con el phone_number_id del evento.
+          config
         )
       }
     }
@@ -618,7 +620,9 @@ async function processMessage(
   // WhatsApp config; the choice is arbitrary post-017 but stable.
   configOwnerUserId: string,
   accessToken: string,
-  phoneNumberId: string
+  phoneNumberId: string,
+  // Línea (fila de whatsapp_config) por la que entró el mensaje: define el hilo.
+  line: { id: string; area: string | null; is_primary?: boolean }
 ) {
   // El equipo de Golden escribe al mismo número (075). Si quien escribe es
   // del equipo y tiene un modo (Golden Caja), lo atiende su asistente y el
@@ -649,7 +653,8 @@ async function processMessage(
   const convResult = await findOrCreateConversation(
     accountId,
     configOwnerUserId,
-    contactRecord.id
+    contactRecord.id,
+    line
   )
   if (!convResult) return
   const conversation = convResult.conversation
@@ -1018,24 +1023,40 @@ async function findOrCreateConversation(
   accountId: string,
   configOwnerUserId: string,
   contactId: string,
+  line: { id: string; area: string | null; is_primary?: boolean },
   silent = false,
 ) {
   if (silent) {
     const { data, error } = await supabaseAdmin().rpc('coexistence_conversation', {
-      p_account: accountId, p_user: configOwnerUserId, p_contact: contactId,
+      p_account: accountId, p_user: configOwnerUserId, p_contact: contactId, p_line: line.id,
     })
     if (error) throw error
     return { conversation: data, created: false }
   }
-  // Look for existing conversation in this account
-  const { data: existing, error: findError } = await supabaseAdmin()
+  // Un hilo por contacto Y línea. Los hilos antiguos con line_id NULL (la
+  // migración 103 los asigna a la principal; esto cubre los que queden) solo
+  // los reutiliza la línea principal, para que una cuenta de una línea siga igual.
+  let lookup = supabaseAdmin()
     .from('conversations')
     .select('*')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
-    .single()
+  lookup = line.is_primary
+    ? lookup.or(`line_id.eq.${line.id},line_id.is.null`)
+    : lookup.eq('line_id', line.id)
+  const { data: existing, error: findError } = await lookup
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle()
 
   if (!findError && existing) {
+    if (!existing.line_id) {
+      // Perezoso y no crítico: fija la línea del hilo antiguo.
+      await supabaseAdmin()
+        .from('conversations')
+        .update({ line_id: line.id, area: existing.area ?? line.area })
+        .eq('id', existing.id)
+    }
     return { conversation: existing, created: false }
   }
 
@@ -1047,6 +1068,8 @@ async function findOrCreateConversation(
       account_id: accountId,
       user_id: configOwnerUserId,
       contact_id: contactId,
+      line_id: line.id,
+      area: line.area,
     })
     .select()
     .single()
