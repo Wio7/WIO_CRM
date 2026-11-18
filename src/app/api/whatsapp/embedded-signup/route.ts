@@ -17,23 +17,28 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'La conexión con Meta no está configurada en el servidor.' }, { status: 503 })
     }
     const admin = createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-    const { data: claimed, error: claimError } = await admin.from('whatsapp_config')
-      .select('account_id').eq('phone_number_id', session.phone_number_id).neq('account_id', accountId).maybeSingle()
-    if (claimError) throw new Error()
-    if (claimed) return NextResponse.json({ error: 'Este número de WhatsApp ya está conectado a otra cuenta.' }, { status: 409 })
+    const isClaimed = async (phoneId: string) => {
+      const { data: claimed, error: claimError } = await admin.from('whatsapp_config')
+        .select('account_id').eq('phone_number_id', phoneId).neq('account_id', accountId).maybeSingle()
+      if (claimError) throw new Error()
+      return Boolean(claimed)
+    }
+    const claimedMessage = { error: 'Este número de WhatsApp ya está conectado a otra cuenta.' }
+    if (session.phone_number_id && await isClaimed(session.phone_number_id)) return NextResponse.json(claimedMessage, { status: 409 })
     const { data: existing, error: readError } = await supabase.from('whatsapp_config')
       .select('phone_number_id, registered_at, contacts_sync_requested_at, history_sync_requested_at, history_sync_status, last_signup_error')
       .eq('account_id', accountId).maybeSingle()
     if (readError) throw new Error()
     const api = embeddedSignupApi()
-    const { token, phone } = await api.connect(body.code, session, process.env.META_APP_ID, process.env.META_APP_SECRET)
+    const { token, phone, phone_number_id: phoneId, waba_id: wabaId } = await api.connect(body.code, session, process.env.META_APP_ID, process.env.META_APP_SECRET)
+    if (!session.phone_number_id && await isClaimed(phoneId)) return NextResponse.json(claimedMessage, { status: 409 })
     const coexistence = session.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING'
-    const sameNumber = existing?.phone_number_id === session.phone_number_id
+    const sameNumber = existing?.phone_number_id === phoneId
     const now = new Date().toISOString()
     const registeredAt = coexistence ? now : sameNumber ? existing.registered_at : null
     const { error: saveError } = await supabase.from('whatsapp_config').upsert({
-      account_id: accountId, user_id: userId, phone_number_id: session.phone_number_id,
-      waba_id: session.waba_id, business_id: session.business_id ?? null,
+      account_id: accountId, user_id: userId, phone_number_id: phoneId,
+      waba_id: wabaId, business_id: session.business_id ?? null,
       access_token: encrypt(token), connection_type: coexistence ? 'coexistence' : 'embedded',
       is_on_biz_app: phone.is_on_biz_app ?? null, platform_type: phone.platform_type ?? null,
       status: 'connected', connected_at: now, updated_at: now,
@@ -57,19 +62,19 @@ export async function POST(request: Request) {
         // Reservar antes de llamar a Meta evita repetir solicitudes al reconectar o en concurrencia.
         const { data: reserved, error: reserveError } = await supabase.from('whatsapp_config')
           .update({ [column]: new Date().toISOString(), ...(type === 'history' ? { history_sync_status: 'requested' } : {}) })
-          .eq('account_id', accountId).eq('phone_number_id', session.phone_number_id).is(column, null).select('account_id')
+          .eq('account_id', accountId).eq('phone_number_id', phoneId).is(column, null).select('account_id')
         if (reserveError) { warnings.push(`No se pudo guardar la solicitud de ${type === 'history' ? 'historial' : 'contactos'}.`); continue }
         if (!reserved?.length) continue
-        try { await api.sync(session.phone_number_id, token, type) }
+        try { await api.sync(phoneId, token, type) }
         catch {
           warnings.push(`No se pudo solicitar la sincronización de ${type === 'history' ? 'historial' : 'contactos'}.`)
           if (type === 'history') await supabase.from('whatsapp_config').update({ history_sync_status: 'failed' })
-            .eq('account_id', accountId).eq('phone_number_id', session.phone_number_id)
+            .eq('account_id', accountId).eq('phone_number_id', phoneId)
         }
       }
       if (warnings.length) {
         await supabase.from('whatsapp_config').update({ last_signup_error: warnings.join(' ') })
-          .eq('account_id', accountId).eq('phone_number_id', session.phone_number_id)
+          .eq('account_id', accountId).eq('phone_number_id', phoneId)
       }
     }
     return NextResponse.json({ success: true, saved: true, registered: registeredAt != null,

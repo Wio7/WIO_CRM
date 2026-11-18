@@ -31,10 +31,25 @@ export function embeddedSignupApi(fetcher: typeof fetch = fetch) {
       const exchanged = await request('validar la autorización', `oauth/access_token?${params}`)
       if (typeof exchanged.access_token !== 'string' || !exchanged.access_token) throw new SignupError('Meta no devolvió un token válido.')
       const token = exchanged.access_token as string
-      await request('suscribir la aplicación a tu cuenta de WhatsApp', `${session.waba_id}/subscribed_apps`, token, {})
+      let wabaId = session.waba_id
+      if (!wabaId) {
+        // Sin waba_id en el evento: Meta lo lista en los permisos granulares del token.
+        const debug = await request('identificar tu cuenta de WhatsApp', `debug_token?input_token=${encodeURIComponent(token)}`, `${appId}|${appSecret}`)
+        const scopes = (debug?.data?.granular_scopes ?? []) as { scope?: string; target_ids?: string[] }[]
+        wabaId = scopes.find(s => s.scope === 'whatsapp_business_management')?.target_ids?.[0]
+        if (!wabaId) throw new SignupError('Meta no indicó la cuenta de WhatsApp conectada. Repite la conexión.')
+      }
+      await request('suscribir la aplicación a tu cuenta de WhatsApp', `${wabaId}/subscribed_apps`, token, {})
+      let phoneId = session.phone_number_id
+      if (!phoneId) {
+        const list = await request('leer los números de tu cuenta', `${wabaId}/phone_numbers?fields=id`, token)
+        const ids = ((list?.data ?? []) as { id?: string }[]).map(p => p.id).filter((id): id is string => typeof id === 'string')
+        if (ids.length !== 1) throw new SignupError(ids.length ? 'La cuenta tiene varios números de WhatsApp. Conecta uno a la vez.' : 'La cuenta de WhatsApp no tiene números. Repite la conexión.')
+        phoneId = ids[0]
+      }
       // Ningún flujo llama /register: coexistencia ya está registrada; embedded no tiene PIN.
-      const phone = await request('leer los datos del número', `${session.phone_number_id}?fields=is_on_biz_app,platform_type,display_phone_number,verified_name`, token)
-      return { token, phone: phone as { is_on_biz_app?: boolean; platform_type?: string; display_phone_number?: string; verified_name?: string } }
+      const phone = await request('leer los datos del número', `${phoneId}?fields=is_on_biz_app,platform_type,display_phone_number,verified_name`, token)
+      return { token, waba_id: wabaId, phone_number_id: phoneId, phone: phone as { is_on_biz_app?: boolean; platform_type?: string; display_phone_number?: string; verified_name?: string } }
     },
     async sync(phoneId: string, token: string, type: 'smb_app_state_sync' | 'history') {
       await request('pedir la sincronización', `${phoneId}/smb_app_data`, token, { messaging_product: 'whatsapp', sync_type: type })
