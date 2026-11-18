@@ -38,6 +38,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { MessageBubble } from "./message-bubble";
+import { LineBadge } from "./line-badge";
+import { conversationLineLabel } from "@/lib/inbox/line-filter";
+import { useWhatsappLines } from "@/hooks/use-whatsapp-lines";
 import { MessageActions } from "./message-actions";
 import {
   MessageComposer,
@@ -267,6 +270,7 @@ export function MessageThread({
   });
 
   const conversationId = conversation?.id;
+  const { lines } = useWhatsappLines();
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
 
   // Fetch messages whenever the selected conversation changes. Kept
@@ -806,6 +810,7 @@ export function MessageThread({
   }
 
   const displayName = contact.name || contact.phone;
+  const lineLabel = conversationLineLabel(conversation, lines);
   const messageGroups = groupMessagesByDate(messages);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
@@ -863,6 +868,7 @@ export function MessageThread({
             <div className="min-w-0">
               <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
               <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+              {lineLabel && <LineBadge label={lineLabel} className="flex" />}
             </div>
           </button>
           {/* Session timer badge — hidden on the narrowest phones so
@@ -1092,6 +1098,7 @@ export function MessageThread({
                           reactions={msgReactions}
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
+                          lineId={conversation.line_id}
                         />
                       </MessageActions>
                     );

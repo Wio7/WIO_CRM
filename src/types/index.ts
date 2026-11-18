@@ -68,7 +68,8 @@ export type MemberArea =
   | "contabilidad"
   | "administracion"
   | "tecnica"
-  | "promueve";
+  | "promueve"
+  | "posventa";
 
 export const MEMBER_AREAS: MemberArea[] = [
   "marketing",
@@ -80,6 +81,7 @@ export const MEMBER_AREAS: MemberArea[] = [
   "administracion",
   "tecnica",
   "promueve",
+  "posventa",
 ];
 
 export interface AccountMember {
@@ -219,6 +221,10 @@ export interface Conversation {
   delegated_from?: string | null;
   /** agendo · 24h · manual */
   delegation_reason?: "agendo" | "24h" | "manual" | null;
+  /** Línea de WhatsApp (whatsapp_config.id) de la conversación; NULL = la principal (103). */
+  line_id?: string | null;
+  /** Área que atiende la conversación (103). */
+  area?: string | null;
   last_message_text?: string;
   last_message_at?: string;
   unread_count: number;

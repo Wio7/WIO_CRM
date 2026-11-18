@@ -10,6 +10,8 @@ import {
 import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
+import { useWhatsappLines } from "@/hooks/use-whatsapp-lines";
+import { isWhatsappConnected } from "@/lib/inbox/line-filter";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import {
@@ -41,9 +43,6 @@ export default function InboxPage() {
     useState<Conversation | null>(null);
   const [activeContact, setActiveContact] = useState<Contact | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [whatsappConnected, setWhatsappConnected] = useState<boolean | null>(
-    null
-  );
   /**
    * Bumped whenever we want children (ConversationList, MessageThread)
    * to refetch from the DB — used as a safety net against missed
@@ -179,45 +178,13 @@ export default function InboxPage() {
     }
   }, []);
 
-  // Check WhatsApp connection status on mount
-  useEffect(() => {
-    const checkConnection = async () => {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-
-      if (!user) return;
-
-      // whatsapp_config is one-row-per-account post-multi-user, so
-      // the previous `.eq('user_id', user.id)` would miss the row
-      // for any teammate who didn't personally save the config —
-      // the "WhatsApp not connected" banner would show in the
-      // shared inbox even though the admin had it configured.
-      // Resolve account_id via the profile and query by that.
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("account_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      const accountId = profile?.account_id as string | undefined;
-      if (!accountId) {
-        setWhatsappConnected(false);
-        return;
-      }
-
-      const { data } = await supabase
-        .from("whatsapp_config")
-        .select("status")
-        .eq("account_id", accountId)
-        .maybeSingle();
-
-      setWhatsappConnected(data?.status === "connected");
-    };
-
-    checkConnection();
-  }, []);
+  // Estado de WhatsApp: conectado si al menos una línea está conectada y
+  // no desconectada (las líneas llegan por GET /api/whatsapp/config, sin
+  // tokens; antes se leía la única fila de whatsapp_config).
+  const { lines: waLines, loading: waLinesLoading } = useWhatsappLines();
+  const whatsappConnected: boolean | null = waLinesLoading
+    ? null
+    : isWhatsappConnected(waLines);
 
   // Handle realtime message events
   const handleMessageEvent = useCallback(
