@@ -14,7 +14,7 @@ export const AREA_LABELS: Record<LineArea, string> = {
   tecnica: 'Técnica',
   promueve: 'Promueve',
   administracion: 'Administración',
-  posventa: 'Posventa',
+  postventa: 'Posventa',
 }
 
 /** Campos públicos de una línea (lo que devuelve GET /api/whatsapp/config en `lines`). */
@@ -40,7 +40,8 @@ export type LineRow = {
   areaLabel: string
   logoUrl: string | null
   initials: string
-  phone: string
+  /** phone_number_id de Meta, rotulado: no es el número de teléfono. */
+  metaIdLabel: string
   statusKey: LineStatusKey
   statusLabel: string
   isPrimary: boolean
@@ -77,7 +78,7 @@ export function toLineRows(lines: LineView[]): LineRow[] {
       areaLabel: areaLabel(l.area),
       logoUrl: l.logo_url,
       initials: lineInitials(l.line_name),
-      phone: l.phone_number_id,
+      metaIdLabel: `ID del número en Meta: ${l.phone_number_id}`,
       statusKey,
       statusLabel: soft ? 'Desconectada' : l.status === 'connected' ? 'Conectada' : 'Requiere atención',
       isPrimary: l.id === primaryId,

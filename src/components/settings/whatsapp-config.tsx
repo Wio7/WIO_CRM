@@ -35,6 +35,7 @@ import { toLineRows, type LineRow, type LineView } from '@/lib/whatsapp/lines-vi
 const MASKED_TOKEN = '••••••••••••••••';
 const NEW_LINE = '__new__';
 const META_LIMIT_NOTE = 'Meta permite 2 números sin verificar la empresa y hasta 20 verificada.';
+const TEMPLATES_WABA_NOTE = 'Las plantillas se gestionan por cuenta de WhatsApp de Meta: conecta todas las líneas en la misma cuenta de WhatsApp de Meta que la principal.';
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'unknown';
 type ResetReason = 'token_corrupted' | 'meta_api_error' | null;
@@ -472,7 +473,12 @@ export function WhatsAppConfig() {
         buttonLabel={lines.length > 0 ? 'Agregar línea' : 'Conectar mi WhatsApp'}
         onConnected={() => { if (accountId) void fetchConfig(accountId); }}
       />
-      {lines.length > 0 && <p className="-mt-3 mb-6 text-xs text-muted-foreground">{META_LIMIT_NOTE}</p>}
+      {lines.length > 0 && (
+        <div className="-mt-3 mb-6 space-y-1 text-xs text-muted-foreground">
+          <p>{META_LIMIT_NOTE}</p>
+          <p>{TEMPLATES_WABA_NOTE}</p>
+        </div>
+      )}
       <details open={advancedOpen || lines.length === 0} onToggle={(e) => setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open)}>
       <summary className="mb-4 cursor-pointer text-sm text-muted-foreground">Opciones avanzadas: configuración manual con token</summary>
       {lines.length > 0 && (
@@ -485,7 +491,7 @@ export function WhatsAppConfig() {
             className="h-9 w-full rounded-md border border-border bg-muted px-2 text-sm text-foreground"
           >
             {toLineRows(lines).map((r) => (
-              <option key={r.id} value={r.id}>{r.name} · {r.phone}</option>
+              <option key={r.id} value={r.id}>{r.name} · {r.metaIdLabel}</option>
             ))}
             <option value={NEW_LINE}>Agregar otra línea (manual)</option>
           </select>

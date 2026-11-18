@@ -95,8 +95,10 @@ function supabaseAdmin() {
  *   { connected: false, reason: 'no_config',        message: '...' }
  *   { connected: false, reason: 'token_corrupted',  message: '...', needs_reset: true }
  *   { connected: false, reason: 'meta_api_error',   message: '...' }
+ *
+ * GET /api/whatsapp/config?lines_only=1 → { lines } (sin token, sin Meta).
  */
-export async function GET() {
+export async function GET(request?: Request) {
   try {
     const supabase = await createClient()
 
@@ -132,6 +134,13 @@ export async function GET() {
     }
 
     const lines = allLines.map(toPublicLine)
+
+    // ?lines_only=1 (bandeja, cada 60 s): solo las líneas, sin descifrar el
+    // token ni llamar a Meta.
+    if (request && new URL(request.url).searchParams.get('lines_only') === '1') {
+      return NextResponse.json({ lines })
+    }
+
     const config = pickPrimary(allLines)
 
     if (!config) {
@@ -644,7 +653,8 @@ export async function PATCH(request: Request) {
  * principal (como el botón "Reset Configuration"). Las conversaciones no se
  * borran: conversations.line_id pasa a NULL (ON DELETE SET NULL). Si la línea
  * borrada era la principal y quedan otras, la de menor sort_order pasa a
- * principal. Borrar la última línea está permitido.
+ * principal. La única línea de la cuenta siempre se borra (duro); con otras
+ * líneas, una línea con conversaciones se desconecta en suave.
  */
 export async function DELETE(request?: Request) {
   try {
@@ -687,21 +697,30 @@ export async function DELETE(request?: Request) {
     }
     if (!target) return NextResponse.json({ success: true })
 
-    // Cuántas conversaciones cuelgan de la línea. Si hay, la fila NO se borra:
-    // line_id NULL significa "línea principal", así que borrarla movería esos
-    // hilos al otro número sin avisar. Se desconecta (suave) y se invalida el token.
-    const { count: convCount, error: convError } = await supabase
-      .from('conversations')
-      .select('id', { count: 'exact', head: true })
-      .eq('account_id', accountId)
-      .eq('line_id', target.id)
-    if (convError) {
-      console.error('Error counting line conversations:', convError)
-      return NextResponse.json({ error: 'Failed to delete configuration' }, { status: 500 })
-    }
-    const conversationCount = convCount ?? 0
-    const soft = conversationCount > 0
     const others = lines.filter((l) => l.id !== target.id)
+
+    // Única línea de la cuenta: borrado duro, como antes de las líneas. Sus
+    // conversaciones quedan con line_id NULL (= principal), que será la próxima
+    // línea que se conecte.
+    // Con otras líneas: si de esta cuelgan conversaciones, la fila NO se borra
+    // (line_id NULL las movería al otro número sin avisar): se desconecta en
+    // suave y se invalida el token. El conteo va con el cliente de servicio:
+    // la vista RLS de un admin con área no ve los chats de otras áreas y
+    // contaría 0.
+    let conversationCount = 0
+    if (others.length > 0) {
+      const { count: convCount, error: convError } = await supabaseAdmin()
+        .from('conversations')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', accountId)
+        .eq('line_id', target.id)
+      if (convError) {
+        console.error('Error counting line conversations:', convError)
+        return NextResponse.json({ error: 'Failed to delete configuration' }, { status: 500 })
+      }
+      conversationCount = convCount ?? 0
+    }
+    const soft = conversationCount > 0
     const nextPrimary =
       others.find((l) => !l.disconnected_at) ?? (soft ? null : others[0] ?? null)
     const handOver = target.is_primary && nextPrimary !== null

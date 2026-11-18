@@ -13,7 +13,7 @@ describe('areaLabel', () => {
     expect(areaLabel('cobranzas')).toBe('Cobranzas')
     expect(areaLabel('tecnica')).toBe('Técnica')
     expect(areaLabel('administracion')).toBe('Administración')
-    expect(areaLabel('posventa')).toBe('Posventa')
+    expect(areaLabel('postventa')).toBe('Posventa')
   })
   it('sin área o desconocida', () => {
     expect(areaLabel(null)).toBe('Sin área')
@@ -33,7 +33,7 @@ describe('lineInitials', () => {
 describe('toLineRows', () => {
   it('una línea conectada y principal', () => {
     const [r] = toLineRows([base])
-    expect(r).toMatchObject({ id: 'l1', name: 'Principal', areaLabel: 'Sin área', phone: '111', statusKey: 'connected', statusLabel: 'Conectada', isPrimary: true, canReconnect: false, initials: 'P' })
+    expect(r).toMatchObject({ id: 'l1', name: 'Principal', areaLabel: 'Sin área', metaIdLabel: 'ID del número en Meta: 111', statusKey: 'connected', statusLabel: 'Conectada', isPrimary: true, canReconnect: false, initials: 'P' })
   })
   it('desconexión suave: Desconectada + Reconectar', () => {
     const [r] = toLineRows([{ ...base, disconnected_at: '2026-11-18T00:00:00Z', status: 'disconnected' }])

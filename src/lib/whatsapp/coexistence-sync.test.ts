@@ -58,8 +58,10 @@ describe('mapeo puro de coexistencia', () => {
   it('historial grande: una resolución por hilo, lotes de 200, tenant del config', async () => {
     const rpc = vi.fn().mockResolvedValue({ error: null })
     const update = vi.fn()
-    const query = { select: () => query, eq: vi.fn().mockResolvedValue({ data: [{ account_id: 'account', user_id: 'owner' }], error: null }) }
-    const statusQuery = { eq: () => statusQuery, or: vi.fn().mockResolvedValue({ error: null }) }
+    const query = { select: () => query, eq: vi.fn().mockResolvedValue({ data: [{ id: 'line-B', account_id: 'account', user_id: 'owner' }], error: null }) }
+    const statusEq = vi.fn()
+    const statusQuery = { eq: statusEq, or: vi.fn().mockResolvedValue({ error: null }) }
+    statusEq.mockReturnValue(statusQuery)
     update.mockReturnValue(statusQuery)
     const db = { from: () => ({ ...query, update }), rpc } as unknown as SupabaseClient
     const deps = { findContact: vi.fn().mockResolvedValue({ contact: { id: 'contact' } }), findConversation: vi.fn().mockResolvedValue({ conversation: { id: 'conv' } }) }
@@ -70,5 +72,21 @@ describe('mapeo puro de coexistencia', () => {
     expect(rpc.mock.calls.map(call => call[1].p_rows.length)).toEqual([200, 200, 5])
     expect(rpc.mock.calls.every(call => call[1].p_account === 'account')).toBe(true)
     expect(update).toHaveBeenCalledWith({ history_sync_status: 'in_progress', last_signup_error: null })
+    // El estado del historial es de ESA línea, no de toda la cuenta (M1).
+    expect(statusEq).toHaveBeenCalledWith('id', 'line-B')
+    expect(statusEq).toHaveBeenCalledWith('account_id', 'account')
+  })
+  it('historial que falla: marca failed solo en su línea', async () => {
+    const query = { select: () => query, eq: vi.fn().mockResolvedValue({ data: [{ id: 'line-B', account_id: 'account', user_id: 'owner' }], error: null }) }
+    const failEq = vi.fn()
+    const failQuery = { eq: failEq, then: (r: (v: unknown) => unknown) => r({ error: null }) }
+    failEq.mockReturnValue(failQuery)
+    const update = vi.fn().mockReturnValue(failQuery)
+    const db = { from: () => ({ ...query, update }), rpc: vi.fn().mockResolvedValue({ error: { message: 'boom' } }) } as unknown as SupabaseClient
+    const deps = { findContact: vi.fn().mockResolvedValue({ contact: { id: 'contact' } }), findConversation: vi.fn().mockResolvedValue({ conversation: { id: 'conv' } }) }
+    await expect(processCoexistenceChange(db, 'history', history, deps)).rejects.toBeTruthy()
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ history_sync_status: 'failed' }))
+    expect(failEq).toHaveBeenCalledWith('id', 'line-B')
+    expect(failEq).toHaveBeenCalledWith('account_id', 'account')
   })
 })

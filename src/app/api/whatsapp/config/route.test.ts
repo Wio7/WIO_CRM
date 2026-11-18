@@ -6,6 +6,8 @@ const state = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
   claimed: false,
   convs: [] as Array<Record<string, unknown>>,
+  // Lo que ve el cliente de servicio (sin RLS); null = lo mismo que convs.
+  adminConvs: null as Array<Record<string, unknown>> | null,
   log: [] as string[],
   writes: 0,
   seq: 0,
@@ -23,7 +25,17 @@ vi.mock('@/lib/whatsapp/encryption', () => ({
 }))
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    from: () => {
+    from: (table: string) => {
+      if (table === 'conversations') {
+        const filters: Array<[string, unknown]> = []
+        const c = {
+          select: () => c,
+          eq: (k: string, v: unknown) => { filters.push([k, v]); return c },
+          then: (resolve: (v: unknown) => unknown) =>
+            resolve({ data: null, error: null, count: (state.adminConvs ?? state.convs).filter((r) => filters.every(([k, v]) => r[k] === v)).length }),
+        }
+        return c
+      }
       const b = {
         select: () => b, eq: () => b, neq: () => b,
         maybeSingle: async () => ({ data: state.claimed ? { account_id: 'other' } : null, error: null }),
@@ -95,7 +107,7 @@ const del = (qs = '') => DELETE(new Request(`http://localhost/api/whatsapp/confi
 
 beforeEach(() => {
   vi.clearAllMocks()
-  state.rows = []; state.convs = []; state.log = []; state.claimed = false; state.writes = 0; state.seq = 0
+  state.rows = []; state.convs = []; state.adminConvs = null; state.log = []; state.claimed = false; state.writes = 0; state.seq = 0
   vi.spyOn(console, 'error').mockImplementation(() => {})
   meta.verifyPhoneNumber.mockResolvedValue({ display_phone_number: '+51 999' })
   meta.registerPhoneNumber.mockResolvedValue(undefined)
@@ -114,6 +126,21 @@ describe('GET /api/whatsapp/config', () => {
       expect(l).not.toHaveProperty('verify_token')
     }
     expect(meta.verifyPhoneNumber).toHaveBeenCalledWith({ phoneNumberId: '111', accessToken: 'tok-secret' })
+  })
+  it('?lines_only=1: solo lines, sin tokens ni llamada a Meta (Ruling X)', async () => {
+    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1 })]
+    const json = await (await GET(new Request('http://localhost/api/whatsapp/config?lines_only=1'))).json()
+    expect(Object.keys(json)).toEqual(['lines'])
+    expect(json.lines.map((l: Row) => l.id)).toEqual(['l1', 'l2'])
+    expect(JSON.stringify(json)).not.toContain('tok-secret')
+    expect(meta.verifyPhoneNumber).not.toHaveBeenCalled()
+  })
+  it('sin lines_only (con request): respuesta completa como siempre', async () => {
+    state.rows = [line({})]
+    const json = await (await GET(new Request('http://localhost/api/whatsapp/config'))).json()
+    expect(json).toMatchObject({ connected: true, phone_info: { display_phone_number: '+51 999' } })
+    expect(json.lines).toHaveLength(1)
+    expect(meta.verifyPhoneNumber).toHaveBeenCalledTimes(1)
   })
   it('sin líneas: no_config y lines vacío', async () => {
     expect(await (await GET()).json()).toMatchObject({ connected: false, reason: 'no_config', lines: [] })
@@ -277,11 +304,29 @@ describe('DELETE /api/whatsapp/config', () => {
     expect(state.rows.find((r) => r.id === 'l1')).toMatchObject({ status: 'disconnected', is_primary: false })
     expect(state.rows.filter((r) => r.is_primary).map((r) => r.id)).toEqual(['l3'])
   })
-  it('principal con conversaciones y sin otra conectada: sigue principal (desconectada)', async () => {
+  it('única línea con conversaciones: borrado duro como antes (Ruling U)', async () => {
     state.rows = [line({})]
     state.convs = [{ id: 'c1', account_id: 'acc', line_id: 'l1' }]
-    expect((await del()).status).toBe(200)
-    expect(state.rows[0]).toMatchObject({ status: 'disconnected', is_primary: true })
+    const json = await (await del()).json()
+    expect(json).toMatchObject({ success: true })
+    expect(json).not.toHaveProperty('disconnected')
+    expect(state.rows).toHaveLength(0)
+  })
+  it('dos líneas y la borrada tiene conversaciones: desconexión suave', async () => {
+    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1 })]
+    state.convs = [{ id: 'c1', account_id: 'acc', line_id: 'l2' }]
+    const json = await (await del('?line_id=l2')).json()
+    expect(json).toMatchObject({ success: true, disconnected: true, conversation_count: 1 })
+    expect(state.rows).toHaveLength(2)
+    expect(state.rows[1]).toMatchObject({ id: 'l2', status: 'disconnected' })
+  })
+  it('el conteo usa el cliente de servicio: la vista RLS ve 0 pero hay chats de otra área (I3)', async () => {
+    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1 })]
+    state.convs = []
+    state.adminConvs = [{ id: 'c9', account_id: 'acc', line_id: 'l2', area: 'legal' }]
+    const json = await (await del('?line_id=l2')).json()
+    expect(json).toMatchObject({ success: true, disconnected: true, conversation_count: 1 })
+    expect(state.rows.map((r) => r.id)).toEqual(['l1', 'l2'])
   })
   it('conversaciones de otra línea no cuentan: se borra la fila', async () => {
     state.rows = three()

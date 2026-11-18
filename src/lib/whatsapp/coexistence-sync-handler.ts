@@ -70,7 +70,8 @@ export async function processCoexistenceChange(db: SupabaseClient, field: string
       const status = computeSyncStatus(value.history ?? [])
       if (status) {
         // Una entrega tardía de un chunk anterior no revierte completed.
-        let update = db.from('whatsapp_config').update(status).eq('account_id', config.account_id)
+        // Por línea (id), no por cuenta: con dos líneas de coexistencia una pisaría a la otra.
+        let update = db.from('whatsapp_config').update(status).eq('id', config.id).eq('account_id', config.account_id)
         if (status.history_sync_status === 'in_progress') update = update.or('history_sync_status.is.null,history_sync_status.not.in.(completed,declined,failed)')
         const { error } = await update
         if (error) throw error
@@ -78,7 +79,8 @@ export async function processCoexistenceChange(db: SupabaseClient, field: string
     }
   } catch (error) {
     if (field === 'history') await db.from('whatsapp_config').update({ history_sync_status: 'failed',
-      last_signup_error: 'No se pudo guardar el historial de WhatsApp. Se puede reintentar sin duplicar mensajes.' }).eq('account_id', config.account_id)
+      last_signup_error: 'No se pudo guardar el historial de WhatsApp. Se puede reintentar sin duplicar mensajes.' })
+      .eq('id', config.id).eq('account_id', config.account_id)
     throw error
   }
 }

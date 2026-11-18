@@ -1,6 +1,6 @@
 "use client";
 
-// Líneas de WhatsApp de la cuenta, sin tokens, desde GET /api/whatsapp/config.
+// Líneas de WhatsApp de la cuenta, sin tokens, desde GET /api/whatsapp/config?lines_only=1.
 // Una sola petición compartida entre todos los componentes (lista, hilo,
 // aviso de conexión) con caché corta en memoria. El navegador nunca lee
 // whatsapp_config directamente. invalidateWhatsappLines() (la pantalla de
@@ -19,7 +19,8 @@ let generation = 0;
 const listeners = new Set<() => void>();
 
 async function fetchLines(): Promise<LineView[]> {
-  const res = await fetch("/api/whatsapp/config", { method: "GET", cache: "no-store" });
+  // lines_only: solo las líneas, sin verificar en Meta (esto corre cada 60 s por pestaña).
+  const res = await fetch("/api/whatsapp/config?lines_only=1", { method: "GET", cache: "no-store" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const payload = await res.json();
   return Array.isArray(payload?.lines) ? (payload.lines as LineView[]) : [];

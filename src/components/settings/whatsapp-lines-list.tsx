@@ -132,7 +132,7 @@ export function WhatsAppLinesList({
               <div className="min-w-0 flex-1">
                 <p className="truncate font-medium text-foreground">{row.name}</p>
                 <p className="truncate text-sm text-muted-foreground">
-                  {row.areaLabel} · {row.phone}
+                  {row.areaLabel} · {row.metaIdLabel}
                 </p>
               </div>
               <Badges row={row} />
@@ -146,7 +146,7 @@ export function WhatsAppLinesList({
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium text-foreground">{row.name}</p>
                   <p className="truncate text-sm text-muted-foreground">{row.areaLabel}</p>
-                  <p className="truncate text-xs text-muted-foreground">{row.phone}</p>
+                  <p className="truncate text-xs text-muted-foreground">{row.metaIdLabel}</p>
                 </div>
               </div>
               <Badges row={row} />
