@@ -6,7 +6,8 @@ import { computeSyncStatus, dedupeMessages, isCoexistenceField, mapStateSync, ma
 
 interface Dependencies {
   findContact(account: string, user: string, phone: string): Promise<{ contact: { id: string } } | null>
-  findConversation(account: string, user: string, contact: string): Promise<{ conversation: { id: string } } | null>
+  // `line` es la fila de whatsapp_config que resolvió el phone_number_id: el hilo es por contacto Y línea.
+  findConversation(account: string, user: string, contact: string, line: { id: string; area: string | null; is_primary?: boolean }): Promise<{ conversation: { id: string } } | null>
 }
 
 // Rama sin llamadas a motores, envíos, notificaciones ni contadores de no leídos.
@@ -52,7 +53,7 @@ export async function processCoexistenceChange(db: SupabaseClient, field: string
       if (!messages.length) continue
       const contactId = await contactFor(thread.id)
       if (!contactId) continue
-      const result = await deps.findConversation(config.account_id, config.user_id, contactId)
+      const result = await deps.findConversation(config.account_id, config.user_id, contactId, config)
       if (!result) throw new Error('No se pudo resolver la conversación de coexistencia')
       for (let offset = 0; offset < messages.length; offset += 200) {
         const batch = messages.slice(offset, offset + 200)
