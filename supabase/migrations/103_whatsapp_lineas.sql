@@ -28,6 +28,12 @@
 -- tipo ('agent') se resolvería a la sobrecarga de texto: castear siempre
 -- ('agent'::account_role_enum) al llamarla desde código nuevo.
 --
+--   5. set_member_area (copia de 092) acepta también 'posventa'; el resto igual.
+--
+-- Llamadores: la sobrecarga de 2 args (uuid, uuid) sigue funcionando; con 3 args
+-- castear siempre el rol: 'agent'::account_role_enum (un literal sin tipo
+-- se resuelve a la sobrecarga de texto del área).
+--
 -- Idempotente — se puede volver a correr. Requiere 017, 039, 055, 091, 092.
 -- ============================================================
 BEGIN;
@@ -178,6 +184,87 @@ GRANT EXECUTE ON FUNCTION public.can_access_conversation(UUID, UUID, TEXT)
 
 COMMENT ON FUNCTION public.can_access_conversation(UUID, UUID, TEXT) IS
   'Acceso a una conversación (lectura): lógica de 055 + área de la conversación (103). Sin área = como antes; con área, dueño / admin sin área / gerencia / misma área. Lo asignado al usuario se ve siempre.';
+
+-- ============================================================
+-- 4b. set_member_area (092 + 'posventa'; el resto igual)
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.set_member_area(
+  p_user_id UUID,
+  p_area TEXT
+) RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_account UUID;
+  v_caller_role account_role_enum;
+  v_target_role account_role_enum;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Unauthorized' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT account_id, account_role
+  INTO v_account, v_caller_role
+  FROM profiles WHERE user_id = auth.uid();
+
+  IF v_account IS NULL THEN
+    RAISE EXCEPTION 'Caller has no account' USING ERRCODE = '42501';
+  END IF;
+
+  IF v_caller_role NOT IN ('owner', 'admin') THEN
+    RAISE EXCEPTION 'This action requires the admin role or higher'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF p_area IS NOT NULL
+     AND p_area NOT IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion', 'posventa') THEN
+    RAISE EXCEPTION 'Unknown area: %', p_area USING ERRCODE = '22023';
+  END IF;
+
+  SELECT account_role INTO v_target_role
+  FROM profiles
+  WHERE user_id = p_user_id AND account_id = v_account;
+
+  IF v_target_role IS NULL THEN
+    RAISE EXCEPTION 'Target user is not a member of your account'
+      USING ERRCODE = '22023';
+  END IF;
+
+  IF v_caller_role = 'admin' AND v_target_role IN ('owner', 'admin') THEN
+    RAISE EXCEPTION 'Only an owner can change an admin''s area'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF v_caller_role <> 'owner' AND p_area = 'gerencia' THEN
+    RAISE EXCEPTION 'Only an owner can grant the gerencia area'
+      USING ERRCODE = '42501';
+  END IF;
+
+  IF v_caller_role <> 'owner'
+     AND (SELECT area FROM profiles WHERE user_id = p_user_id AND account_id = v_account) = 'gerencia' THEN
+    RAISE EXCEPTION 'Only an owner can change a gerencia member''s area'
+      USING ERRCODE = '42501';
+  END IF;
+
+  -- Un Promueve es siempre agente externo: no se le pone esta área a un
+  -- dueño ni a un administrador (quedaría con el rol alto y sin acceso).
+  IF p_area = 'promueve' AND v_target_role IN ('owner', 'admin') THEN
+    RAISE EXCEPTION 'Promueve solo se asigna a agentes' USING ERRCODE = '22023';
+  END IF;
+
+  UPDATE profiles
+     SET area = p_area,
+         area_set_by = (SELECT id FROM profiles WHERE user_id = auth.uid()),
+         area_set_at = NOW()
+   WHERE user_id = p_user_id AND account_id = v_account;
+END;
+$$;
+
+ALTER FUNCTION public.set_member_area(UUID, TEXT) OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.set_member_area(UUID, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.set_member_area(UUID, TEXT) TO authenticated;
 
 -- ============================================================
 -- 5. Políticas de lectura con el área de la conversación

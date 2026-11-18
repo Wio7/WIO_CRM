@@ -58,7 +58,7 @@ beforeAll(async () => {
     CREATE TABLE profiles(id uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
       user_id uuid PRIMARY KEY REFERENCES auth.users ON DELETE CASCADE,
       account_id uuid NOT NULL REFERENCES accounts ON DELETE CASCADE,
-      account_role account_role_enum NOT NULL, area text);
+      account_role account_role_enum NOT NULL, area text, area_set_by uuid, area_set_at timestamptz);
     -- 092:43
     ALTER TABLE profiles ADD CONSTRAINT profiles_area_check
       CHECK (area IS NULL OR area IN ('marketing', 'legal', 'cobranzas', 'ventas', 'gerencia', 'contabilidad', 'tecnica', 'promueve', 'administracion'));
@@ -188,6 +188,18 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
     await expect(
       db.exec(`INSERT INTO account_invitations(account_id, role, area) VALUES ('${ACCT}', 'admin', 'promueve')`),
     ).rejects.toThrow(/check/i);
+  });
+
+  it("set_member_area acepta posventa y sigue rechazando areas invalidas", async () => {
+    await db.exec(`SELECT set_config('request.jwt.claim.sub', '${U.owner}', false)`);
+    await db.exec(`SELECT set_member_area('${U.agente}', 'posventa')`);
+    let r = await db.query<{ area: string }>(`SELECT area FROM profiles WHERE user_id = '${U.agente}'`);
+    expect(r.rows[0].area).toBe("posventa");
+    await db.exec(`SELECT set_member_area('${U.agente}', 'administracion')`);
+    await expect(db.exec(`SELECT set_member_area('${U.agente}', 'inventada')`)).rejects.toThrow(/Unknown area: inventada/);
+    await db.exec(`SELECT set_member_area('${U.agente}', NULL)`);
+    r = await db.query<{ area: string }>(`SELECT area FROM profiles WHERE user_id = '${U.agente}'`);
+    expect(r.rows[0].area).toBeNull();
   });
 
   it("conversations.line_id se pone en NULL si se borra la linea", async () => {
