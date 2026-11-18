@@ -33,6 +33,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { decrypt } from '@/lib/whatsapp/encryption';
+import {
+  LineNotFoundError,
+  LineUnavailableError,
+  resolveAccountLine,
+} from '@/lib/whatsapp/lines';
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api';
 import { sendTemplateWithVariants } from '@/lib/whatsapp/broadcast-core';
 import { isValidE164, phoneVariants, sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
@@ -268,14 +273,25 @@ async function processBroadcast(
     return outcome('failed');
   };
 
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('phone_number_id, access_token')
-    .eq('account_id', b.account_id)
-    .maybeSingle();
-  if (configError) {
-    console.error(`${LOG} config read failed for ${b.id}:`, configError);
-    return outcome('error');
+  // Una sola línea para toda la difusión: la guardada en
+  // audience_filter.lineId (no hay columna propia ni migración en la fase 1)
+  // o, sin ella, la principal. Fase 1: no se verifica la WABA de la plantilla
+  // (message_templates no la guarda); si Meta no la encuentra en la WABA de
+  // la línea, responde 132001 y la difusión se detiene con ese motivo.
+  const lineId =
+    typeof b.audience_filter?.lineId === 'string' ? b.audience_filter.lineId : null;
+  let config;
+  try {
+    config = await resolveAccountLine(db, b.account_id, lineId);
+  } catch (err) {
+    if (err instanceof LineUnavailableError && err.transient) {
+      console.error(`${LOG} config read failed for ${b.id}:`, err);
+      return outcome('error');
+    }
+    if (err instanceof LineNotFoundError || err instanceof LineUnavailableError) {
+      return fail(err.message);
+    }
+    throw err;
   }
   if (!config) return fail('la cuenta no tiene whatsapp_config');
 

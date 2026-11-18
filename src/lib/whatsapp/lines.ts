@@ -10,9 +10,15 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  * línea principal, que mandaría el mensaje desde otro número.
  */
 export class LineUnavailableError extends Error {
-  constructor(message = 'La línea de WhatsApp de esta conversación no está disponible') {
+  /** true = fallo de lectura de la base (reintentable); false = línea desconectada o ya no existe. */
+  readonly transient: boolean;
+  constructor(
+    message = 'La línea de WhatsApp de esta conversación no está disponible',
+    opts: { transient?: boolean } = {},
+  ) {
     super(message);
     this.name = 'LineUnavailableError';
+    this.transient = opts.transient ?? false;
   }
 }
 
@@ -76,7 +82,12 @@ export async function getPrimaryLine(
   db: SupabaseClient,
   accountId: string,
 ): Promise<WhatsAppLine | null> {
-  const { data } = await db
+  const { data } = await readPrimaryLine(db, accountId);
+  return (data as WhatsAppLine | null) ?? null;
+}
+
+function readPrimaryLine(db: SupabaseClient, accountId: string) {
+  return db
     .from('whatsapp_config')
     .select('*')
     .eq('account_id', accountId)
@@ -85,7 +96,6 @@ export async function getPrimaryLine(
     .order('sort_order', { ascending: true })
     .limit(1)
     .maybeSingle();
-  return (data as WhatsAppLine | null) ?? null;
 }
 
 /** Línea de la conversación; si line_id es NULL, la principal de la cuenta. */
@@ -142,7 +152,42 @@ export async function getLineById(
     .eq('id', lineId)
     .eq('account_id', accountId)
     .maybeSingle();
-  if (error) throw new LineUnavailableError(`No se pudo leer la línea: ${error.message}`);
+  if (error) {
+    throw new LineUnavailableError(`No se pudo leer la línea: ${error.message}`, { transient: true });
+  }
+  return usable((data as WhatsAppLine | null) ?? null);
+}
+
+/** `line_id` pedido en una ruta que no existe o es de otra cuenta (404). */
+export class LineNotFoundError extends Error {
+  constructor(message = 'La línea de WhatsApp indicada no existe en esta cuenta.') {
+    super(message);
+    this.name = 'LineNotFoundError';
+  }
+}
+
+/**
+ * Línea para plantillas y difusiones: la indicada en `lineId` (solo si es de
+ * la cuenta) o, sin `lineId`, la principal. Devuelve null solo cuando la
+ * cuenta no tiene ninguna línea. Lanza LineNotFoundError si `lineId` no
+ * existe o es de otra cuenta, y LineUnavailableError si la línea está
+ * desconectada o no se pudo leer (nunca se cae a otra línea).
+ */
+export async function resolveAccountLine(
+  db: SupabaseClient,
+  accountId: string,
+  lineId?: unknown,
+): Promise<WhatsAppLine | null> {
+  const wanted = typeof lineId === 'string' ? lineId.trim() : '';
+  if (wanted) {
+    const line = await getLineById(db, accountId, wanted);
+    if (!line) throw new LineNotFoundError();
+    return line;
+  }
+  const { data, error } = await readPrimaryLine(db, accountId);
+  if (error) {
+    throw new LineUnavailableError(`No se pudo leer la línea: ${error.message}`, { transient: true });
+  }
   return usable((data as WhatsAppLine | null) ?? null);
 }
 

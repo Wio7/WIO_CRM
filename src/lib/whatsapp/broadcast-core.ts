@@ -21,6 +21,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { MetaApiError, sendTemplateMessage } from '@/lib/whatsapp/meta-api';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import {
+  LineNotFoundError,
+  LineUnavailableError,
+  resolveAccountLine,
+} from '@/lib/whatsapp/lines';
+import {
   sanitizePhoneForMeta,
   isValidE164,
   phoneVariants,
@@ -55,6 +60,8 @@ export interface CreateBroadcastParams {
   templateName: string;
   templateLanguage?: string | null;
   recipients: BroadcastRecipientInput[];
+  /** Línea de WhatsApp (whatsapp_config.id) por la que sale; por defecto la principal. */
+  lineId?: string | null;
 }
 
 interface PlannedRecipient {
@@ -112,12 +119,22 @@ export async function createBroadcast(
 
   // Config (fail fast + provides the audit trail owner already resolved
   // by the caller). Meta send needs phone_number_id + decrypted token.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
-  if (configError || !config) {
+  // Una sola línea para toda la difusión: `lineId` opcional, si no la
+  // principal. Fase 1: no se verifica la WABA de la plantilla (la tabla
+  // message_templates no la guarda); Meta rechaza el envío si no existe allí.
+  let config;
+  try {
+    config = await resolveAccountLine(db, accountId, params.lineId);
+  } catch (err) {
+    if (err instanceof LineNotFoundError) {
+      throw new BroadcastError('line_not_found', err.message, 404);
+    }
+    if (err instanceof LineUnavailableError) {
+      throw new BroadcastError('line_unavailable', err.message, 503);
+    }
+    throw err;
+  }
+  if (!config) {
     throw new BroadcastError(
       'whatsapp_not_configured',
       'WhatsApp not configured. Please set up your WhatsApp integration first.',
