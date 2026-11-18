@@ -24,7 +24,8 @@ describe('sesión de Embedded Signup', () => {
     expect(parseSignupMessage('https://facebook.com', '{')).toBeNull()
     expect(parseSignupMessage('https://facebook.com', JSON.stringify({ type: 'OTHER' }))).toBeNull()
     expect(parseSignupMessage('https://facebook.com', JSON.stringify({ type: 'WA_EMBEDDED_SIGNUP', event: 'CANCEL', data: { current_step: 'PHONE' } }))).toEqual({ error: 'Conexión cancelada: PHONE' })
-    expect(parseSignupMessage('https://facebook.com', JSON.stringify({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH_ONLY_WABA', data: { waba_id: '456' } }))).toHaveProperty('error')
+    expect(parseSignupMessage('https://facebook.com', JSON.stringify({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH_ONLY_WABA', data: { waba_id: 'abc' } }))).toEqual({ error: expect.stringContaining('FINISH_ONLY_WABA; campos: waba_id') })
+    expect(parseSignupMessage('https://facebook.com', JSON.stringify({ type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', data: { waba_id: '456' } }))).toEqual({ event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', waba_id: '456' })
   })
   it('deshabilita la configuración pública incompleta', () => {
     expect(signupConfigured(undefined, '123')).toBe(false)
@@ -51,6 +52,28 @@ describe('Graph Embedded Signup', () => {
     expect(calls[3][1]?.body).toContain('smb_app_state_sync')
     expect(calls[4][1]?.body).toContain('history')
     expect(calls.some(([url]) => String(url).includes('/register'))).toBe(false)
+  })
+  it('descubre la cuenta y el número cuando el evento no los trae', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: 'secret-token' }))
+      .mockResolvedValueOnce(Response.json({ data: { granular_scopes: [{ scope: 'whatsapp_business_management', target_ids: ['777'] }] } }))
+      .mockResolvedValueOnce(Response.json({ success: true }))
+      .mockResolvedValueOnce(Response.json({ data: [{ id: '555' }] }))
+      .mockResolvedValueOnce(Response.json({ is_on_biz_app: true }))
+    const result = await embeddedSignupApi(fetcher).connect('code', { event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' }, 'app', 'secret')
+    expect(result).toMatchObject({ waba_id: '777', phone_number_id: '555' })
+    const calls = fetcher.mock.calls
+    expect(calls[1][0]).toContain('debug_token')
+    expect(calls[2][0]).toContain('/777/subscribed_apps')
+    expect(calls[3][0]).toContain('/777/phone_numbers')
+    expect(calls[4][0]).toContain('/555?fields=')
+  })
+  it('no adivina con varios números', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: 't' }))
+      .mockResolvedValueOnce(Response.json({ success: true }))
+      .mockResolvedValueOnce(Response.json({ data: [{ id: '1' }, { id: '2' }] }))
+    await expect(embeddedSignupApi(fetcher).connect('code', { event: 'FINISH', waba_id: '9' }, 'app', 'secret')).rejects.toThrow('varios números')
   })
   it('no hace llamadas sin variables del servidor y no filtra errores sensibles', async () => {
     const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new Error('secret-token'))

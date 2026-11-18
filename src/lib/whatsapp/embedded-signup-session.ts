@@ -2,8 +2,8 @@ export const FINISH_EVENTS = ['FINISH', 'FINISH_ONLY_WABA', 'FINISH_WHATSAPP_BUS
 export type FinishEvent = typeof FINISH_EVENTS[number]
 export interface SignupSession {
   event: FinishEvent
-  phone_number_id: string
-  waba_id: string
+  phone_number_id?: string
+  waba_id?: string
   business_id?: string
 }
 export function takeSignupPayload(attempt: { code?: string; session?: SignupSession; sent: boolean }) {
@@ -15,9 +15,12 @@ const isId = (v: unknown): v is string => typeof v === 'string' && /^\d{1,32}$/.
 export function parseSignupSession(value: unknown): SignupSession | null {
   if (!value || typeof value !== 'object') return null
   const v = value as Record<string, unknown>
-  if (!FINISH_EVENTS.includes(v.event as FinishEvent) || !isId(v.phone_number_id) || !isId(v.waba_id)) return null
-  if (v.business_id != null && !isId(v.business_id)) return null
-  return { event: v.event as FinishEvent, phone_number_id: v.phone_number_id, waba_id: v.waba_id,
+  if (!FINISH_EVENTS.includes(v.event as FinishEvent)) return null
+  for (const key of ['phone_number_id', 'waba_id', 'business_id']) if (v[key] != null && !isId(v[key])) return null
+  // Algunos flujos (coexistencia) no traen cuenta ni número: el servidor los resuelve con el token.
+  return { event: v.event as FinishEvent,
+    ...(isId(v.phone_number_id) ? { phone_number_id: v.phone_number_id } : {}),
+    ...(isId(v.waba_id) ? { waba_id: v.waba_id } : {}),
     ...(isId(v.business_id) ? { business_id: v.business_id } : {}) }
 }
 export function signupConfigured(appId?: string, configId?: string) {
@@ -32,6 +35,6 @@ export function parseSignupMessage(origin: string, raw: unknown): SignupSession 
     if (message?.type !== 'WA_EMBEDDED_SIGNUP') return null
     if (message.event === 'CANCEL') return { error: `Conexión cancelada: ${message.data?.current_step || message.data?.error_message || 'no se completó el proceso'}` }
     if (!FINISH_EVENTS.includes(message.event)) return null
-    return parseSignupSession({ ...message.data, event: message.event }) ?? { error: 'Meta no devolvió un número de WhatsApp. Repite la conexión y selecciona un número.' }
+    return parseSignupSession({ ...message.data, event: message.event }) ?? { error: `Meta no devolvió los datos del número (evento ${message.event}; campos: ${Object.keys(message.data ?? {}).join(', ') || 'ninguno'}). Repite la conexión.` }
   } catch { return null }
 }

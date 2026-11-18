@@ -35,7 +35,7 @@ beforeEach(() => {
   state.claimed = false; state.conflict = false; state.existing = null; state.saved = {}; state.reserved = true
   vi.stubEnv('META_APP_ID', 'app'); vi.stubEnv('META_APP_SECRET', 'secret')
   vi.mocked(requireRole).mockResolvedValue({ supabase: database(), accountId: 'account', userId: 'user' } as unknown as Awaited<ReturnType<typeof requireRole>>)
-  mocks.connect.mockResolvedValue({ token: 'secret-token', phone: { is_on_biz_app: true, platform_type: 'CLOUD_API' } })
+  mocks.connect.mockResolvedValue({ token: 'secret-token', phone_number_id: '123', waba_id: '456', phone: { is_on_biz_app: true, platform_type: 'CLOUD_API' } })
   mocks.sync.mockResolvedValue(undefined)
 })
 afterEach(() => vi.unstubAllEnvs())
@@ -81,6 +81,12 @@ describe('POST embedded-signup', () => {
     state.existing = { phone_number_id: '123', contacts_sync_requested_at: 'before', history_sync_requested_at: 'before' }
     await POST(request())
     expect(mocks.sync).not.toHaveBeenCalled()
+  })
+  it('resuelve el número cuando el evento de Meta no lo trae', async () => {
+    mocks.connect.mockResolvedValue({ token: 'secret-token', phone_number_id: '999', waba_id: '888', phone: { is_on_biz_app: true } })
+    const response = await POST(request({ code: 'code', event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING' }))
+    expect(response.status).toBe(200)
+    expect(state.saved).toMatchObject({ phone_number_id: '999', waba_id: '888', connection_type: 'coexistence' })
   })
   it('embedded queda pendiente sin sincronizar', async () => {
     const response = await POST(request({ ...body, event: 'FINISH' }))
