@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { POST } from './route'
 import { requireRole, ForbiddenError } from '@/lib/auth/account'
 
-const state = vi.hoisted(() => ({ claimed: false, conflict: false, existing: null as Record<string, unknown> | null, saved: {} as Record<string, unknown>, syncFailure: false, reserved: true }))
+const state = vi.hoisted(() => ({ claimed: false, conflict: false, rows: [] as Array<Record<string, unknown>>, saved: {} as Record<string, unknown>, upsertOptions: null as unknown, syncFailure: false, reserved: true }))
 const mocks = vi.hoisted(() => ({ connect: vi.fn(), sync: vi.fn() }))
 vi.mock('@/lib/auth/account', () => {
   class UnauthorizedError extends Error { status = 401 }
@@ -21,8 +21,8 @@ function database() {
     const b = {
       select: () => updating ? Promise.resolve({ data: state.reserved ? [{ account_id: 'account' }] : [], error: null }) : b,
       eq: () => b, is: () => b,
-      maybeSingle: async () => ({ data: state.existing, error: null }),
-      upsert: async (row: Record<string, unknown>) => { state.saved = row; return { error: state.conflict ? { code: '23505' } : null } },
+      then: (resolve: (v: unknown) => unknown) => resolve({ data: updating ? null : state.rows, error: null }),
+      upsert: async (row: Record<string, unknown>, options: unknown) => { state.saved = row; state.upsertOptions = options; return { error: state.conflict ? { code: '23505' } : null } },
       update: (row: Record<string, unknown>) => { Object.assign(state.saved, row); updating = true; return b },
     }
     return b
@@ -32,7 +32,7 @@ const body = { code: 'code', event: 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING', p
 const request = (payload: unknown = body) => new Request('http://localhost/api/whatsapp/embedded-signup', { method: 'POST', body: JSON.stringify(payload) })
 beforeEach(() => {
   vi.clearAllMocks()
-  state.claimed = false; state.conflict = false; state.existing = null; state.saved = {}; state.reserved = true
+  state.claimed = false; state.conflict = false; state.rows = []; state.saved = {}; state.upsertOptions = null; state.reserved = true
   vi.stubEnv('META_APP_ID', 'app'); vi.stubEnv('META_APP_SECRET', 'secret')
   vi.mocked(requireRole).mockResolvedValue({ supabase: database(), accountId: 'account', userId: 'user' } as unknown as Awaited<ReturnType<typeof requireRole>>)
   mocks.connect.mockResolvedValue({ token: 'secret-token', phone_number_id: '123', waba_id: '456', phone: { is_on_biz_app: true, platform_type: 'CLOUD_API' } })
@@ -78,7 +78,7 @@ describe('POST embedded-signup', () => {
   })
   it('no repite sync reservado y conserva las reservas', async () => {
     state.reserved = false
-    state.existing = { phone_number_id: '123', contacts_sync_requested_at: 'before', history_sync_requested_at: 'before' }
+    state.rows = [{ phone_number_id: '123', sort_order: 0 }]
     await POST(request())
     expect(mocks.sync).not.toHaveBeenCalled()
   })
@@ -92,5 +92,29 @@ describe('POST embedded-signup', () => {
     const response = await POST(request({ ...body, event: 'FINISH' }))
     expect(await response.json()).toMatchObject({ registered: false, registration_skipped: true })
     expect(mocks.sync).not.toHaveBeenCalled()
+  })
+  it('upsert por phone_number_id, no por account_id', async () => {
+    await POST(request())
+    expect(state.upsertOptions).toEqual({ onConflict: 'phone_number_id' })
+  })
+  it('primer número de la cuenta queda como línea principal', async () => {
+    await POST(request())
+    expect(state.saved).toMatchObject({ is_primary: true, sort_order: 0 })
+  })
+  it('un segundo número crea una fila nueva no principal al final', async () => {
+    state.rows = [{ phone_number_id: '111', sort_order: 0, registered_at: null }]
+    expect((await POST(request())).status).toBe(200)
+    expect(state.saved).toMatchObject({ phone_number_id: '123', account_id: 'account', is_primary: false, sort_order: 1 })
+  })
+  it('reconectar el mismo número actualiza en sitio sin tocar nombre, principal ni orden', async () => {
+    state.rows = [{ phone_number_id: '123', sort_order: 3, registered_at: 'before', last_signup_error: null }]
+    expect((await POST(request({ ...body, event: 'FINISH' }))).status).toBe(200)
+    for (const k of ['is_primary', 'line_name', 'sort_order', 'area', 'logo_url']) expect(state.saved).not.toHaveProperty(k)
+    expect(state.saved).toMatchObject({ phone_number_id: '123', registered_at: 'before' })
+  })
+  it('número reclamado por otra cuenta: 409 sin escribir', async () => {
+    state.claimed = true
+    expect((await POST(request())).status).toBe(409)
+    expect(state.saved).toEqual({})
   })
 })

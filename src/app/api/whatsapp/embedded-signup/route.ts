@@ -25,17 +25,26 @@ export async function POST(request: Request) {
     }
     const claimedMessage = { error: 'Este número de WhatsApp ya está conectado a otra cuenta.' }
     if (session.phone_number_id && await isClaimed(session.phone_number_id)) return NextResponse.json(claimedMessage, { status: 409 })
-    const { data: existing, error: readError } = await supabase.from('whatsapp_config')
-      .select('phone_number_id, registered_at, contacts_sync_requested_at, history_sync_requested_at, history_sync_status, last_signup_error')
-      .eq('account_id', accountId).maybeSingle()
+    // La cuenta puede tener varias líneas: se leen todas y luego se elige la del número conectado.
+    const { data: accountLines, error: readError } = await supabase.from('whatsapp_config')
+      .select('phone_number_id, registered_at, last_signup_error, sort_order')
+      .eq('account_id', accountId)
     if (readError) throw new Error()
+    const lines = (accountLines ?? []) as Array<{ phone_number_id: string; registered_at: string | null; last_signup_error: string | null; sort_order: number | null }>
     const api = embeddedSignupApi()
     const { token, phone, phone_number_id: phoneId, waba_id: wabaId } = await api.connect(body.code, session, process.env.META_APP_ID, process.env.META_APP_SECRET)
     if (!session.phone_number_id && await isClaimed(phoneId)) return NextResponse.json(claimedMessage, { status: 409 })
     const coexistence = session.event === 'FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING'
-    const sameNumber = existing?.phone_number_id === phoneId
+    const existing = lines.find(l => l.phone_number_id === phoneId) ?? null
     const now = new Date().toISOString()
-    const registeredAt = coexistence ? now : sameNumber ? existing.registered_at : null
+    const registeredAt = coexistence ? now : existing ? existing.registered_at : null
+    // Número nuevo: línea adicional (no principal) al final, o principal si la cuenta no tenía ninguna.
+    // Reconexión del mismo número: se actualiza la fila y se conservan nombre, área, logo y principal.
+    const newLineFields = existing ? {} : {
+      is_primary: lines.length === 0,
+      sort_order: lines.reduce((max, l) => Math.max(max, l.sort_order ?? 0), -1) + 1,
+      ...(lines.length === 0 ? {} : { line_name: `Línea ${lines.length + 1}` }),
+    }
     const { error: saveError } = await supabase.from('whatsapp_config').upsert({
       account_id: accountId, user_id: userId, phone_number_id: phoneId,
       waba_id: wabaId, business_id: session.business_id ?? null,
@@ -44,11 +53,8 @@ export async function POST(request: Request) {
       status: 'connected', connected_at: now, updated_at: now,
       registered_at: registeredAt, subscribed_apps_at: now, last_registration_error: null,
       // No sobrescribir reservas de sincronización de otra solicitud concurrente.
-      ...(existing && !sameNumber ? {
-        contacts_sync_requested_at: null, history_sync_requested_at: null,
-        history_sync_status: null, last_signup_error: null,
-      } : {}),
-    }, { onConflict: 'account_id' })
+      ...newLineFields,
+    }, { onConflict: 'phone_number_id' })
     // La restricción UNIQUE de 013 también protege dos altas simultáneas.
     if (saveError?.code === '23505') return NextResponse.json({ error: 'El número ya está vinculado a otra cuenta.' }, { status: 409 })
     if (saveError) throw new Error()
@@ -79,7 +85,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ success: true, saved: true, registered: registeredAt != null,
       registration_skipped: !coexistence && registeredAt == null, phone_info: phone,
-      last_signup_error: warnings.join(' ') || (sameNumber ? existing.last_signup_error : null) })
+      last_signup_error: warnings.join(' ') || (existing ? existing.last_signup_error : null) })
   } catch (error) {
     if (error instanceof UnauthorizedError || error instanceof ForbiddenError) {
       return NextResponse.json({ error: 'Necesitas una sesión de administrador de la cuenta.' }, { status: error.status })

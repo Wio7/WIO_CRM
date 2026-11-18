@@ -16,6 +16,12 @@ export class LineUnavailableError extends Error {
   }
 }
 
+/** Áreas permitidas en whatsapp_config.area (CHECK de la migración 103). */
+export const LINE_AREAS = [
+  'marketing', 'legal', 'cobranzas', 'ventas', 'gerencia',
+  'contabilidad', 'tecnica', 'promueve', 'administracion', 'posventa',
+] as const;
+
 export type WhatsAppLine = {
   id: string;
   account_id: string;

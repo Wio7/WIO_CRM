@@ -7,6 +7,39 @@ import {
   verifyPhoneNumber,
 } from '@/lib/whatsapp/meta-api'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
+import { LINE_AREAS, type WhatsAppLine } from '@/lib/whatsapp/lines'
+
+// Fila de línea tal como se guarda; el token (y el de verificación) viven
+// cifrados y NUNCA salen en la respuesta.
+type LineRow = WhatsAppLine & {
+  verify_token?: string | null
+  registered_at?: string | null
+  sort_order?: number | null
+}
+type PublicLine = Omit<LineRow, 'access_token' | 'verify_token'>
+
+function toPublicLine(row: LineRow): PublicLine {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { access_token, verify_token, ...rest } = row
+  return rest
+}
+
+/** Principal = la marcada; si ninguna lo está, la de menor sort_order. */
+function pickPrimary<T extends { is_primary: boolean }>(lines: T[]): T | null {
+  return lines.find((l) => l.is_primary) ?? lines[0] ?? null
+}
+
+async function readLines(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  accountId: string,
+) {
+  const { data, error } = await supabase
+    .from('whatsapp_config')
+    .select('*')
+    .eq('account_id', accountId)
+    .order('sort_order', { ascending: true })
+  return { lines: (data as LineRow[] | null) ?? [], error }
+}
 
 /**
  * Resolve the caller's account_id from their profile. Inlined here
@@ -85,11 +118,7 @@ export async function GET() {
       )
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('phone_number_id, access_token, status')
-      .eq('account_id', accountId)
-      .maybeSingle()
+    const { lines: allLines, error: configError } = await readLines(supabase, accountId)
 
     if (configError) {
       console.error('Error fetching whatsapp_config:', configError)
@@ -99,12 +128,16 @@ export async function GET() {
       )
     }
 
+    const lines = allLines.map(toPublicLine)
+    const config = pickPrimary(allLines)
+
     if (!config) {
       return NextResponse.json(
         {
           connected: false,
           reason: 'no_config',
           message: 'No WhatsApp configuration saved yet. Fill in the form and click Save Configuration.',
+          lines,
         },
         { status: 200 }
       )
@@ -124,6 +157,7 @@ export async function GET() {
           needs_reset: true,
           message:
             'The stored access token cannot be decrypted with the current ENCRYPTION_KEY. This usually means the key changed, or it differs between environments (local vs Hostinger vs Vercel). Click "Reset Configuration" below, then re-save.',
+          lines,
         },
         { status: 200 }
       )
@@ -135,7 +169,7 @@ export async function GET() {
         phoneNumberId: config.phone_number_id,
         accessToken,
       })
-      return NextResponse.json({ connected: true, phone_info: phoneInfo })
+      return NextResponse.json({ connected: true, phone_info: phoneInfo, lines })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown Meta API error'
       console.error('[whatsapp/config GET] Meta API verification failed:', message)
@@ -144,6 +178,7 @@ export async function GET() {
           connected: false,
           reason: 'meta_api_error',
           message: `Meta API rejected the credentials: ${message}`,
+          lines,
         },
         { status: 200 }
       )
@@ -185,7 +220,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { phone_number_id, waba_id, access_token, verify_token, pin, line_id, line_name, area, logo_url } = body
 
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
@@ -201,6 +236,20 @@ export async function POST(request: Request) {
           { status: 400 }
         )
       }
+    }
+
+    // Datos opcionales de la línea. Se validan antes de llamar a Meta.
+    if (line_id !== undefined && line_id !== null && typeof line_id !== 'string') {
+      return NextResponse.json({ error: 'line_id must be a string.' }, { status: 400 })
+    }
+    if (line_name !== undefined && (typeof line_name !== 'string' || !line_name.trim() || line_name.length > 80)) {
+      return NextResponse.json({ error: 'line_name must be a non-empty string up to 80 characters.' }, { status: 400 })
+    }
+    if (area !== undefined && area !== null && area !== '' && !(LINE_AREAS as readonly string[]).includes(area)) {
+      return NextResponse.json({ error: 'area is not a valid area.' }, { status: 400 })
+    }
+    if (logo_url !== undefined && logo_url !== null && typeof logo_url !== 'string') {
+      return NextResponse.json({ error: 'logo_url must be a string.' }, { status: 400 })
     }
 
     // Reject if another account has already claimed this phone_number_id.
@@ -269,22 +318,30 @@ export async function POST(request: Request) {
       )
     }
 
-    // Look up any pre-existing row for this account so we know whether
-    // this number is already registered with Meta — if so we can skip
-    // /register when the user didn't provide a PIN this time around.
-    const { data: existing } = await supabase
-      .from('whatsapp_config')
-      .select('id, registered_at, phone_number_id, verify_token')
-      .eq('account_id', accountId)
-      .maybeSingle()
+    // Líneas de la cuenta: con `line_id` se edita esa línea; sin él, la fila
+    // de este mismo número (re-guardado) o, si el número es nuevo, se crea
+    // una línea nueva (la primera de la cuenta queda como principal).
+    const { lines: accountLines, error: linesError } = await readLines(supabase, accountId)
+    if (linesError) {
+      console.error('Error reading whatsapp_config lines:', linesError)
+      return NextResponse.json({ error: 'Failed to read configuration' }, { status: 500 })
+    }
+    const existing = line_id
+      ? accountLines.find((l) => l.id === line_id) ?? null
+      : accountLines.find((l) => l.phone_number_id === phone_number_id) ?? null
+    if (line_id && !existing) {
+      return NextResponse.json({ error: 'Line not found.' }, { status: 404 })
+    }
 
     // The form never shows the verify token back (same as the access
     // token), so it arrives empty on every later save — changing the PIN,
     // rotating the access token. Empty means "unchanged", not "clear it":
     // clearing it silently breaks the webhook the next time Meta
     // re-verifies, long after whoever saved has forgotten touching it.
-    if (!encryptedVerifyToken && existing?.verify_token) {
-      encryptedVerifyToken = existing.verify_token as string
+    // Una línea nueva hereda el de la principal (el webhook es de la app).
+    const inheritedVerifyToken = existing?.verify_token ?? pickPrimary(accountLines)?.verify_token ?? null
+    if (!encryptedVerifyToken && inheritedVerifyToken) {
+      encryptedVerifyToken = inheritedVerifyToken as string
     }
 
     const sameNumber =
@@ -375,10 +432,17 @@ export async function POST(request: Request) {
       updated_at: new Date().toISOString(),
     }
 
+    const lineMeta = {
+      ...(line_name !== undefined ? { line_name: line_name.trim() } : {}),
+      ...(area !== undefined ? { area: area === '' ? null : area } : {}),
+      ...(logo_url !== undefined ? { logo_url: logo_url || null } : {}),
+    } as { line_name?: string; area?: string | null; logo_url?: string | null }
+
     if (existing) {
       const { error: updateError } = await supabase
         .from('whatsapp_config')
-        .update(baseRow)
+        .update({ ...baseRow, ...lineMeta })
+        .eq('id', existing.id)
         .eq('account_id', accountId)
 
       if (updateError) {
@@ -390,8 +454,8 @@ export async function POST(request: Request) {
       }
     } else {
       // Insert with both columns: `account_id` is the tenancy key
-      // (NOT NULL post-017, UNIQUE so duplicates trip the constraint
-      // up-front), `user_id` is the audit column identifying which
+      // (NOT NULL post-017; desde la 103 ya no es único: una
+      // cuenta tiene varias líneas), `user_id` is the audit column identifying which
       // member of the account saved the config.
       const { error: insertError } = await supabase
         .from('whatsapp_config')
@@ -399,6 +463,11 @@ export async function POST(request: Request) {
           account_id: accountId,
           user_id: user.id,
           ...baseRow,
+          line_name: lineMeta.line_name ?? (accountLines.length === 0 ? 'Principal' : `Línea ${accountLines.length + 1}`),
+          area: lineMeta.area ?? null,
+          logo_url: lineMeta.logo_url ?? null,
+          is_primary: accountLines.length === 0,
+          sort_order: accountLines.reduce((max, l) => Math.max(max, l.sort_order ?? 0), -1) + 1,
         })
 
       if (insertError) {
@@ -441,13 +510,15 @@ export async function POST(request: Request) {
 }
 
 /**
- * DELETE /api/whatsapp/config
+ * DELETE /api/whatsapp/config[?line_id=...]
  *
- * Removes the authenticated user's WhatsApp configuration row.
- * Used by the "Reset Configuration" button to recover from a corrupted
- * encrypted token (mismatched ENCRYPTION_KEY across environments).
+ * Desconecta (borra) UNA línea de la cuenta. Sin `line_id` actúa sobre la
+ * principal (como el botón "Reset Configuration"). Las conversaciones no se
+ * borran: conversations.line_id pasa a NULL (ON DELETE SET NULL). Si la línea
+ * borrada era la principal y quedan otras, la de menor sort_order pasa a
+ * principal. Borrar la última línea está permitido.
  */
-export async function DELETE() {
+export async function DELETE(request?: Request) {
   try {
     const supabase = await createClient()
 
@@ -468,9 +539,30 @@ export async function DELETE() {
       )
     }
 
+    let lineId: string | null = null
+    if (request) {
+      lineId = new URL(request.url).searchParams.get('line_id')
+      if (!lineId) {
+        const body = await request.json().catch(() => null)
+        if (typeof body?.line_id === 'string') lineId = body.line_id
+      }
+    }
+
+    const { lines, error: readError } = await readLines(supabase, accountId)
+    if (readError) {
+      console.error('Error reading whatsapp_config lines:', readError)
+      return NextResponse.json({ error: 'Failed to delete configuration' }, { status: 500 })
+    }
+    const target = lineId ? lines.find((l) => l.id === lineId) ?? null : pickPrimary(lines)
+    if (lineId && !target) {
+      return NextResponse.json({ error: 'Line not found.' }, { status: 404 })
+    }
+    if (!target) return NextResponse.json({ success: true })
+
     const { error: deleteError } = await supabase
       .from('whatsapp_config')
       .delete()
+      .eq('id', target.id)
       .eq('account_id', accountId)
 
     if (deleteError) {
@@ -479,6 +571,25 @@ export async function DELETE() {
         { error: 'Failed to delete configuration' },
         { status: 500 }
       )
+    }
+
+    // Si era la principal, la de menor sort_order (lines ya viene ordenada) pasa a serlo.
+    if (target.is_primary) {
+      const next = lines.find((l) => l.id !== target.id)
+      if (next) {
+        const { error: promoteError } = await supabase
+          .from('whatsapp_config')
+          .update({ is_primary: true })
+          .eq('id', next.id)
+          .eq('account_id', accountId)
+        if (promoteError) {
+          console.error('Error promoting primary whatsapp line:', promoteError)
+          return NextResponse.json(
+            { error: 'Line deleted but a new primary line could not be set' },
+            { status: 500 }
+          )
+        }
+      }
     }
 
     return NextResponse.json({ success: true })
