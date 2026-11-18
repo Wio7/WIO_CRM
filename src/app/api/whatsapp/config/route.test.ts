@@ -195,10 +195,10 @@ describe('POST /api/whatsapp/config', () => {
 describe('reconexión y conflictos', () => {
   const base = { phone_number_id: '222', waba_id: 'w', access_token: 'nuevo' }
   it('reconectar el mismo número reactiva la misma fila', async () => {
-    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1, status: 'disconnected', access_token: 'enc:disconnected' })]
+    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1, status: 'disconnected', disconnected_at: '2026-11-18T00:00:00Z', access_token: 'enc:disconnected' })]
     expect((await post(base)).status).toBe(200)
     expect(state.rows).toHaveLength(2)
-    expect(state.rows[1]).toMatchObject({ id: 'l2', status: 'connected', access_token: 'enc:nuevo' })
+    expect(state.rows[1]).toMatchObject({ id: 'l2', status: 'connected', disconnected_at: null, access_token: 'enc:nuevo' })
   })
   it('poner a una línea el número de otra línea de la misma cuenta: 409', async () => {
     state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1 })]
@@ -206,8 +206,14 @@ describe('reconexión y conflictos', () => {
     expect(res.status).toBe(409)
     expect(state.rows[0]).toMatchObject({ phone_number_id: '111' })
   })
+  it('GET con status disconnected por /register fallido (sin disconnected_at) sigue verificando en Meta', async () => {
+    state.rows = [line({ status: 'disconnected' })]
+    const json = await (await GET()).json()
+    expect(json).toMatchObject({ connected: true })
+    expect(meta.verifyPhoneNumber).toHaveBeenCalled()
+  })
   it('GET con la principal desconectada: line_disconnected sin llamar a Meta', async () => {
-    state.rows = [line({ status: 'disconnected', access_token: 'enc:disconnected' })]
+    state.rows = [line({ status: 'disconnected', disconnected_at: '2026-11-18T00:00:00Z', access_token: 'enc:disconnected' })]
     const json = await (await GET()).json()
     expect(json).toMatchObject({ connected: false, reason: 'line_disconnected' })
     expect(json.lines).toHaveLength(1)
@@ -254,13 +260,14 @@ describe('DELETE /api/whatsapp/config', () => {
     expect(json.warning).toContain('2')
     expect(state.rows.map((r) => r.id)).toEqual(['l1', 'l3', 'l2'])
     expect(state.rows.find((r) => r.id === 'l2')).toMatchObject({ status: 'disconnected', access_token: 'enc:disconnected', phone_number_id: '222' })
+    expect(state.rows.find((r) => r.id === 'l2')?.disconnected_at).toEqual(expect.any(String))
     expect(state.convs).toHaveLength(2)
   })
   it('principal con conversaciones: deja de ser principal ANTES de promover a la conectada de menor sort_order', async () => {
     state.rows = [
       line({}),
       line({ id: 'l3', phone_number_id: '333', is_primary: false, sort_order: 2 }),
-      line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1, status: 'disconnected' }),
+      line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1, status: 'disconnected', disconnected_at: '2026-11-18T00:00:00Z' }),
       line({ id: 'l4', phone_number_id: '444', is_primary: false, sort_order: 3 }),
     ]
     state.convs = [{ id: 'c1', account_id: 'acc', line_id: 'l1' }]

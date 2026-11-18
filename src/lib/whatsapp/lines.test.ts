@@ -48,6 +48,7 @@ const line = (over: Partial<WhatsAppLine> = {}): WhatsAppLine => ({
   logo_url: null,
   is_primary: true,
   status: 'connected',
+  disconnected_at: null,
   access_token: 'enc-token',
   user_id: 'user-1',
   ...over,
@@ -213,7 +214,7 @@ describe('resolveSendLine — sin caer a la principal', () => {
 })
 
 describe('líneas desconectadas (desconexión suave) nunca envían', () => {
-  const dead = () => line({ id: 'line-dead', is_primary: false, status: 'disconnected' })
+  const dead = () => line({ id: 'line-dead', is_primary: false, status: 'disconnected', disconnected_at: '2026-11-18T00:00:00Z' })
 
   it('conversación con line_id de una línea desconectada lanza y no consulta la principal', async () => {
     const { db, calls } = makeDb({
@@ -237,15 +238,32 @@ describe('líneas desconectadas (desconexión suave) nunca envían', () => {
   it('conversación sin line_id cuya principal está desconectada lanza', async () => {
     const { db } = makeDb({
       conversations: [{ data: { account_id: 'acct-1', line_id: null } }],
-      whatsapp_config: [{ data: line({ status: 'disconnected' }) }],
+      whatsapp_config: [{ data: line({ status: 'disconnected', disconnected_at: '2026-11-18T00:00:00Z' }) }],
     })
     await expect(getLineForConversation(db, 'cv-1')).rejects.toBeInstanceOf(LineUnavailableError)
   })
 
-  it('getPrimaryLine prefiere líneas conectadas', async () => {
+  it('status disconnected con disconnected_at NULL (registro fallido) sigue pudiendo enviar', async () => {
+    const failedRegister = line({ status: 'disconnected', disconnected_at: null })
+    const a = makeDb({
+      conversations: [{ data: { account_id: 'acct-1', line_id: null } }],
+      whatsapp_config: [{ data: failedRegister }],
+    })
+    expect(await getLineForConversation(a.db, 'cv-1')).toEqual(failedRegister)
+    const b = makeDb({ whatsapp_config: [{ data: failedRegister }] })
+    expect(await resolveSendLine(b.db, 'acct-1', { lineId: 'line-1' })).toEqual(failedRegister)
+  })
+
+  it('listLines pone primero las líneas en uso', async () => {
+    const { db, calls } = makeDb({ whatsapp_config: [{ data: [line()] }] })
+    await listLines(db, 'acct-1')
+    expect(calls.filter((c) => c.method === 'order').map((c) => c.args[0])).toEqual(['disconnected_at', 'sort_order'])
+  })
+
+  it('getPrimaryLine prefiere líneas en uso', async () => {
     const { db, calls } = makeDb({ whatsapp_config: [{ data: line() }] })
     await getPrimaryLine(db, 'acct-1')
     const orders = calls.filter((c) => c.method === 'order').map((c) => c.args[0])
-    expect(orders).toEqual(['status', 'is_primary', 'sort_order'])
+    expect(orders).toEqual(['disconnected_at', 'is_primary', 'sort_order'])
   })
 })

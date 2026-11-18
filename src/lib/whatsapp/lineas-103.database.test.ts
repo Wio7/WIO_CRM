@@ -146,6 +146,13 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
     expect(c.rows[0].area).toBeNull();
   });
 
+  it("disconnected_at existe y es NULL por defecto (desconexion suave de lineas)", async () => {
+    const r = await db.query<{ disconnected_at: string | null }>(
+      `SELECT disconnected_at FROM whatsapp_config WHERE phone_number_id = 'PN-1'`,
+    );
+    expect(r.rows[0].disconnected_at).toBeNull();
+  });
+
   it("(a) permite dos lineas de la misma cuenta con distinto phone_number_id", async () => {
     await db.exec(`INSERT INTO whatsapp_config(user_id, account_id, phone_number_id, access_token, line_name, area)
       VALUES ('${U.owner}', '${ACCT}', 'PN-2', 'tok', 'Legal', 'legal')`);

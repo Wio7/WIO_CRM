@@ -50,7 +50,7 @@ export async function POST(request: Request) {
       waba_id: wabaId, business_id: session.business_id ?? null,
       access_token: encrypt(token), connection_type: coexistence ? 'coexistence' : 'embedded',
       is_on_biz_app: phone.is_on_biz_app ?? null, platform_type: phone.platform_type ?? null,
-      status: 'connected', connected_at: now, updated_at: now,
+      status: 'connected', disconnected_at: null, connected_at: now, updated_at: now,
       registered_at: registeredAt, subscribed_apps_at: now, last_registration_error: null,
       // No sobrescribir reservas de sincronización de otra solicitud concurrente.
       ...newLineFields,

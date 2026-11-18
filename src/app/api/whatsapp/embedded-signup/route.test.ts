@@ -93,6 +93,11 @@ describe('POST embedded-signup', () => {
     expect(await response.json()).toMatchObject({ registered: false, registration_skipped: true })
     expect(mocks.sync).not.toHaveBeenCalled()
   })
+  it('reconectar limpia disconnected_at', async () => {
+    state.rows = [{ phone_number_id: '123', sort_order: 0, registered_at: null }]
+    await POST(request())
+    expect(state.saved).toHaveProperty('disconnected_at', null)
+  })
   it('upsert por phone_number_id, no por account_id', async () => {
     await POST(request())
     expect(state.upsertOptions).toEqual({ onConflict: 'phone_number_id' })

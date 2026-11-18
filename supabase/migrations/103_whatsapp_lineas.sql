@@ -48,7 +48,8 @@ ALTER TABLE public.whatsapp_config
   ADD COLUMN IF NOT EXISTS area TEXT,
   ADD COLUMN IF NOT EXISTS logo_url TEXT,
   ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS disconnected_at TIMESTAMPTZ;  -- desconexión suave (línea con conversaciones): NULL = en uso
 
 ALTER TABLE public.whatsapp_config DROP CONSTRAINT IF EXISTS whatsapp_config_area_check;
 ALTER TABLE public.whatsapp_config

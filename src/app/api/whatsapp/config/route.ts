@@ -166,7 +166,7 @@ export async function GET() {
       )
     }
 
-    if (accessToken === DISCONNECTED_TOKEN) {
+    if (config.disconnected_at) {
       return NextResponse.json(
         {
           connected: false,
@@ -468,6 +468,7 @@ export async function POST(request: Request) {
       access_token: encryptedAccessToken,
       verify_token: encryptedVerifyToken,
       status: registrationError ? 'disconnected' : 'connected',
+      disconnected_at: null, // reconectar reactiva una línea desconectada en suave
       connected_at: registrationError ? null : new Date().toISOString(),
       registered_at: registrationError ? null : registeredAt,
       subscribed_apps_at: subscribedAppsAt ?? null,
@@ -624,7 +625,7 @@ export async function DELETE(request?: Request) {
     const soft = conversationCount > 0
     const others = lines.filter((l) => l.id !== target.id)
     const nextPrimary =
-      others.find((l) => l.status === 'connected') ?? (soft ? null : others[0] ?? null)
+      others.find((l) => !l.disconnected_at) ?? (soft ? null : others[0] ?? null)
     const handOver = target.is_primary && nextPrimary !== null
 
     if (soft) {
@@ -632,6 +633,7 @@ export async function DELETE(request?: Request) {
         .from('whatsapp_config')
         .update({
           status: 'disconnected',
+          disconnected_at: new Date().toISOString(),
           access_token: encrypt(DISCONNECTED_TOKEN),
           connected_at: null,
           updated_at: new Date().toISOString(),

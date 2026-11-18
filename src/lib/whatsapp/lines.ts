@@ -23,11 +23,13 @@ export const LINE_AREAS = [
 ] as const;
 
 /**
- * Una línea desconectada (desconexión suave: conserva sus conversaciones pero
- * su token ya no sirve) nunca se usa para enviar.
+ * Una línea con desconexión suave (disconnected_at no nulo: conserva sus
+ * conversaciones pero su token ya no sirve) nunca se usa para enviar. NO se
+ * mira `status`: 'disconnected' también lo deja un /register fallido con el
+ * token vigente, y esas líneas siguen intentando enviar como siempre.
  */
 function usable(line: WhatsAppLine | null): WhatsAppLine | null {
-  if (line && line.status === 'disconnected') {
+  if (line && line.disconnected_at) {
     throw new LineUnavailableError(
       `La línea "${line.line_name}" está desconectada. Reconéctala para enviar mensajes.`,
     );
@@ -45,11 +47,12 @@ export type WhatsAppLine = {
   logo_url: string | null;
   is_primary: boolean;
   status: string;
+  disconnected_at: string | null;
   access_token: string;
   user_id: string;
 };
 
-/** Todas las líneas de la cuenta, ordenadas por sort_order. */
+/** Todas las líneas de la cuenta: las en uso primero, luego por sort_order. */
 export async function listLines(
   db: SupabaseClient,
   accountId: string,
@@ -58,6 +61,7 @@ export async function listLines(
     .from('whatsapp_config')
     .select('*')
     .eq('account_id', accountId)
+    .order('disconnected_at', { ascending: true, nullsFirst: true })
     .order('sort_order', { ascending: true });
   return (data as WhatsAppLine[] | null) ?? [];
 }
@@ -76,7 +80,7 @@ export async function getPrimaryLine(
     .from('whatsapp_config')
     .select('*')
     .eq('account_id', accountId)
-    .order('status', { ascending: true }) // 'connected' antes que 'disconnected'
+    .order('disconnected_at', { ascending: true, nullsFirst: true }) // en uso antes que desconectadas
     .order('is_primary', { ascending: false })
     .order('sort_order', { ascending: true })
     .limit(1)
