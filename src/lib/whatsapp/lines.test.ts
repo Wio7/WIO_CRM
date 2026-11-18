@@ -211,3 +211,41 @@ describe('resolveSendLine — sin caer a la principal', () => {
     )
   })
 })
+
+describe('líneas desconectadas (desconexión suave) nunca envían', () => {
+  const dead = () => line({ id: 'line-dead', is_primary: false, status: 'disconnected' })
+
+  it('conversación con line_id de una línea desconectada lanza y no consulta la principal', async () => {
+    const { db, calls } = makeDb({
+      conversations: [{ data: { account_id: 'acct-1', line_id: 'line-dead' } }],
+      whatsapp_config: [{ data: dead() }, { data: line() }],
+    })
+    await expect(getLineForConversation(db, 'cv-1')).rejects.toBeInstanceOf(LineUnavailableError)
+    expect(calls.filter((c) => c.table === 'whatsapp_config' && c.method === 'select')).toHaveLength(1)
+  })
+
+  it('resolveSendLine con la conversación o con line_id desconectados lanza', async () => {
+    const a = makeDb({
+      conversations: [{ data: { account_id: 'acct-1', line_id: 'line-dead' } }],
+      whatsapp_config: [{ data: dead() }],
+    })
+    await expect(resolveSendLine(a.db, 'acct-1', { conversationId: 'cv-1' })).rejects.toBeInstanceOf(LineUnavailableError)
+    const b = makeDb({ whatsapp_config: [{ data: dead() }] })
+    await expect(resolveSendLine(b.db, 'acct-1', { lineId: 'line-dead' })).rejects.toBeInstanceOf(LineUnavailableError)
+  })
+
+  it('conversación sin line_id cuya principal está desconectada lanza', async () => {
+    const { db } = makeDb({
+      conversations: [{ data: { account_id: 'acct-1', line_id: null } }],
+      whatsapp_config: [{ data: line({ status: 'disconnected' }) }],
+    })
+    await expect(getLineForConversation(db, 'cv-1')).rejects.toBeInstanceOf(LineUnavailableError)
+  })
+
+  it('getPrimaryLine prefiere líneas conectadas', async () => {
+    const { db, calls } = makeDb({ whatsapp_config: [{ data: line() }] })
+    await getPrimaryLine(db, 'acct-1')
+    const orders = calls.filter((c) => c.method === 'order').map((c) => c.args[0])
+    expect(orders).toEqual(['status', 'is_primary', 'sort_order'])
+  })
+})

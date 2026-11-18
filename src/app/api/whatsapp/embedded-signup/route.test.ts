@@ -101,7 +101,7 @@ describe('POST embedded-signup', () => {
     await POST(request())
     expect(state.saved).toMatchObject({ is_primary: true, sort_order: 0 })
   })
-  it('un segundo número crea una fila nueva no principal al final', async () => {
+  it('un número nuevo, incluso en una cuenta de una sola línea, agrega una línea no principal al final', async () => {
     state.rows = [{ phone_number_id: '111', sort_order: 0, registered_at: null }]
     expect((await POST(request())).status).toBe(200)
     expect(state.saved).toMatchObject({ phone_number_id: '123', account_id: 'account', is_primary: false, sort_order: 1 })

@@ -16,6 +16,9 @@ type LineRow = WhatsAppLine & {
   registered_at?: string | null
   sort_order?: number | null
 }
+// Marca que se guarda (cifrada) en access_token al desconectar sin borrar la fila.
+const DISCONNECTED_TOKEN = 'disconnected'
+
 type PublicLine = Omit<LineRow, 'access_token' | 'verify_token'>
 
 function toPublicLine(row: LineRow): PublicLine {
@@ -160,6 +163,18 @@ export async function GET() {
           lines,
         },
         { status: 200 }
+      )
+    }
+
+    if (accessToken === DISCONNECTED_TOKEN) {
+      return NextResponse.json(
+        {
+          connected: false,
+          reason: 'line_disconnected',
+          message: 'La línea principal está desconectada. Vuelve a conectar el número para usarla.',
+          lines,
+        },
+        { status: 200 },
       )
     }
 
@@ -353,6 +368,14 @@ export async function POST(request: Request) {
       )
     }
 
+    // Otra línea de esta misma cuenta ya usa ese phone_number_id (UNIQUE global).
+    if (sameNumberLine && existing && sameNumberLine.id !== existing.id) {
+      return NextResponse.json(
+        { error: 'Ese número ya está conectado como otra línea de esta cuenta.' },
+        { status: 409 }
+      )
+    }
+
     // The form never shows the verify token back (same as the access
     // token), so it arrives empty on every later save — changing the PIN,
     // rotating the access token. Empty means "unchanged", not "clear it":
@@ -466,6 +489,9 @@ export async function POST(request: Request) {
         .eq('account_id', accountId)
 
       if (updateError) {
+        if (updateError.code === '23505') {
+          return NextResponse.json({ error: 'Ese número ya está conectado como otra línea.' }, { status: 409 })
+        }
         console.error('Error updating whatsapp_config:', updateError)
         return NextResponse.json(
           { error: 'Failed to update configuration' },
@@ -491,6 +517,9 @@ export async function POST(request: Request) {
         })
 
       if (insertError) {
+        if (insertError.code === '23505') {
+          return NextResponse.json({ error: 'Ese número ya está conectado como otra línea.' }, { status: 409 })
+        }
         console.error('Error inserting whatsapp_config:', insertError)
         return NextResponse.json(
           { error: 'Failed to save configuration' },
@@ -579,40 +608,82 @@ export async function DELETE(request?: Request) {
     }
     if (!target) return NextResponse.json({ success: true })
 
-    const { error: deleteError } = await supabase
-      .from('whatsapp_config')
-      .delete()
-      .eq('id', target.id)
+    // Cuántas conversaciones cuelgan de la línea. Si hay, la fila NO se borra:
+    // line_id NULL significa "línea principal", así que borrarla movería esos
+    // hilos al otro número sin avisar. Se desconecta (suave) y se invalida el token.
+    const { count: convCount, error: convError } = await supabase
+      .from('conversations')
+      .select('id', { count: 'exact', head: true })
       .eq('account_id', accountId)
-
-    if (deleteError) {
-      console.error('Error deleting whatsapp_config:', deleteError)
-      return NextResponse.json(
-        { error: 'Failed to delete configuration' },
-        { status: 500 }
-      )
+      .eq('line_id', target.id)
+    if (convError) {
+      console.error('Error counting line conversations:', convError)
+      return NextResponse.json({ error: 'Failed to delete configuration' }, { status: 500 })
     }
+    const conversationCount = convCount ?? 0
+    const soft = conversationCount > 0
+    const others = lines.filter((l) => l.id !== target.id)
+    const nextPrimary =
+      others.find((l) => l.status === 'connected') ?? (soft ? null : others[0] ?? null)
+    const handOver = target.is_primary && nextPrimary !== null
 
-    // Si era la principal, la de menor sort_order (lines ya viene ordenada) pasa a serlo.
-    if (target.is_primary) {
-      const next = lines.find((l) => l.id !== target.id)
-      if (next) {
-        const { error: promoteError } = await supabase
-          .from('whatsapp_config')
-          .update({ is_primary: true })
-          .eq('id', next.id)
-          .eq('account_id', accountId)
-        if (promoteError) {
-          console.error('Error promoting primary whatsapp line:', promoteError)
-          return NextResponse.json(
-            { error: 'Line deleted but a new primary line could not be set' },
-            { status: 500 }
-          )
-        }
+    if (soft) {
+      const { error: softError } = await supabase
+        .from('whatsapp_config')
+        .update({
+          status: 'disconnected',
+          access_token: encrypt(DISCONNECTED_TOKEN),
+          connected_at: null,
+          updated_at: new Date().toISOString(),
+          ...(handOver ? { is_primary: false } : {}),
+        })
+        .eq('id', target.id)
+        .eq('account_id', accountId)
+      if (softError) {
+        console.error('Error disconnecting whatsapp_config:', softError)
+        return NextResponse.json({ error: 'Failed to delete configuration' }, { status: 500 })
+      }
+    } else {
+      const { error: deleteError } = await supabase
+        .from('whatsapp_config')
+        .delete()
+        .eq('id', target.id)
+        .eq('account_id', accountId)
+      if (deleteError) {
+        console.error('Error deleting whatsapp_config:', deleteError)
+        return NextResponse.json(
+          { error: 'Failed to delete configuration' },
+          { status: 500 }
+        )
       }
     }
 
-    return NextResponse.json({ success: true })
+    // Si era la principal, otra línea (conectada y de menor sort_order) pasa a serlo.
+    // La anterior ya dejó de serlo (o se borró): el índice parcial nunca ve dos.
+    if (handOver && nextPrimary) {
+      const { error: promoteError } = await supabase
+        .from('whatsapp_config')
+        .update({ is_primary: true })
+        .eq('id', nextPrimary.id)
+        .eq('account_id', accountId)
+      if (promoteError) {
+        console.error('Error promoting primary whatsapp line:', promoteError)
+        return NextResponse.json(
+          { error: 'Line removed but a new primary line could not be set' },
+          { status: 500 }
+        )
+      }
+    }
+
+    if (soft) {
+      return NextResponse.json({
+        success: true,
+        disconnected: true,
+        conversation_count: conversationCount,
+        warning: `La línea tiene ${conversationCount} conversación(es), así que no se borró: quedó desconectada y no puede enviar mensajes. Sus conversaciones se conservan; para volver a usarla, conecta de nuevo el mismo número.`,
+      })
+    }
+    return NextResponse.json({ success: true, conversation_count: 0 })
   } catch (error) {
     console.error('Error in WhatsApp config DELETE:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

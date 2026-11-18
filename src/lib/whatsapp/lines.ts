@@ -22,6 +22,19 @@ export const LINE_AREAS = [
   'contabilidad', 'tecnica', 'promueve', 'administracion', 'posventa',
 ] as const;
 
+/**
+ * Una línea desconectada (desconexión suave: conserva sus conversaciones pero
+ * su token ya no sirve) nunca se usa para enviar.
+ */
+function usable(line: WhatsAppLine | null): WhatsAppLine | null {
+  if (line && line.status === 'disconnected') {
+    throw new LineUnavailableError(
+      `La línea "${line.line_name}" está desconectada. Reconéctala para enviar mensajes.`,
+    );
+  }
+  return line;
+}
+
 export type WhatsAppLine = {
   id: string;
   account_id: string;
@@ -49,7 +62,12 @@ export async function listLines(
   return (data as WhatsAppLine[] | null) ?? [];
 }
 
-/** Línea principal de la cuenta (si ninguna está marcada, la de menor sort_order). */
+/**
+ * Línea principal de la cuenta (si ninguna está marcada, la de menor
+ * sort_order). Prefiere líneas conectadas sobre las desconectadas. Devuelve
+ * la fila tal cual; los envíos pasan por getLineForConversation/resolveSendLine,
+ * que rechazan líneas desconectadas.
+ */
 export async function getPrimaryLine(
   db: SupabaseClient,
   accountId: string,
@@ -58,6 +76,7 @@ export async function getPrimaryLine(
     .from('whatsapp_config')
     .select('*')
     .eq('account_id', accountId)
+    .order('status', { ascending: true }) // 'connected' antes que 'disconnected'
     .order('is_primary', { ascending: false })
     .order('sort_order', { ascending: true })
     .limit(1)
@@ -80,7 +99,7 @@ export async function getLineForConversation(
   }
   if (!conv) return null;
   const { account_id, line_id } = conv as { account_id: string; line_id: string | null };
-  if (!line_id) return getPrimaryLine(db, account_id);
+  if (!line_id) return usable(await getPrimaryLine(db, account_id));
   const { data, error } = await db
     .from('whatsapp_config')
     .select('*')
@@ -91,7 +110,7 @@ export async function getLineForConversation(
       error ? `No se pudo leer la línea: ${error.message}` : undefined,
     );
   }
-  return data as WhatsAppLine;
+  return usable(data as WhatsAppLine);
 }
 
 /** Línea por phone_number_id (único globalmente, migración 013). */
@@ -120,7 +139,7 @@ export async function getLineById(
     .eq('account_id', accountId)
     .maybeSingle();
   if (error) throw new LineUnavailableError(`No se pudo leer la línea: ${error.message}`);
-  return (data as WhatsAppLine | null) ?? null;
+  return usable((data as WhatsAppLine | null) ?? null);
 }
 
 /**
@@ -137,12 +156,12 @@ export async function resolveSendLine(
 ): Promise<WhatsAppLine | null> {
   if (opts.conversationId) {
     const line = await getLineForConversation(db, opts.conversationId);
-    if (!line) return getPrimaryLine(db, accountId);
+    if (!line) return usable(await getPrimaryLine(db, accountId));
     if (line.account_id !== accountId) throw new LineUnavailableError();
     return line;
   }
   if (opts.lineId) return getLineById(db, accountId, opts.lineId);
-  return getPrimaryLine(db, accountId);
+  return usable(await getPrimaryLine(db, accountId));
 }
 
 /**

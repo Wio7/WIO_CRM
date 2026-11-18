@@ -5,6 +5,8 @@ type Row = Record<string, unknown>
 const state = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
   claimed: false,
+  convs: [] as Array<Record<string, unknown>>,
+  log: [] as string[],
   writes: 0,
   seq: 0,
 }))
@@ -40,18 +42,20 @@ function fakeDb() {
         const p = { select: () => p, eq: () => p, maybeSingle: async () => ({ data: { account_id: 'acc' }, error: null }) }
         return p
       }
+      const isConv = table === 'conversations'
       const filters: Array<[string, unknown]> = []
       const orders: Array<[string, boolean]> = []
       let op: 'select' | 'insert' | 'update' | 'delete' = 'select'
       let payload: Row = {}
-      const matches = () => state.rows.filter((r) => filters.every(([k, v]) => r[k] === v))
+      const matches = () => (isConv ? state.convs : state.rows).filter((r) => filters.every(([k, v]) => r[k] === v))
       const run = () => {
         if (op === 'insert') {
           state.writes++
           state.rows.push({ id: `line-${++state.seq}`, is_primary: false, sort_order: 0, line_name: 'Principal', ...payload })
           return { data: null, error: null }
         }
-        if (op === 'update') { state.writes++; matches().forEach((r) => Object.assign(r, payload)); return { data: null, error: null } }
+        if (isConv) return { data: null, count: matches().length, error: null }
+        if (op === 'update') { state.writes++; state.log.push(`update:${String(payload.is_primary ?? payload.status)}:${String(filters.find(([k]) => k === 'id')?.[1])}`); matches().forEach((r) => Object.assign(r, payload)); return { data: null, error: null } }
         if (op === 'delete') { state.writes++; const m = matches(); state.rows = state.rows.filter((r) => !m.includes(r)); return { data: null, error: null } }
         const out = [...matches()]
         out.sort((a, b) => {
@@ -90,7 +94,7 @@ const del = (qs = '') => DELETE(new Request(`http://localhost/api/whatsapp/confi
 
 beforeEach(() => {
   vi.clearAllMocks()
-  state.rows = []; state.claimed = false; state.writes = 0; state.seq = 0
+  state.rows = []; state.convs = []; state.log = []; state.claimed = false; state.writes = 0; state.seq = 0
   vi.spyOn(console, 'error').mockImplementation(() => {})
   meta.verifyPhoneNumber.mockResolvedValue({ display_phone_number: '+51 999' })
   meta.registerPhoneNumber.mockResolvedValue(undefined)
@@ -188,6 +192,29 @@ describe('POST /api/whatsapp/config', () => {
   })
 })
 
+describe('reconexión y conflictos', () => {
+  const base = { phone_number_id: '222', waba_id: 'w', access_token: 'nuevo' }
+  it('reconectar el mismo número reactiva la misma fila', async () => {
+    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1, status: 'disconnected', access_token: 'enc:disconnected' })]
+    expect((await post(base)).status).toBe(200)
+    expect(state.rows).toHaveLength(2)
+    expect(state.rows[1]).toMatchObject({ id: 'l2', status: 'connected', access_token: 'enc:nuevo' })
+  })
+  it('poner a una línea el número de otra línea de la misma cuenta: 409', async () => {
+    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1 })]
+    const res = await post({ ...base, line_id: 'l1' })
+    expect(res.status).toBe(409)
+    expect(state.rows[0]).toMatchObject({ phone_number_id: '111' })
+  })
+  it('GET con la principal desconectada: line_disconnected sin llamar a Meta', async () => {
+    state.rows = [line({ status: 'disconnected', access_token: 'enc:disconnected' })]
+    const json = await (await GET()).json()
+    expect(json).toMatchObject({ connected: false, reason: 'line_disconnected' })
+    expect(json.lines).toHaveLength(1)
+    expect(meta.verifyPhoneNumber).not.toHaveBeenCalled()
+  })
+})
+
 describe('DELETE /api/whatsapp/config', () => {
   const three = () => [
     line({}),
@@ -216,6 +243,44 @@ describe('DELETE /api/whatsapp/config', () => {
     state.rows = [line({})]
     expect((await del()).status).toBe(200)
     expect(state.rows).toHaveLength(0)
+  })
+  it('línea con conversaciones: se conserva desconectada, con conteo y aviso', async () => {
+    state.rows = three()
+    state.convs = [{ id: 'c1', account_id: 'acc', line_id: 'l2' }, { id: 'c2', account_id: 'acc', line_id: 'l2' }]
+    const res = await del('?line_id=l2')
+    const json = await res.json()
+    expect(res.status).toBe(200)
+    expect(json).toMatchObject({ success: true, disconnected: true, conversation_count: 2 })
+    expect(json.warning).toContain('2')
+    expect(state.rows.map((r) => r.id)).toEqual(['l1', 'l3', 'l2'])
+    expect(state.rows.find((r) => r.id === 'l2')).toMatchObject({ status: 'disconnected', access_token: 'enc:disconnected', phone_number_id: '222' })
+    expect(state.convs).toHaveLength(2)
+  })
+  it('principal con conversaciones: deja de ser principal ANTES de promover a la conectada de menor sort_order', async () => {
+    state.rows = [
+      line({}),
+      line({ id: 'l3', phone_number_id: '333', is_primary: false, sort_order: 2 }),
+      line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1, status: 'disconnected' }),
+      line({ id: 'l4', phone_number_id: '444', is_primary: false, sort_order: 3 }),
+    ]
+    state.convs = [{ id: 'c1', account_id: 'acc', line_id: 'l1' }]
+    expect((await del('?line_id=l1')).status).toBe(200)
+    expect(state.log).toEqual(['update:false:l1', 'update:true:l3'])
+    expect(state.rows.find((r) => r.id === 'l1')).toMatchObject({ status: 'disconnected', is_primary: false })
+    expect(state.rows.filter((r) => r.is_primary).map((r) => r.id)).toEqual(['l3'])
+  })
+  it('principal con conversaciones y sin otra conectada: sigue principal (desconectada)', async () => {
+    state.rows = [line({})]
+    state.convs = [{ id: 'c1', account_id: 'acc', line_id: 'l1' }]
+    expect((await del()).status).toBe(200)
+    expect(state.rows[0]).toMatchObject({ status: 'disconnected', is_primary: true })
+  })
+  it('conversaciones de otra línea no cuentan: se borra la fila', async () => {
+    state.rows = three()
+    state.convs = [{ id: 'c1', account_id: 'acc', line_id: 'l3' }]
+    const json = await (await del('?line_id=l2')).json()
+    expect(json).toMatchObject({ success: true, conversation_count: 0 })
+    expect(state.rows.map((r) => r.id)).toEqual(['l1', 'l3'])
   })
   it('line_id ajeno: 404 sin borrar', async () => {
     state.rows = [line({})]
