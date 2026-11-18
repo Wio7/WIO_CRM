@@ -28,6 +28,7 @@ import {
   type MediaKind,
 } from '@/lib/whatsapp/meta-api';
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption';
+import { getLineById, getPrimaryLine } from '@/lib/whatsapp/lines';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { notifyClient } from '@/lib/push/send';
 import {
@@ -328,14 +329,14 @@ export async function sendMessageToConversation(
     });
   }
 
-  // WhatsApp config, account-scoped.
-  const { data: config, error: configError } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .single();
+  // Línea de WhatsApp de la conversación (la respuesta sale por el mismo
+  // número por el que escribió el cliente); sin línea, la principal.
+  const config =
+    (conversation.line_id
+      ? await getLineById(db, accountId, conversation.line_id)
+      : null) ?? (await getPrimaryLine(db, accountId));
 
-  if (configError || !config) {
+  if (!config) {
     // No WhatsApp number connected. If this contact reads their messages
     // inside the Golden App (they have a DNI and the account's client
     // portal is on), the reply still has somewhere to land: store it and

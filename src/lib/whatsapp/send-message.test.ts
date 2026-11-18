@@ -115,3 +115,117 @@ describe('SendMessageError', () => {
     expect(e).toBeInstanceOf(Error);
   });
 });
+
+// ------------------------------------------------------------
+// Varias líneas por cuenta: la respuesta sale por la línea del hilo.
+// ------------------------------------------------------------
+const { sendTextMessage } = vi.hoisted(() => ({
+  sendTextMessage: vi.fn(async (..._args: unknown[]) => ({ messageId: 'wamid-1' })),
+}));
+vi.mock('@/lib/whatsapp/meta-api', async (orig) => ({
+  ...(await orig<typeof import('@/lib/whatsapp/meta-api')>()),
+  sendTextMessage,
+}));
+vi.mock('@/lib/whatsapp/encryption', () => ({
+  decrypt: vi.fn((v: string) => `plain:${v}`),
+  encrypt: vi.fn((v: string) => v),
+  isLegacyFormat: vi.fn(() => false),
+}));
+vi.mock('@/lib/flows/admin-client', () => ({
+  supabaseAdmin: () => {
+    const b: Record<string, unknown> = {};
+    for (const m of ['update', 'eq']) b[m] = () => b;
+    b.then = (res: (v: unknown) => unknown) => res({ data: null, error: null });
+    return { from: () => b };
+  },
+}));
+vi.mock('@/lib/push/send', () => ({ notifyClient: vi.fn(async () => undefined) }));
+
+const LINE_A = {
+  id: 'line-A', account_id: 'acct-1', phone_number_id: 'PNID-A', access_token: 'tok-A',
+  is_primary: true, area: null as string | null, user_id: 'u1',
+};
+const LINE_B = {
+  id: 'line-B', account_id: 'acct-1', phone_number_id: 'PNID-B', access_token: 'tok-B',
+  is_primary: false, area: 'posventa', user_id: 'u1',
+};
+
+function dbWithLines(lines: (typeof LINE_A)[], conversationLineId: string | null): SupabaseClient {
+  return {
+    from(table: string) {
+      let eqId: string | null = null;
+      const b: Record<string, unknown> = {};
+      const chain = () => b;
+      for (const m of ['select', 'order', 'limit', 'update', 'insert']) b[m] = vi.fn(chain);
+      b.eq = vi.fn((col: string, val: string) => {
+        if (col === 'id') eqId = val;
+        return b;
+      });
+      const result = () => {
+        if (table === 'conversations') {
+          return {
+            data: {
+              id: 'cv-1', account_id: 'acct-1', line_id: conversationLineId,
+              contact: { id: 'ct-1', phone: '+15551234567' },
+            },
+            error: null,
+          };
+        }
+        if (table === 'whatsapp_config') {
+          const row = eqId
+            ? lines.find((l) => l.id === eqId)
+            : [...lines].sort((x, y) => Number(y.is_primary) - Number(x.is_primary))[0];
+          return { data: row ?? null, error: null };
+        }
+        if (table === 'messages') return { data: { id: 'msg-1' }, error: null };
+        return { data: null, error: null };
+      };
+      b.single = () => Promise.resolve(result());
+      b.maybeSingle = () => Promise.resolve(result());
+      b.then = (res: (v: unknown) => unknown) => res(result());
+      return b;
+    },
+  } as unknown as SupabaseClient;
+}
+
+describe('sendMessageToConversation — línea de la conversación', () => {
+  const params = { conversationId: 'cv-1', messageType: 'text', contentText: 'hola' };
+
+  it('un hilo de la línea B responde con el phone_number_id y el token de B', async () => {
+    sendTextMessage.mockClear();
+    await sendMessageToConversation(dbWithLines([LINE_A, LINE_B], 'line-B'), 'acct-1', params);
+    expect(sendTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ phoneNumberId: 'PNID-B', accessToken: 'plain:tok-B' }),
+    );
+  });
+
+  it('un hilo de la línea A responde con los de A', async () => {
+    sendTextMessage.mockClear();
+    await sendMessageToConversation(dbWithLines([LINE_A, LINE_B], 'line-A'), 'acct-1', params);
+    expect(sendTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ phoneNumberId: 'PNID-A', accessToken: 'plain:tok-A' }),
+    );
+  });
+
+  it('un hilo antiguo sin line_id sale por la principal', async () => {
+    sendTextMessage.mockClear();
+    await sendMessageToConversation(dbWithLines([LINE_B, LINE_A], null), 'acct-1', params);
+    expect(sendTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ phoneNumberId: 'PNID-A' }),
+    );
+  });
+
+  it('una cuenta con una sola línea sigue igual', async () => {
+    sendTextMessage.mockClear();
+    await sendMessageToConversation(dbWithLines([LINE_A], null), 'acct-1', params);
+    expect(sendTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ phoneNumberId: 'PNID-A', accessToken: 'plain:tok-A' }),
+    );
+  });
+
+  it('sin ninguna línea conectada devuelve el mismo error de siempre', async () => {
+    await expect(
+      sendMessageToConversation(dbWithLines([], null), 'acct-1', params),
+    ).rejects.toMatchObject({ code: 'whatsapp_not_configured', status: 400 });
+  });
+});

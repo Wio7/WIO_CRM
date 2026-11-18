@@ -80,3 +80,80 @@ export async function getLineByPhoneNumberId(
     .maybeSingle();
   return (data as WhatsAppLine | null) ?? null;
 }
+
+/** Línea por id, solo si pertenece a la cuenta. */
+export async function getLineById(
+  db: SupabaseClient,
+  accountId: string,
+  lineId: string,
+): Promise<WhatsAppLine | null> {
+  const { data } = await db
+    .from('whatsapp_config')
+    .select('*')
+    .eq('id', lineId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+  return (data as WhatsAppLine | null) ?? null;
+}
+
+/**
+ * Línea por la que sale un envío: la de la conversación; si no hay
+ * conversación, la indicada en `lineId`; si tampoco, la principal.
+ * Una conversación cuya línea ya no existe cae a la principal.
+ */
+export async function resolveSendLine(
+  db: SupabaseClient,
+  accountId: string,
+  opts: { conversationId?: string | null; lineId?: string | null } = {},
+): Promise<WhatsAppLine | null> {
+  if (opts.conversationId) {
+    const line = await getLineForConversation(db, opts.conversationId);
+    if (line && line.account_id === accountId) return line;
+    return getPrimaryLine(db, accountId);
+  }
+  if (opts.lineId) return getLineById(db, accountId, opts.lineId);
+  return getPrimaryLine(db, accountId);
+}
+
+/**
+ * Hilo del contacto en una línea (uno por contacto Y línea), creándolo con
+ * `line_id` y `area` de la línea si no existe. Los hilos antiguos con
+ * line_id NULL solo los reutiliza la línea principal. Lanza si la consulta
+ * o la creación fallan de verdad.
+ */
+export async function findOrCreateLineConversation(
+  db: SupabaseClient,
+  args: { accountId: string; userId: string; contactId: string; line: WhatsAppLine },
+): Promise<{ id: string; created: boolean }> {
+  const { accountId, userId, contactId, line } = args;
+  let lookup = db
+    .from('conversations')
+    .select('id, line_id')
+    .eq('account_id', accountId)
+    .eq('contact_id', contactId);
+  lookup = line.is_primary
+    ? lookup.or(`line_id.eq.${line.id},line_id.is.null`)
+    : lookup.eq('line_id', line.id);
+  const { data: existing, error: findError } = await lookup
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (findError) throw new Error(`conversation lookup failed: ${findError.message}`);
+  if (existing) return { id: existing.id as string, created: false };
+
+  const { data: created, error: createError } = await db
+    .from('conversations')
+    .insert({
+      account_id: accountId,
+      user_id: userId,
+      contact_id: contactId,
+      line_id: line.id,
+      area: line.area,
+    })
+    .select('id')
+    .single();
+  if (createError || !created) {
+    throw new Error(`conversation create failed: ${createError?.message ?? 'no row'}`);
+  }
+  return { id: created.id as string, created: true };
+}

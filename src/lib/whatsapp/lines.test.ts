@@ -5,6 +5,7 @@ import {
   getLineForConversation,
   getPrimaryLine,
   listLines,
+  resolveSendLine,
   type WhatsAppLine,
 } from './lines'
 
@@ -120,5 +121,40 @@ describe('getLineByPhoneNumberId', () => {
   it('devuelve null si no hay ninguna', async () => {
     const { db } = makeDb({ whatsapp_config: [{ data: null }] })
     expect(await getLineByPhoneNumberId(db, 'x')).toBeNull()
+  })
+})
+
+describe('resolveSendLine', () => {
+  it('con conversación usa la línea de la conversación', async () => {
+    const b = line({ id: 'line-B', is_primary: false })
+    const { db } = makeDb({
+      conversations: [{ data: { account_id: 'acct-1', line_id: 'line-B' } }],
+      whatsapp_config: [{ data: b }],
+    })
+    expect(await resolveSendLine(db, 'acct-1', { conversationId: 'cv-1' })).toEqual(b)
+  })
+
+  it('con line_id sin conversación pide esa línea dentro de la cuenta', async () => {
+    const b = line({ id: 'line-B', is_primary: false })
+    const { db, calls } = makeDb({ whatsapp_config: [{ data: b }] })
+    expect(await resolveSendLine(db, 'acct-1', { lineId: 'line-B' })).toEqual(b)
+    expect(calls.some((c) => c.method === 'eq' && c.args[0] === 'id' && c.args[1] === 'line-B')).toBe(true)
+    expect(calls.some((c) => c.method === 'eq' && c.args[0] === 'account_id' && c.args[1] === 'acct-1')).toBe(true)
+  })
+
+  it('sin nada cae a la principal', async () => {
+    const a = line()
+    const { db } = makeDb({ whatsapp_config: [{ data: a }] })
+    expect(await resolveSendLine(db, 'acct-1')).toEqual(a)
+  })
+
+  it('una conversación de otra cuenta no presta su línea', async () => {
+    const other = line({ id: 'x', account_id: 'acct-2' })
+    const mine = line()
+    const { db } = makeDb({
+      conversations: [{ data: { account_id: 'acct-2', line_id: 'x' } }],
+      whatsapp_config: [{ data: other }, { data: mine }],
+    })
+    expect(await resolveSendLine(db, 'acct-1', { conversationId: 'cv-9' })).toEqual(mine)
   })
 })
