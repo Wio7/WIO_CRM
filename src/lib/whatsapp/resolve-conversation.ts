@@ -24,6 +24,11 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils';
 import { SendMessageError } from '@/lib/whatsapp/send-message';
 import { resolveAuditUserId, ContactError } from '@/lib/api/v1/contacts';
+import {
+  findOrCreateLineConversation,
+  getLineById,
+  getPrimaryLine,
+} from '@/lib/whatsapp/lines';
 
 export interface ResolvedConversation {
   conversationId: string;
@@ -42,7 +47,8 @@ export async function resolveConversationByPhone(
   db: SupabaseClient,
   accountId: string,
   phone: string,
-  name?: string | null
+  name?: string | null,
+  lineId?: string | null
 ): Promise<ResolvedConversation> {
   const sanitized = sanitizePhoneForMeta(phone);
   if (!isValidE164(sanitized)) {
@@ -55,12 +61,11 @@ export async function resolveConversationByPhone(
 
   // Fail fast (and create nothing) when the account has no WhatsApp
   // connected — the same error the send would raise anyway.
-  const { data: config } = await db
-    .from('whatsapp_config')
-    .select('id')
-    .eq('account_id', accountId)
-    .maybeSingle();
-  if (!config) {
+  // `lineId` (opcional) elige la línea; sin ella, la principal.
+  const line = lineId
+    ? await getLineById(db, accountId, lineId)
+    : await getPrimaryLine(db, accountId);
+  if (!line) {
     throw new SendMessageError(
       'whatsapp_not_configured',
       'WhatsApp not configured. Please set up your WhatsApp integration first.',
@@ -137,37 +142,22 @@ export async function resolveConversationByPhone(
   }
 
   // ---- conversation -------------------------------------------
-  // One conversation per (account, contact) — same convention as the
-  // webhook.
-  const { data: conv } = await db
-    .from('conversations')
-    .select('id')
-    .eq('account_id', accountId)
-    .eq('contact_id', contactId)
-    .maybeSingle();
-
-  if (conv?.id) {
+  // One conversation per (account, contact, line) — same convention as
+  // the webhook.
+  try {
+    const conv = await findOrCreateLineConversation(db, {
+      accountId,
+      userId: ownerUserId,
+      contactId,
+      line,
+    });
     return { conversationId: conv.id, contactId, contactCreated };
-  }
-
-  const { data: newConv, error: convErr } = await db
-    .from('conversations')
-    .insert({
-      account_id: accountId,
-      user_id: ownerUserId,
-      contact_id: contactId,
-    })
-    .select('id')
-    .single();
-
-  if (convErr || !newConv) {
-    console.error('[resolve-conversation] conversation create error:', convErr);
+  } catch (err) {
+    console.error('[resolve-conversation] conversation error:', err);
     throw new SendMessageError(
       'db_error',
       'Failed to create conversation',
       500
     );
   }
-
-  return { conversationId: newConv.id, contactId, contactCreated };
 }
