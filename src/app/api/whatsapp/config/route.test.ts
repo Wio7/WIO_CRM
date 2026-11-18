@@ -122,9 +122,9 @@ describe('POST /api/whatsapp/config', () => {
     expect(state.rows).toHaveLength(1)
     expect(state.rows[0]).toMatchObject({ account_id: 'acc', is_primary: true, line_name: 'Principal', sort_order: 0, access_token: 'enc:tok' })
   })
-  it('un número nuevo crea una línea adicional no principal al final', async () => {
+  it('new_line: un número nuevo crea una línea adicional no principal al final', async () => {
     state.rows = [line({ sort_order: 4 })]
-    const res = await post({ ...base, phone_number_id: '222', line_name: 'Ventas', area: 'ventas', logo_url: 'https://x/l.png' })
+    const res = await post({ ...base, new_line: true, phone_number_id: '222', line_name: 'Ventas', area: 'ventas', logo_url: 'https://x/l.png' })
     expect(res.status).toBe(200)
     expect(state.rows).toHaveLength(2)
     expect(state.rows[1]).toMatchObject({ phone_number_id: '222', is_primary: false, sort_order: 5, line_name: 'Ventas', area: 'ventas', logo_url: 'https://x/l.png' })
@@ -135,6 +135,36 @@ describe('POST /api/whatsapp/config', () => {
     expect((await post({ ...base, access_token: 'nuevo' })).status).toBe(200)
     expect(state.rows).toHaveLength(1)
     expect(state.rows[0]).toMatchObject({ access_token: 'enc:nuevo', is_primary: true })
+  })
+  it('(c) con 1 línea y número distinto la reemplaza conservando metadatos', async () => {
+    state.rows = [line({ line_name: 'Mi línea', area: 'ventas', logo_url: 'u', sort_order: 3 })]
+    expect((await post({ ...base, phone_number_id: '999', access_token: 'otro' })).status).toBe(200)
+    expect(state.rows).toHaveLength(1)
+    expect(state.rows[0]).toMatchObject({ id: 'l1', phone_number_id: '999', access_token: 'enc:otro', is_primary: true, line_name: 'Mi línea', area: 'ventas', logo_url: 'u', sort_order: 3 })
+  })
+  it('(a) con 2+ líneas, el número de una de ellas actualiza esa línea', async () => {
+    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1 })]
+    expect((await post({ ...base, phone_number_id: '222', access_token: 'rot' })).status).toBe(200)
+    expect(state.rows).toHaveLength(2)
+    expect(state.rows[1]).toMatchObject({ access_token: 'enc:rot', is_primary: false })
+  })
+  it('(d) con 2+ líneas y número desconocido: 400 sin escribir', async () => {
+    state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1 })]
+    const res = await post({ ...base, phone_number_id: '777' })
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toContain('line_id')
+    expect(state.rows).toHaveLength(2)
+    expect(state.writes).toBe(0)
+  })
+  it('new_line con line_id: 400 contradictorio', async () => {
+    state.rows = [line({})]
+    expect((await post({ ...base, new_line: true, line_id: 'l1' })).status).toBe(400)
+    expect(state.writes).toBe(0)
+  })
+  it('new_line con número ya existente actualiza esa línea, no duplica', async () => {
+    state.rows = [line({})]
+    expect((await post({ ...base, new_line: true })).status).toBe(200)
+    expect(state.rows).toHaveLength(1)
   })
   it('con line_id edita esa línea', async () => {
     state.rows = [line({}), line({ id: 'l2', phone_number_id: '222', is_primary: false, sort_order: 1 })]

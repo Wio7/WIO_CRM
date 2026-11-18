@@ -220,7 +220,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phone_number_id, waba_id, access_token, verify_token, pin, line_id, line_name, area, logo_url } = body
+    const { phone_number_id, waba_id, access_token, verify_token, pin, line_id, line_name, area, logo_url, new_line } = body
 
     if (!access_token || !phone_number_id) {
       return NextResponse.json(
@@ -241,6 +241,12 @@ export async function POST(request: Request) {
     // Datos opcionales de la línea. Se validan antes de llamar a Meta.
     if (line_id !== undefined && line_id !== null && typeof line_id !== 'string') {
       return NextResponse.json({ error: 'line_id must be a string.' }, { status: 400 })
+    }
+    if (new_line !== undefined && typeof new_line !== 'boolean') {
+      return NextResponse.json({ error: 'new_line debe ser true o false.' }, { status: 400 })
+    }
+    if (new_line === true && line_id) {
+      return NextResponse.json({ error: 'new_line y line_id son contradictorios: usa uno solo.' }, { status: 400 })
     }
     if (line_name !== undefined && (typeof line_name !== 'string' || !line_name.trim() || line_name.length > 80)) {
       return NextResponse.json({ error: 'line_name must be a non-empty string up to 80 characters.' }, { status: 400 })
@@ -326,11 +332,25 @@ export async function POST(request: Request) {
       console.error('Error reading whatsapp_config lines:', linesError)
       return NextResponse.json({ error: 'Failed to read configuration' }, { status: 500 })
     }
-    const existing = line_id
-      ? accountLines.find((l) => l.id === line_id) ?? null
-      : accountLines.find((l) => l.phone_number_id === phone_number_id) ?? null
-    if (line_id && !existing) {
-      return NextResponse.json({ error: 'Line not found.' }, { status: 404 })
+    // Sin line_id: (a) mismo número -> esa línea; (b) 0 líneas -> crea la principal;
+    // (c) 1 línea -> la reemplaza (cambio de número como antes); (d) 2+ y número
+    // desconocido -> 400. Una línea adicional exige `new_line: true`.
+    const sameNumberLine = accountLines.find((l) => l.phone_number_id === phone_number_id) ?? null
+    let existing: LineRow | null
+    if (line_id) {
+      existing = accountLines.find((l) => l.id === line_id) ?? null
+      if (!existing) return NextResponse.json({ error: 'Line not found.' }, { status: 404 })
+    } else if (sameNumberLine) {
+      existing = sameNumberLine
+    } else if (new_line === true || accountLines.length === 0) {
+      existing = null
+    } else if (accountLines.length === 1) {
+      existing = accountLines[0]
+    } else {
+      return NextResponse.json(
+        { error: 'Esta cuenta tiene varias líneas de WhatsApp: indica cuál con line_id (o usa new_line: true para agregar una nueva).' },
+        { status: 400 }
+      )
     }
 
     // The form never shows the verify token back (same as the access
