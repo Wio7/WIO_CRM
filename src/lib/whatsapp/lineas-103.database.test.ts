@@ -251,13 +251,47 @@ describe.sequential("103: lineas de WhatsApp por cuenta", () => {
       await setRestringido(true);
       expect(await puede(U.agente, U.agente, null)).toBe(true);
       expect(await puede(U.agente, U.owner, null)).toBe(false);
-      expect(await puede(U.agenteLegal, U.owner, "legal")).toBe(false);
+      expect(await puede(U.agenteLegal, U.owner, null)).toBe(false);
       expect(await puede(U.agenteLegal, U.agenteLegal, "legal")).toBe(true);
     });
 
     it("un agente sin area no ve una conversacion de un area que no es suya", async () => {
       await setRestringido(false);
       expect(await puede(U.agente, null, "legal")).toBe(false);
+    });
+
+    it("cuenta restringida (tipo Golden): con area solo cuenta el area, no la asignacion", async () => {
+      await db.exec(`UPDATE accounts SET name = 'Golden Habitat'`);
+      await setRestringido(true);
+      await db.exec(`UPDATE profiles SET area = 'cobranzas' WHERE user_id = '${U.agente}'`);
+      try {
+        // gerencia y dueno ven una conversacion legal sin asignar
+        expect(await puede(U.gerencia, null, "legal")).toBe(true);
+        expect(await puede(U.owner, null, "legal")).toBe(true);
+        // admin de legal y agente de legal ven la conversacion legal sin asignar o ajena
+        expect(await puede(U.legal, null, "legal")).toBe(true);
+        expect(await puede(U.agenteLegal, null, "legal")).toBe(true);
+        expect(await puede(U.agenteLegal, U.owner, "legal")).toBe(true);
+        // agente de cobranzas no
+        expect(await puede(U.agente, null, "legal")).toBe(false);
+        expect(await puede(U.agente, U.owner, "legal")).toBe(false);
+        // pero si le esta asignada, la ve
+        expect(await puede(U.agente, U.agente, "legal")).toBe(true);
+        // el area no abre lo de otra area
+        expect(await puede(U.legal, null, "cobranzas")).toBe(false);
+        // area NULL en cuenta restringida: exactamente como antes (055)
+        expect(await puede(U.agenteLegal, null, null)).toBe(false);
+        expect(await puede(U.agenteLegal, U.agenteLegal, null)).toBe(true);
+        expect(await puede(U.legal, null, null)).toBe(false);
+        expect(await puede(U.legal, U.agenteLegal, null)).toBe(true);
+        expect(await puede(U.gerencia, null, null)).toBe(false);
+        expect(await puede(U.adminSinArea, null, null)).toBe(true);
+        expect(await puede(U.owner, U.agente, null)).toBe(true);
+      } finally {
+        await db.exec(`UPDATE profiles SET area = NULL WHERE user_id = '${U.agente}'`);
+        await db.exec(`UPDATE accounts SET name = 'Cuenta'`);
+        await setRestringido(false);
+      }
     });
 
     it("la sobrecarga de 2 argumentos sigue funcionando (politicas vigentes)", async () => {

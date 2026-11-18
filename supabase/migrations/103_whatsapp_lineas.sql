@@ -115,11 +115,16 @@ ALTER TABLE public.account_invitations
 -- ============================================================
 -- 4. can_access_conversation con área
 --
--- Es la lógica de 055 (miembro AND (la suya, o cuenta sin restricción, o
--- dueño / admin general / jefe de ventas / admin de su área)) con una
--- condición más: si la conversación tiene área, el usuario debe ser dueño,
--- administrador sin área, de gerencia, o de esa misma área. Lo asignado al
--- propio usuario se ve siempre. Rol mínimo: viewer (como el default de 055).
+-- Miembro AND una de:
+--   · la conversación es suya (asignada al usuario): siempre;
+--   · la conversación NO tiene área: exactamente la lógica de 055 (cuenta sin
+--     restricción, o dueño / admin general / jefe de ventas / admin de su
+--     área). Todas las conversaciones existentes quedan así (área NULL);
+--   · la conversación TIENE área: solo cuenta el área. Ven todo el dueño, el
+--     administrador sin área y quien tiene el área 'gerencia'; quien tiene
+--     esa misma área la ve esté o no asignada. agents_see_only_assigned NO
+--     se aplica (también vale en cuentas restringidas como Golden, 055).
+-- Rol mínimo: viewer (como el default de 055).
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.can_access_conversation(
   p_account_id UUID,
@@ -135,33 +140,33 @@ AS $$
     AND (
       -- La suya, siempre.
       COALESCE(p_assigned_agent_id = auth.uid(), false)
-      OR (
-        -- Lo de hoy (055).
-        (
-          NOT COALESCE(
-            (SELECT a.agents_see_only_assigned FROM accounts a WHERE a.id = p_account_id),
-            false)
-          OR EXISTS (
-            SELECT 1
-              FROM profiles yo
-              LEFT JOIN profiles suyo
-                ON suyo.account_id = p_account_id
-               AND suyo.user_id = p_assigned_agent_id
-             WHERE yo.account_id = p_account_id
-               AND yo.user_id = auth.uid()
-               AND (
-                 yo.account_role = 'owner'
-                 OR (yo.account_role = 'admin' AND yo.area IS NULL)
-                 OR (yo.account_role = 'admin' AND yo.area = 'ventas'
-                     AND (p_assigned_agent_id IS NULL OR suyo.area = 'ventas' OR suyo.area IS NULL))
-                 OR (yo.account_role = 'admin' AND yo.area IS NOT NULL AND yo.area = suyo.area)
-               )
+      OR CASE
+        WHEN p_area IS NULL THEN
+          -- Sin área: la lógica de hoy (055).
+          (
+            NOT COALESCE(
+              (SELECT a.agents_see_only_assigned FROM accounts a WHERE a.id = p_account_id),
+              false)
+            OR EXISTS (
+              SELECT 1
+                FROM profiles yo
+                LEFT JOIN profiles suyo
+                  ON suyo.account_id = p_account_id
+                 AND suyo.user_id = p_assigned_agent_id
+               WHERE yo.account_id = p_account_id
+                 AND yo.user_id = auth.uid()
+                 AND (
+                   yo.account_role = 'owner'
+                   OR (yo.account_role = 'admin' AND yo.area IS NULL)
+                   OR (yo.account_role = 'admin' AND yo.area = 'ventas'
+                       AND (p_assigned_agent_id IS NULL OR suyo.area = 'ventas' OR suyo.area IS NULL))
+                   OR (yo.account_role = 'admin' AND yo.area IS NOT NULL AND yo.area = suyo.area)
+                 )
+            )
           )
-        )
-        -- El área de la conversación.
-        AND (
-          p_area IS NULL
-          OR EXISTS (
+        ELSE
+          -- Con área: solo el área.
+          EXISTS (
             SELECT 1 FROM profiles yo2
              WHERE yo2.account_id = p_account_id
                AND yo2.user_id = auth.uid()
@@ -172,8 +177,7 @@ AS $$
                  OR yo2.area = p_area
                )
           )
-        )
-      )
+      END
     );
 $$;
 
