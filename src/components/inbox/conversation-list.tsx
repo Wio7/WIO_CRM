@@ -13,6 +13,7 @@ import {
   conversationLineLabel,
   matchesLineFilter,
   showLineUi,
+  validLineSelection,
   type ConversationLineLabel,
 } from "@/lib/inbox/line-filter";
 import { useWhatsappLines } from "@/hooks/use-whatsapp-lines";
@@ -79,7 +80,10 @@ export function ConversationList({
   // Filtro "Línea": solo existe con 2+ líneas. null = Todas.
   const { lines } = useWhatsappLines();
   const lineUi = showLineUi(lines);
-  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
+  const [pickedLineId, setSelectedLineId] = useState<string | null>(null);
+  // Una línea quitada (o una cuenta que vuelve a tener una sola) no deja el
+  // filtro pegado: la selección vigente se deriva de las líneas actuales.
+  const selectedLineId = validLineSelection(pickedLineId, lines);
   const selectedLine = lines.find((l) => l.id === selectedLineId) ?? null;
 
   // Keep the latest callback in a ref so the fetch effect below can

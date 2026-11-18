@@ -72,3 +72,24 @@ export function mediaUrlForLine(url: string, lineId: string | null | undefined):
 export function isWhatsappConnected(lines: LineView[]): boolean {
   return lines.some((l) => !l.disconnected_at && l.status === 'connected')
 }
+
+/** Selección del filtro Línea vigente: null si ya no existe o hay una sola línea. */
+export function validLineSelection(selectedLineId: string | null, lines: LineView[]): string | null {
+  if (!selectedLineId || !showLineUi(lines)) return null
+  return lines.some((l) => l.id === selectedLineId) ? selectedLineId : null
+}
+
+/** Una respuesta que empezó antes de una invalidación no debe pisar lo nuevo. */
+export function isStaleLinesResponse(startedGeneration: number, currentGeneration: number): boolean {
+  return startedGeneration !== currentGeneration
+}
+
+/**
+ * Estado del aviso "WhatsApp no conectado": null = no decidir (cargando, o la
+ * carga falló y no hay líneas en caché: no se avisa por un error transitorio).
+ */
+export function connectionBanner(state: { loading: boolean; error: boolean; lines: LineView[] }): boolean | null {
+  if (state.loading) return null
+  if (state.error && state.lines.length === 0) return null
+  return isWhatsappConnected(state.lines)
+}

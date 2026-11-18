@@ -28,6 +28,7 @@ import {
   AccordionTrigger,
   AccordionContent,
 } from '@/components/ui/accordion';
+import { invalidateWhatsappLines } from '@/hooks/use-whatsapp-lines';
 import { WhatsAppLinesList, type LineEdit } from './whatsapp-lines-list';
 import { toLineRows, type LineRow, type LineView } from '@/lib/whatsapp/lines-view';
 
@@ -126,6 +127,9 @@ export function WhatsAppConfig() {
       const payload = await res.json();
       const fetched: ConfigLine[] = Array.isArray(payload.lines) ? payload.lines : [];
       setLines(fetched);
+      // Alta, edición, baja, reconexión y guardado terminan aquí: la bandeja
+      // debe ver las líneas nuevas sin esperar su caché.
+      invalidateWhatsappLines();
 
       const primary = toLineRows(fetched).find((r) => r.isPrimary)?.id ?? null;
       const nextId =
@@ -396,6 +400,7 @@ export function WhatsAppConfig() {
         return false;
       }
       setLines((prev) => prev.map((l) => (l.id === lineId ? { ...l, ...data.line } : l)));
+      invalidateWhatsappLines();
       toast.success('Línea actualizada.');
       return true;
     } catch (err) {

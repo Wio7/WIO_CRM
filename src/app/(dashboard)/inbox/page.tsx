@@ -11,7 +11,7 @@ import type { Conversation, Message, Contact, ConversationStatus } from "@/types
 import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { useWhatsappLines } from "@/hooks/use-whatsapp-lines";
-import { isWhatsappConnected } from "@/lib/inbox/line-filter";
+import { connectionBanner } from "@/lib/inbox/line-filter";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import {
@@ -181,10 +181,9 @@ export default function InboxPage() {
   // Estado de WhatsApp: conectado si al menos una línea está conectada y
   // no desconectada (las líneas llegan por GET /api/whatsapp/config, sin
   // tokens; antes se leía la única fila de whatsapp_config).
-  const { lines: waLines, loading: waLinesLoading } = useWhatsappLines();
-  const whatsappConnected: boolean | null = waLinesLoading
-    ? null
-    : isWhatsappConnected(waLines);
+  // Si la carga falla y no hay líneas en caché, el aviso queda oculto.
+  const waState = useWhatsappLines();
+  const whatsappConnected: boolean | null = connectionBanner(waState);
 
   // Handle realtime message events
   const handleMessageEvent = useCallback(

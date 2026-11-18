@@ -82,3 +82,43 @@ describe('isWhatsappConnected', () => {
     expect(isWhatsappConnected([mk({ id: 'y', status: 'disconnected' })])).toBe(false)
   })
 })
+
+import { connectionBanner, isStaleLinesResponse, validLineSelection } from './line-filter'
+
+describe('validLineSelection', () => {
+  it('conserva una selección que sigue existiendo', () => {
+    expect(validLineSelection('b', [A, B])).toBe('b')
+  })
+  it('devuelve null si la línea ya no existe o hay una sola línea', () => {
+    expect(validLineSelection('zzz', [A, B])).toBeNull()
+    expect(validLineSelection('b', [A])).toBeNull()
+    expect(validLineSelection(null, [A, B])).toBeNull()
+  })
+  it('un id viejo ya no oculta todo: el filtro validado deja pasar todo', () => {
+    const sel = validLineSelection('zzz', [A, B])
+    expect(matchesLineFilter({ line_id: 'a' }, sel, [A, B])).toBe(true)
+  })
+})
+
+describe('isStaleLinesResponse', () => {
+  it('es vieja si la generación cambió desde que empezó', () => {
+    expect(isStaleLinesResponse(1, 2)).toBe(true)
+    expect(isStaleLinesResponse(2, 2)).toBe(false)
+  })
+})
+
+describe('connectionBanner', () => {
+  it('null (sin aviso) mientras carga', () => {
+    expect(connectionBanner({ loading: true, error: false, lines: [] })).toBeNull()
+  })
+  it('null si falló la carga y no hay líneas en caché', () => {
+    expect(connectionBanner({ loading: false, error: true, lines: [] })).toBeNull()
+  })
+  it('con líneas en caché usa su estado aunque el último intento fallara', () => {
+    expect(connectionBanner({ loading: false, error: true, lines: [A] })).toBe(true)
+  })
+  it('false solo cuando cargó bien y no hay línea conectada', () => {
+    expect(connectionBanner({ loading: false, error: false, lines: [] })).toBe(false)
+    expect(connectionBanner({ loading: false, error: false, lines: [A] })).toBe(true)
+  })
+})

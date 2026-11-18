@@ -83,7 +83,7 @@ describe("destinoDeArea", () => {
   });
 
   it("orden fijo de areas", () => {
-    expect(AREA_KEYS).toEqual(["gerencia", "ventas", "promueve", "legal", "cobranzas", "contabilidad", "administracion", "marketing", "tecnica", "sin_area"]);
+    expect(AREA_KEYS).toEqual(["gerencia", "ventas", "promueve", "legal", "cobranzas", "contabilidad", "administracion", "marketing", "tecnica", "posventa", "sin_area"]);
   });
 });
 
