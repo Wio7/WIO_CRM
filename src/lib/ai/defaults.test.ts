@@ -17,3 +17,11 @@ describe('buildSystemPrompt: citas', () => {
     expect(p).not.toMatch(/CANNOT book|AGENDAR/)
   })
 })
+
+describe('buildSystemPrompt: no repetir', () => {
+  it('pide no repetir saludo ni descripción, en respuestas y borradores', () => {
+    for (const mode of ['auto_reply', 'draft'] as const) {
+      expect(buildSystemPrompt({ userPrompt: 'x', mode })).toMatch(/never repeat a greeting/)
+    }
+  })
+})

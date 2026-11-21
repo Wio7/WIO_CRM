@@ -16,13 +16,15 @@ interface FakeState {
   rpcCalls: string[]
   inserted: Record<string, unknown>[] | null
   deletedFor: string | null
+  /** Todos los fragmentos, para la base chica. */
+  todos?: { id: string; content: string }[]
 }
 
 function makeDb() {
   const state: FakeState = {
     semantic: [],
     fts: [],
-    chunkCount: 5, // account has a non-empty KB by default
+    chunkCount: 50, // account has a non-empty (large) KB by default
     rpcCalls: [],
     inserted: null,
     deletedFor: null,
@@ -39,7 +41,11 @@ function makeDb() {
     from: () => ({
       // retrieveKnowledge's empty-KB count guard.
       select: () => ({
-        eq: () => Promise.resolve({ count: state.chunkCount, error: null }),
+        // El conteo se espera directo; la base chica pide `.limit()` después.
+        eq: () =>
+          Object.assign(Promise.resolve({ count: state.chunkCount, error: null }), {
+            limit: () => Promise.resolve({ data: state.todos ?? [], error: null }),
+          }),
       }),
       delete: () => ({
         eq: (_col: string, val: string) => {
@@ -77,6 +83,20 @@ describe('retrieveKnowledge', () => {
     expect(out).toEqual([])
     expect(h.embedTexts).not.toHaveBeenCalled()
     expect(state.rpcCalls).toEqual([])
+  })
+
+  it('una base chica va completa, sin buscar ni gastar embeddings', async () => {
+    const { db, state } = makeDb()
+    state.chunkCount = 3
+    state.todos = [
+      { id: 'a', content: 'Precios por manzana' },
+      { id: 'b', content: 'Cómo llegar' },
+      { id: 'c', content: 'Formas de pago' },
+    ]
+    const out = await retrieveKnowledge(db, 'acct', { embeddingsApiKey: 'sk-x' }, '¿cuánto cuesta?')
+    expect(out).toEqual(['Precios por manzana', 'Cómo llegar', 'Formas de pago'])
+    expect(state.rpcCalls).toEqual([])
+    expect(h.embedTexts).not.toHaveBeenCalled()
   })
 
   it('uses lexical FTS only when there is no embeddings key', async () => {

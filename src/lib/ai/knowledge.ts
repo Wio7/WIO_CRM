@@ -81,6 +81,9 @@ export async function ingestDocument(
  * any failure (no KB, embedding error, RPC error) degrades to fewer or
  * zero results and never throws into the draft / auto-reply path.
  */
+/** Hasta cuántos fragmentos una base se considera chica y va completa. */
+export const BASE_CHICA = 8
+
 export async function retrieveKnowledge(
   db: SupabaseClient,
   accountId: string,
@@ -95,14 +98,34 @@ export async function retrieveKnowledge(
   // every draft / auto-reply would pay for a query embedding + two RPCs
   // just to get []. One cheap indexed COUNT (head, no rows) instead of a
   // paid embeddings call on the hot path.
+  let total = 0
   try {
     const { count, error } = await db
       .from('ai_knowledge_chunks')
       .select('id', { count: 'exact', head: true })
       .eq('account_id', accountId)
     if (error || !count) return []
+    total = count
   } catch {
     return []
+  }
+
+  // Base chica (lo que carga un asesor desde su app): va entera. Buscar por
+  // palabras con "¿cuánto cuesta?" casi nunca encuentra nada, y la IA
+  // terminaba repitiendo el único párrafo que sabía (Broker Home, 2026-11-21).
+  if (total <= BASE_CHICA) {
+    try {
+      const { data, error } = await db
+        .from('ai_knowledge_chunks')
+        .select('id, content')
+        .eq('account_id', accountId)
+        .limit(BASE_CHICA)
+      if (!error && Array.isArray(data) && data.length) {
+        return (data as { content: string }[]).map((r) => r.content)
+      }
+    } catch {
+      // Sigue por la búsqueda normal.
+    }
   }
 
   const picked = new Map<string, string>() // id → content, preserves order

@@ -91,9 +91,12 @@ function stateKey(): Buffer {
  *
  * Format: base64url(payload).hex(hmac) — payload is `accountId:nonce:issuedAt`.
  */
-export function signState(accountId: string): string {
+export function signState(accountId: string, desdeApp?: DesdeApp): string {
   const nonce = crypto.randomBytes(16).toString('hex');
-  const payload = `${accountId}:${nonce}:${Date.now()}`;
+  // Desde la app de un cliente (Broker Home) viaja también a dónde volver
+  // y quién conectó, firmados: el callback no tiene la cookie del CRM.
+  const extra = desdeApp ? `:${Buffer.from(JSON.stringify(desdeApp)).toString('base64url')}` : '';
+  const payload = `${accountId}:${nonce}:${Date.now()}${extra}`;
   const encoded = Buffer.from(payload).toString('base64url');
   const mac = crypto
     .createHmac('sha256', stateKey())
@@ -109,6 +112,19 @@ export function signState(accountId: string): string {
  * timing the response.
  */
 export function verifyState(state: string | null): string | null {
+  return verifyStateCompleto(state)?.accountId ?? null;
+}
+
+/** Lo que trae un `state` iniciado desde la app de un cliente. */
+export interface DesdeApp {
+  /** A dónde volver (ya validado contra los orígenes permitidos). */
+  volver: string;
+  /** Quién conectó: el dueño o administrador que tocó el botón. */
+  userId: string;
+}
+
+/** Como `verifyState`, pero devuelve también lo que vino de la app. */
+export function verifyStateCompleto(state: string | null): { accountId: string; desdeApp: DesdeApp | null } | null {
   if (!state) return null;
   const [encoded, mac] = state.split('.');
   if (!encoded || !mac) return null;
@@ -128,11 +144,20 @@ export function verifyState(state: string | null): string | null {
   } catch {
     return null;
   }
-  const [accountId, , issuedAtRaw] = payload.split(':');
+  const [accountId, , issuedAtRaw, extraRaw] = payload.split(':');
   const issuedAt = Number(issuedAtRaw);
   if (!accountId || !Number.isFinite(issuedAt)) return null;
   if (Date.now() - issuedAt > STATE_TTL_MS) return null;
-  return accountId;
+  let desdeApp: DesdeApp | null = null;
+  if (extraRaw) {
+    try {
+      const x = JSON.parse(Buffer.from(extraRaw, 'base64url').toString()) as Partial<DesdeApp>;
+      if (typeof x.volver === 'string' && typeof x.userId === 'string') desdeApp = { volver: x.volver, userId: x.userId };
+    } catch {
+      return null;
+    }
+  }
+  return { accountId, desdeApp };
 }
 
 // ------------------------------------------------------------
@@ -143,11 +168,12 @@ export function verifyState(state: string | null): string | null {
 export function buildAuthorizeUrl(
   accountId: string,
   redirectUri: string,
+  desdeApp?: DesdeApp,
 ): string {
   const params = new URLSearchParams({
     client_id: appId(),
     redirect_uri: redirectUri,
-    state: signState(accountId),
+    state: signState(accountId, desdeApp),
     scope: META_OAUTH_SCOPES.join(','),
     response_type: 'code',
   });
