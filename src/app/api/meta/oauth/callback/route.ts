@@ -1,17 +1,61 @@
 import { NextResponse } from 'next/server';
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { requireRole } from '@/lib/auth/account';
 import { getBaseUrl } from '@/lib/auth/invitations';
+import { origenPermitido } from '@/lib/cors';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 import { encrypt } from '@/lib/whatsapp/encryption';
 import {
   exchangeCodeForToken,
   exchangeForLongLivedToken,
   expiryFromNow,
   fetchMe,
+  instagramDePagina,
   listPages,
   META_OAUTH_SCOPES,
+  subscribePageToApp,
   verifyState,
+  verifyStateCompleto,
 } from '@/lib/meta-leads/oauth';
+
+/** "https://broker.wiocompany.com/#/conectar" + meta=ok → "…/#/conectar?meta=ok". */
+export function volverConResultado(volver: string, resultado: Record<string, string>): string {
+  const q = new URLSearchParams(resultado).toString();
+  return `${volver}${volver.includes('?') ? '&' : '?'}${q}`;
+}
+
+/**
+ * Desde la app nadie va a la pantalla de Configuración a encender cada
+ * página: se activan todas para mensajes (Messenger e Instagram) al volver.
+ */
+async function activarPaginas(db: SupabaseClient, accountId: string, pages: { id: string; access_token: string }[]) {
+  for (const page of pages) {
+    try {
+      const { messaging } = await subscribePageToApp(page.id, page.access_token);
+      const ig = await instagramDePagina(page.id, page.access_token).catch(() => null);
+      await db
+        .from('meta_pages')
+        .update({
+          is_active: true,
+          subscribed_at: new Date().toISOString(),
+          messaging_at: messaging ? new Date().toISOString() : null,
+          instagram_id: ig?.id ?? null,
+          instagram_username: ig?.username ?? null,
+          last_error: null,
+        })
+        .eq('account_id', accountId)
+        .eq('page_id', page.id);
+    } catch (err) {
+      await db
+        .from('meta_pages')
+        .update({ last_error: err instanceof Error ? err.message : 'No se pudo activar la página.' })
+        .eq('account_id', accountId)
+        .eq('page_id', page.id);
+    }
+  }
+}
 
 /**
  * GET /api/meta/oauth/callback
@@ -31,8 +75,17 @@ import {
 export async function GET(request: Request) {
   const base = getBaseUrl(request);
   const settingsUrl = `${base}/settings?tab=meta-leads`;
+
+  // ¿Viene de la app de un cliente? Entonces el `state` firmado trae a dónde
+  // volver y quién conectó (esa app no tiene la cookie del CRM).
+  const estado = verifyStateCompleto(new URL(request.url).searchParams.get('state'));
+  const desdeApp =
+    estado?.desdeApp && origenPermitido(new URL(estado.desdeApp.volver).origin) ? estado.desdeApp : null;
+
   const fail = (msg: string) =>
-    NextResponse.redirect(`${settingsUrl}&error=${encodeURIComponent(msg)}`);
+    desdeApp
+      ? NextResponse.redirect(volverConResultado(desdeApp.volver, { meta_error: msg }))
+      : NextResponse.redirect(`${settingsUrl}&error=${encodeURIComponent(msg)}`);
 
   try {
     const url = new URL(request.url);
@@ -44,17 +97,38 @@ export async function GET(request: Request) {
     const code = url.searchParams.get('code');
     if (!code) return fail('Meta no devolvió un código de autorización.');
 
-    // The session is the authority on which account we're writing to.
-    // `state` must agree — it's what proves this callback belongs to a
-    // flow we started (CSRF), and a mismatch means the browser switched
-    // accounts mid-flow, so we refuse rather than cross-write tenants.
-    const { supabase, accountId, userId } = await requireRole('admin');
-    const stateAccountId = verifyState(url.searchParams.get('state'));
-    if (!stateAccountId) {
-      return fail('La sesión de conexión expiró o no es válida. Intenta de nuevo.');
-    }
-    if (stateAccountId !== accountId) {
-      return fail('La conexión se inició desde otra cuenta. Vuelve a intentarlo.');
+    let supabase: SupabaseClient;
+    let accountId: string;
+    let userId: string;
+    if (desdeApp && estado) {
+      // El `state` lo firmó el servidor para un dueño/administrador con
+      // sesión, vence a los 10 min y no se puede alterar. Igual se vuelve a
+      // comprobar que esa persona sigue siendo dueña o administradora.
+      supabase = supabaseAdmin();
+      accountId = estado.accountId;
+      userId = desdeApp.userId;
+      const { data: perfil } = await supabase
+        .from('profiles')
+        .select('account_role')
+        .eq('user_id', userId)
+        .eq('account_id', accountId)
+        .maybeSingle();
+      if (!perfil || !['owner', 'admin'].includes(perfil.account_role as string)) {
+        return fail('Solo el dueño o un administrador puede conectar Facebook e Instagram.');
+      }
+    } else {
+      // The session is the authority on which account we're writing to.
+      // `state` must agree — it's what proves this callback belongs to a
+      // flow we started (CSRF), and a mismatch means the browser switched
+      // accounts mid-flow, so we refuse rather than cross-write tenants.
+      ({ supabase, accountId, userId } = await requireRole('admin'));
+      const stateAccountId = verifyState(url.searchParams.get('state'));
+      if (!stateAccountId) {
+        return fail('La sesión de conexión expiró o no es válida. Intenta de nuevo.');
+      }
+      if (stateAccountId !== accountId) {
+        return fail('La conexión se inició desde otra cuenta. Vuelve a intentarlo.');
+      }
     }
 
     const redirectUri = `${base}/api/meta/oauth/callback`;
@@ -105,6 +179,18 @@ export async function GET(request: Request) {
         if (error.code === '23505') claimed.push(page.name || page.id);
         else console.error('[meta oauth callback] page upsert failed:', page.id, error);
       }
+    }
+
+    if (desdeApp) {
+      const propias = pages.filter((p) => !claimed.includes(p.name || p.id));
+      await activarPaginas(supabase, accountId, propias);
+      return NextResponse.redirect(
+        volverConResultado(desdeApp.volver, {
+          meta: 'ok',
+          paginas: String(propias.length),
+          ...(claimed.length ? { omitidas: claimed.join(', ') } : {}),
+        }),
+      );
     }
 
     const params = new URLSearchParams({ connected: '1', pages: String(pages.length) });
