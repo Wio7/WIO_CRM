@@ -183,3 +183,29 @@ describe("middleware — app de Cobranzas", () => {
     expect(res.headers.get("location")).toBe("https://app.test/dashboard");
   });
 });
+
+describe("middleware — rutas de las apps con Bearer", () => {
+  const rutas = [
+    "/api/whatsapp/templates/disponibles",
+    "/api/whatsapp/profile-photo",
+    "/api/whatsapp/calidad",
+    "/api/whatsapp/plantillas",
+    "/api/whatsapp/send",
+  ];
+  it("dejan pasar el preflight y la sesión Bearer sin cookie", async () => {
+    for (const ruta of rutas) {
+      const pre = await middleware(new NextRequest(`https://app.test${ruta}`, { method: "OPTIONS" }));
+      expect(pre.status, `${ruta} preflight`).not.toBe(401);
+      const conBearer = await middleware(
+        new NextRequest(`https://app.test${ruta}`, { headers: { authorization: "Bearer token-de-la-app" } }),
+      );
+      expect(conBearer.status, `${ruta} bearer`).not.toBe(401);
+    }
+  });
+  it("el resto de /api/whatsapp sigue cerrado sin sesión", async () => {
+    for (const ruta of ["/api/whatsapp/config", "/api/whatsapp/templates/sync", "/api/whatsapp/broadcast"]) {
+      const res = await middleware(new NextRequest(`https://app.test${ruta}`, { headers: { authorization: "Bearer x" } }));
+      expect(res.status, ruta).toBe(401);
+    }
+  });
+});
