@@ -92,8 +92,18 @@ export async function middleware(request: NextRequest) {
 
   // The Golden App calls send/media from another origin with a Bearer
   // access token instead of cookies (and its CORS preflight carries no
-  // credentials at all). Those two routes verify the token themselves.
-  const bearerRoutes = ['/api/whatsapp/send', '/api/whatsapp/media/']
+  // credentials at all). These routes verify the token themselves.
+  // Hasta 2026-11-21 solo estaban send y media: las plantillas del chat
+  // (templates/disponibles) y la foto del negocio (profile-photo) daban 401
+  // desde la app de Broker Home antes de llegar a la ruta.
+  const bearerRoutes = [
+    '/api/whatsapp/send',
+    '/api/whatsapp/media/',
+    '/api/whatsapp/templates/disponibles',
+    '/api/whatsapp/profile-photo',
+    '/api/whatsapp/calidad',
+    '/api/whatsapp/plantillas',
+  ]
   const viaBearer =
     (request.method === 'OPTIONS' ||
       request.headers.get('authorization')?.startsWith('Bearer ')) &&
