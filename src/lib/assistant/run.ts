@@ -15,6 +15,7 @@ import { loadAiConfig } from "@/lib/ai/config";
 import { AI_PROVIDER_DEFAULT_MODEL } from "@/lib/ai/defaults";
 import { esCuentaDeGolden } from "@/lib/golden/catalogo";
 import { HERRAMIENTAS, ejecutarHerramienta, marcaDeLaCuenta, type Accion, type ContextoAsistente } from "./tools";
+import { paraElModelo } from "./recorte";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 const VUELTAS_MAXIMAS = 5;
@@ -71,6 +72,11 @@ export function instrucciones(ctx: ContextoAsistente, marca = "Golden Habitat"):
     "- Usa SIEMPRE las herramientas para cualquier dato del CRM. Nunca inventes clientes, montos, fechas ni citas.",
     "- Si una búsqueda devuelve varios candidatos, pregunta cuál es. Si no encuentra a nadie, dilo.",
     "- Antes de decir que no puedes con algo, mira si alguna herramienta lo cubre. Si te preguntan por precios, casas, lotes, departamentos o qué ofrecerle a un cliente, eso está en `catalogo` y NO depende de qué clientes tenga asignados quien pregunta: nunca contestes 'no tengo clientes visibles' a una pregunta sobre lo que vendemos.",
+    "Lotes, precios y cuotas (aquí un error le cuesta una venta o un reclamo al asesor):",
+    "- Estado o precio de un lote concreto, o qué queda de cierto metraje o manzana: `buscar_lote`. Da el precio EXACTO del lote (lista = financiado, contado y promoción si la hay), nunca el 'desde' del proyecto.",
+    "- Cualquier cuota o simulación: `simular_cuotas`. NO hagas tú la cuenta, ni siquiera una división. Si la herramienta pide el plazo o la TEA, pregúntaselo a la persona; no lo supongas.",
+    "- Di los supuestos que devuelva la simulación (inicial mínima, plazo del proyecto) y, si hay promoción, las dos cuotas.",
+    "- Un lote 'sin_confirmar' no se ofrece ni se cuenta como libre. Uno 'solicitado' está en proceso de separación por otro asesor.",
     "- Un dueño o un jefe casi nunca tiene conversaciones a su nombre: las llevan sus asesores. Si una herramienta te avisa de que amplió a todo el equipo, di eso, no digas que no hay clientes.",
     "- Contesta lo que te preguntaron. Ofrece como mucho UNA cosa más, y sólo si viene a cuento.",
     "Cómo leer el interés de un cliente (esto importa: aquí se pierden ventas):",
@@ -185,7 +191,7 @@ export async function conversar(opciones: {
       mensajes.push({
         role: "tool",
         tool_call_id: llamada.id,
-        content: JSON.stringify(datos).slice(0, 12_000),
+        content: paraElModelo(datos),
       });
     }
   }

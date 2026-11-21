@@ -9,7 +9,38 @@ import {
 } from "./catalogo";
 
 const APP = "https://golden.example";
-const SB = "https://app-db.example";
+
+/**
+ * WioSuite (la base del propio CRM), falsa: `catalogo` = filas de gh_catalogo,
+ * `lotes[proyecto]` = filas de gh_lotes_estado, `fallan` = proyectos cuya
+ * lectura da error. Corta en 1000 filas por página, como PostgREST.
+ */
+const base = vi.hoisted(() => ({
+  catalogo: [] as unknown[],
+  lotes: {} as Record<string, unknown[]>,
+  fallan: [] as string[],
+  paginas: [] as string[],
+}));
+vi.mock("@/lib/flows/admin-client", () => ({
+  supabaseAdmin: () => ({
+    from: () => {
+      let proyecto = "";
+      const q = {
+        select: () => q,
+        eq: (_c: string, v: string) => ((proyecto = v), q),
+        order: () => q,
+        range: async (a: number, b: number) => {
+          base.paginas.push(`${proyecto}:${a}`);
+          if (base.fallan.includes(proyecto)) return { data: null, error: { message: "caida" } };
+          const todas = base.lotes[proyecto] ?? [];
+          return { data: todas.slice(a, Math.min(b + 1, a + 1000)), error: null };
+        },
+        then: (ok: (v: unknown) => unknown) => ok({ data: base.catalogo, error: null }),
+      };
+      return q;
+    },
+  }),
+}));
 
 /** El catálogo tal como lo publica la app, recortado a lo justo. */
 function publicado(): CatalogoDeGolden {
@@ -64,15 +95,15 @@ function conRespuestas(mapa: Record<string, unknown>) {
 beforeEach(() => {
   olvidarCatalogo();
   process.env.GOLDEN_APP_URL = APP;
-  process.env.GOLDEN_SUPABASE_URL = SB;
-  process.env.GOLDEN_SUPABASE_ANON_KEY = "anon-test";
+  base.catalogo = [];
+  base.lotes = {};
+  base.fallan = [];
+  base.paginas = [];
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.GOLDEN_APP_URL;
-  delete process.env.GOLDEN_SUPABASE_URL;
-  delete process.env.GOLDEN_SUPABASE_ANON_KEY;
   olvidarCatalogo();
 });
 
@@ -88,85 +119,83 @@ describe("catalogoDeGolden", () => {
   });
 
   it("el precio que edita marketing gana sobre el compilado", async () => {
-    vi.stubGlobal(
-      "fetch",
-      conRespuestas({
-        "catalogo-ia.json": publicado(),
-        gh_catalogo: [
-          {
-            id: "colinas-1",
-            nombre: null,
-            estado: "ACTIVE",
-            precio_desde: 31900,
-            precio_hasta: null,
-            moneda: "PEN",
-            descripcion: null,
-            financiamiento: null,
-            area_rango: null,
-            oculto: false,
-          },
-        ],
-        gh_lotes_estado: [],
-      }),
-    );
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": publicado() }));
+    base.catalogo = [
+      { id: "colinas-1", nombre: null, estado: "ACTIVE", precio_desde: 31900, precio_hasta: null, moneda: "PEN",
+        descripcion: null, financiamiento: null, area_rango: null, oculto: false },
+    ];
     const c = await catalogoDeGolden();
     expect(c?.proyectos[0].comercial.precioDesde).toBe(31900);
   });
 
-  it("el estado vivo de un lote gana sobre el del plano", async () => {
-    vi.stubGlobal(
-      "fetch",
-      conRespuestas({
-        "catalogo-ia.json": publicado(),
-        gh_catalogo: [],
-        gh_lotes_estado: [
-          { proyecto: "colinas-1", lote: "A-01", estado: "vendido", precio: null, moneda: null },
-        ],
-      }),
-    );
-    const c = await catalogoDeGolden();
-    const lotes = c!.proyectos[0].lotes!;
+  it("el estado y el precio vivos de un lote ganan sobre el plano; bloqueado es vendido", async () => {
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": publicado() }));
+    base.lotes["colinas-1"] = [
+      { lote: "A-01", estado: "vendido", precio: null, moneda: null },
+      { lote: "A-02", estado: "libre", precio: 41000, moneda: "PEN" },
+      { lote: "B-01", estado: "bloqueado", precio: null, moneda: null },
+    ];
+    const lotes = (await catalogoDeGolden())!.proyectos[0].lotes!;
     expect(lotes.find((l) => l.id === "A-01")!.estado).toBe("vendido");
-    // El que la base no menciona conserva el estado del plano.
-    expect(lotes.find((l) => l.id === "A-02")!.estado).toBe("libre");
+    expect(lotes.find((l) => l.id === "A-02")).toMatchObject({ estado: "libre", precio: 41000 });
+    expect(lotes.find((l) => l.id === "B-01")!.estado).toBe("vendido");
+  });
+
+  it("lee TODOS los lotes aunque pasen de 1000 (pagina por proyecto)", async () => {
+    const p = publicado();
+    p.proyectos[0].lotes = Array.from({ length: 1500 }, (_, i) => ({ id: `L-${i}`, mz: "L", area: 100, estado: "libre" }));
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": p }));
+    base.lotes["colinas-1"] = p.proyectos[0].lotes!.map((l) => ({ lote: l.id, estado: "vendido", precio: null, moneda: null }));
+    const lotes = (await catalogoDeGolden())!.proyectos[0].lotes!;
+    expect(lotes.filter((l) => l.estado === "vendido")).toHaveLength(1500);
+    expect(base.paginas).toEqual(["colinas-1:0", "colinas-1:1000"]);
+  });
+
+  it("si no se pudo leer la base, los lotes quedan sin confirmar, nunca libres", async () => {
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": publicado() }));
+    base.fallan = ["colinas-1"];
+    const lotes = (await catalogoDeGolden())!.proyectos[0].lotes!;
+    expect(lotes.every((l) => l.estado === "sin_confirmar")).toBe(true);
+  });
+
+  it("un proyecto sin ninguna fila (no activado) usa el estado del plano, como la app", async () => {
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": publicado() }));
+    const lotes = (await catalogoDeGolden())!.proyectos[0].lotes!;
+    expect(lotes.filter((l) => l.estado === "libre")).toHaveLength(3);
+  });
+
+  it("una promocion no se ofrece en un lote que la base ya no tiene libre", async () => {
+    const p = publicado();
+    p.proyectos[0].lotes![0].promocion = { contado: 20000, financiado: 30000 };
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": p }));
+    base.lotes["colinas-1"] = [{ lote: "A-01", estado: "separado", precio: null, moneda: null }];
+    const l = (await catalogoDeGolden())!.proyectos[0].lotes!.find((x) => x.id === "A-01")!;
+    expect(l.promocion).toBeNull();
   });
 
   it("un proyecto oculto en el panel no se le ofrece a nadie", async () => {
-    vi.stubGlobal(
-      "fetch",
-      conRespuestas({
-        "catalogo-ia.json": publicado(),
-        gh_catalogo: [
-          {
-            id: "colinas-1",
-            nombre: null,
-            estado: "ACTIVE",
-            precio_desde: null,
-            precio_hasta: null,
-            moneda: null,
-            descripcion: null,
-            financiamiento: null,
-            area_rango: null,
-            oculto: true,
-          },
-        ],
-        gh_lotes_estado: [],
-      }),
-    );
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": publicado() }));
+    base.catalogo = [
+      { id: "colinas-1", nombre: null, estado: "ACTIVE", precio_desde: null, precio_hasta: null, moneda: null,
+        descripcion: null, financiamiento: null, area_rango: null, oculto: true },
+    ];
     expect((await catalogoDeGolden())!.proyectos).toHaveLength(0);
   });
 
   it("no vuelve a pedirlo todo en cada mensaje", async () => {
-    const fetchMock = conRespuestas({
-      "catalogo-ia.json": publicado(),
-      gh_catalogo: [],
-      gh_lotes_estado: [],
-    });
+    const fetchMock = conRespuestas({ "catalogo-ia.json": publicado() });
     vi.stubGlobal("fetch", fetchMock);
     await catalogoDeGolden();
     const primeras = fetchMock.mock.calls.length;
     await catalogoDeGolden();
     expect(fetchMock.mock.calls.length).toBe(primeras);
+  });
+
+  it("un fallo no se guarda 10 minutos: el siguiente mensaje lo vuelve a intentar", async () => {
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": null }));
+    expect(await catalogoDeGolden()).toBeNull();
+    vi.stubGlobal("fetch", conRespuestas({ "catalogo-ia.json": publicado() }));
+    expect(await catalogoDeGolden()).not.toBeNull();
   });
 });
 

@@ -6,7 +6,7 @@ import { buildConversationContext } from '@/lib/ai/context'
 import { retrieveKnowledge } from '@/lib/ai/knowledge'
 import { generateReply } from '@/lib/ai/generate'
 import { buildSystemPrompt } from '@/lib/ai/defaults'
-import { catalogoDeGolden, catalogoEnTexto, sinCatalogoPegado } from '@/lib/golden/catalogo'
+import { catalogoDeGolden, catalogoEnTexto, esCuentaDeGolden, sinCatalogoPegado } from '@/lib/golden/catalogo'
 import { latestUserMessage } from '@/lib/ai/query'
 import { AiError } from '@/lib/ai/types'
 
@@ -100,7 +100,8 @@ export async function POST(request: Request) {
     // El borrador que se le sugiere al asesor sale del mismo catálogo que
     // usa la IA al contestar sola: si no, el CRM le propondría un precio y
     // el chat automático le diría otro.
-    const catalogo = await catalogoDeGolden()
+    // Solo Golden: a otra cuenta no le llegan los precios ni los lotes de Golden.
+    const catalogo = esCuentaDeGolden(accountId) ? await catalogoDeGolden() : null
     const systemPrompt = buildSystemPrompt({
       userPrompt: catalogo ? sinCatalogoPegado(config.systemPrompt) : config.systemPrompt,
       mode: 'draft',

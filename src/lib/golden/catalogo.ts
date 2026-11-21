@@ -13,14 +13,18 @@
 //     `/catalogo-ia.json`. Cambia cuando se despliega, que es justo
 //     cuando cambia también para el cliente.
 //   · Lo que cambia TODOS LOS DÍAS —el precio que edita marketing y qué
-//     lote sigue libre— se lee en vivo del Supabase de la app
-//     (`gh_catalogo`, `gh_lotes_estado`), con su clave pública: es
-//     información que ya es pública en la vitrina.
+//     lote sigue libre— se lee en vivo de WioSuite, la base del propio CRM
+//     (`gh_catalogo`, `gh_lotes_estado`), desde 2026-11-15. Antes se leía de
+//     la base vieja de la app (GOLDEN_SUPABASE_URL), que quedó congelada.
+//     Si esa lectura falla, los lotes quedan "sin_confirmar": ofrecer como
+//     libre un lote vendido es el peor error que puede cometer la IA.
 //
 // Si la app no contesta, esto devuelve null y la IA sigue con lo que
 // tenga escrito a mano en sus instrucciones. Quedarse sin catálogo no
 // puede significar quedarse sin contestar.
 // ============================================================
+
+import { supabaseAdmin } from "@/lib/flows/admin-client";
 
 /** La única cuenta que vende este catálogo. A las demás no debe llegarles. */
 const CUENTA_DE_GOLDEN = 'd74b5dfd-2999-4e2c-9a0e-10b3d540898b';
@@ -29,14 +33,35 @@ export function esCuentaDeGolden(accountId: string): boolean {
   return accountId === CUENTA_DE_GOLDEN;
 }
 
-/** Cuánto se reutiliza lo leído. Un chat no necesita el dato al segundo. */
-const VIGENCIA_MS = 10 * 60_000;
+/**
+ * Cuánto se reutiliza lo leído. El estado de un lote cambia durante el día
+ * (separaciones), así que dos minutos; si algo falló, solo medio minuto.
+ */
+const VIGENCIA_MS = 2 * 60_000;
+const VIGENCIA_CON_FALLA_MS = 30_000;
+/** PostgREST devuelve como mucho 1000 filas por consulta. */
+const PAGINA = 1000;
 
 export interface LoteDelPlano {
   id: string;
   mz: string | null;
   area: number | null;
+  /** libre | solicitado | separado | vendido | sin_confirmar (no se pudo leer la base). */
   estado: string;
+  /** Precio de lista (financiado). La base manda sobre el plano. */
+  precio?: number | null;
+  precioContado?: number | null;
+  moneda?: string | null;
+  /** Precio especial; solo vale mientras el lote siga libre. */
+  promocion?: { contado: number | null; financiado: number | null } | null;
+}
+
+/** Reglas para simular cuotas de lote, tal como las publica la app. */
+export interface FinanciamientoLotes {
+  inicial: number | null;
+  mesesLote: number | null;
+  mesesCasa: number | null;
+  sinIntereses: boolean;
 }
 
 export interface ProyectoDeGolden {
@@ -59,6 +84,7 @@ export interface ProyectoDeGolden {
     rangoAreas: string | null;
     unidades: number | null;
     dormitorios: number | null;
+    financiamientoLotes?: FinanciamientoLotes | null;
   };
   puntosVenta: string[];
   lotes: LoteDelPlano[] | null;
@@ -89,14 +115,13 @@ interface FilaCatalogo {
 
 /** Una fila de `gh_lotes_estado`: el estado vigente de un lote. */
 interface FilaLote {
-  proyecto: string;
   lote: string;
   estado: string;
   precio: number | null;
   moneda: string | null;
 }
 
-let cache: { cuando: number; datos: CatalogoDeGolden | null } | null = null;
+let cache: { cuando: number; datos: CatalogoDeGolden | null; vigencia: number } | null = null;
 let enVuelo: Promise<CatalogoDeGolden | null> | null = null;
 
 const sinBarra = (u: string) => u.replace(/\/+$/, "");
@@ -119,35 +144,75 @@ async function pedirJson<T>(url: string, cabeceras: Record<string, string> = {})
   }
 }
 
-/** Lo que edita marketing, por id de proyecto. */
-async function catalogoPublicado(): Promise<Map<string, FilaCatalogo>> {
-  const url = process.env.GOLDEN_SUPABASE_URL?.trim();
-  const key = process.env.GOLDEN_SUPABASE_ANON_KEY?.trim();
-  if (!url || !key) return new Map();
-  const filas = await pedirJson<FilaCatalogo[]>(
-    `${sinBarra(url)}/rest/v1/gh_catalogo?select=id,nombre,estado,precio_desde,precio_hasta,moneda,descripcion,financiamiento,area_rango,oculto`,
-    { apikey: key, Authorization: `Bearer ${key}` },
-  );
-  return new Map((filas ?? []).map((f) => [f.id, f]));
+/** Lo que edita marketing, por id de proyecto. `null` si no se pudo leer. */
+async function catalogoPublicado(): Promise<Map<string, FilaCatalogo> | null> {
+  try {
+    const { data, error } = await supabaseAdmin()
+      .from("gh_catalogo")
+      .select("id,nombre,estado,precio_desde,precio_hasta,moneda,descripcion,financiamiento,area_rango,oculto");
+    if (error) {
+      console.error("[golden catálogo] gh_catalogo:", error.message);
+      return null;
+    }
+    return new Map(((data ?? []) as FilaCatalogo[]).map((f) => [f.id, f]));
+  } catch (err) {
+    console.error("[golden catálogo] gh_catalogo:", err);
+    return null;
+  }
 }
 
-/** El estado vigente de cada lote, por proyecto. */
-async function estadosDeLotes(): Promise<Map<string, Map<string, FilaLote>>> {
-  const url = process.env.GOLDEN_SUPABASE_URL?.trim();
-  const key = process.env.GOLDEN_SUPABASE_ANON_KEY?.trim();
-  const mapa = new Map<string, Map<string, FilaLote>>();
-  if (!url || !key) return mapa;
-  // PostgREST corta en 1000 filas por defecto y hay más de mil lotes: sin
-  // el rango, los últimos proyectos se quedarían con el estado del plano.
-  const filas = await pedirJson<FilaLote[]>(
-    `${sinBarra(url)}/rest/v1/gh_lotes_estado?select=proyecto,lote,estado,precio,moneda`,
-    { apikey: key, Authorization: `Bearer ${key}`, Range: "0-9999" },
-  );
-  for (const f of filas ?? []) {
-    if (!mapa.has(f.proyecto)) mapa.set(f.proyecto, new Map());
-    mapa.get(f.proyecto)!.set(f.lote, f);
+/**
+ * El estado vigente de los lotes de UN proyecto, todas las páginas.
+ * `null` si no se pudo leer: quien llama no debe suponer que están libres.
+ */
+async function estadosDeProyecto(proyecto: string): Promise<Map<string, FilaLote> | null> {
+  const mapa = new Map<string, FilaLote>();
+  try {
+    for (let desde = 0; ; desde += PAGINA) {
+      const { data, error } = await supabaseAdmin()
+        .from("gh_lotes_estado")
+        .select("lote,estado,precio,moneda")
+        .eq("proyecto", proyecto)
+        .order("lote")
+        .range(desde, desde + PAGINA - 1);
+      if (error) {
+        console.error(`[golden catálogo] gh_lotes_estado ${proyecto}:`, error.message);
+        return null;
+      }
+      for (const f of (data ?? []) as FilaLote[]) mapa.set(f.lote, f);
+      if (!data || data.length < PAGINA) return mapa;
+    }
+  } catch (err) {
+    console.error(`[golden catálogo] gh_lotes_estado ${proyecto}:`, err);
+    return null;
   }
-  return mapa;
+}
+
+/** Como la app (normalizarFila): un lote bloqueado se ve vendido. */
+const estadoVisible = (estado: string) => {
+  const e = (estado ?? "").trim().toLowerCase();
+  return e === "bloqueado" ? "vendido" : e;
+};
+
+/**
+ * Funde el plano con la base. Sin lectura (`null`): todos sin confirmar.
+ * Sin ninguna fila: proyecto no activado, vale el plano (lo que ve el cliente).
+ */
+function fusionarLotes(lotes: LoteDelPlano[], estados: Map<string, FilaLote> | null): LoteDelPlano[] {
+  if (estados === null) return lotes.map((l) => ({ ...l, estado: "sin_confirmar", promocion: null }));
+  if (estados.size === 0) return lotes;
+  return lotes.map((l) => {
+    const f = estados.get(l.id);
+    const estado = f ? estadoVisible(f.estado) : l.estado;
+    return {
+      ...l,
+      estado,
+      precio: f?.precio ?? l.precio ?? null,
+      moneda: f?.moneda || l.moneda || null,
+      // Una promoción es para un lote que se puede vender hoy.
+      promocion: estado === "libre" ? (l.promocion ?? null) : null,
+    };
+  });
 }
 
 /**
@@ -155,9 +220,10 @@ async function estadosDeLotes(): Promise<Map<string, Map<string, FilaLote>>> {
  * se puede leer (sin `GOLDEN_APP_URL`, la app caída, la red cortada).
  */
 export async function catalogoDeGolden(): Promise<CatalogoDeGolden | null> {
-  if (cache && Date.now() - cache.cuando < VIGENCIA_MS) return cache.datos;
+  if (cache && Date.now() - cache.cuando < cache.vigencia) return cache.datos;
   if (enVuelo) return enVuelo;
 
+  let completo = true;
   enVuelo = (async () => {
     const app = process.env.GOLDEN_APP_URL?.trim();
     if (!app) return null;
@@ -165,12 +231,19 @@ export async function catalogoDeGolden(): Promise<CatalogoDeGolden | null> {
     const base = await pedirJson<CatalogoDeGolden>(`${sinBarra(app)}/catalogo-ia.json`);
     if (!base?.proyectos?.length) return null;
 
-    const [publicado, lotesVivos] = await Promise.all([catalogoPublicado(), estadosDeLotes()]);
+    const conLotes = base.proyectos.filter((p) => p.lotes?.length).map((p) => p.id);
+    const [publicadoLeido, ...estadosLeidos] = await Promise.all([
+      catalogoPublicado(),
+      ...conLotes.map((id) => estadosDeProyecto(id)),
+    ]);
+    const publicado = publicadoLeido ?? new Map<string, FilaCatalogo>();
+    const lotesVivos = new Map(conLotes.map((id, i) => [id, estadosLeidos[i]]));
+    if (publicadoLeido === null || estadosLeidos.some((e) => e === null)) completo = false;
 
     const proyectos = base.proyectos
       .map((p) => {
         const vivo = publicado.get(p.id);
-        const estados = lotesVivos.get(p.id);
+        const estados = lotesVivos.get(p.id) ?? null;
         return {
           ...p,
           // Lo que marketing haya tocado manda sobre lo que se compiló.
@@ -185,14 +258,7 @@ export async function catalogoDeGolden(): Promise<CatalogoDeGolden | null> {
             rangoAreas: vivo?.area_rango || p.comercial.rangoAreas,
           },
           // El plano dice qué lotes hay; la base, cuáles siguen libres.
-          // Un proyecto sin filas en la base es uno que nunca se activó:
-          // vale el estado del plano, que es lo que ve el cliente.
-          lotes: p.lotes
-            ? p.lotes.map((l) => {
-                const f = estados?.get(l.id);
-                return f ? { ...l, estado: f.estado } : l;
-              })
-            : null,
+          lotes: p.lotes ? fusionarLotes(p.lotes, estados) : null,
           oculto: Boolean(vivo?.oculto),
         };
       })
@@ -205,7 +271,9 @@ export async function catalogoDeGolden(): Promise<CatalogoDeGolden | null> {
 
   try {
     const datos = await enVuelo;
-    cache = { cuando: Date.now(), datos };
+    // Un fallo no se guarda: el siguiente mensaje lo vuelve a intentar. Uno a
+    // medias (algún proyecto sin leer) se guarda poco.
+    cache = datos ? { cuando: Date.now(), datos, vigencia: completo ? VIGENCIA_MS : VIGENCIA_CON_FALLA_MS } : null;
     return datos;
   } finally {
     enVuelo = null;
@@ -300,7 +368,9 @@ export function catalogoEnTexto(catalogo: CatalogoDeGolden): string {
       lineas.push(`Cuotas desde ${dinero(c.cuotaDesde, c.moneda)}${c.plazoMeses ? ` a ${c.plazoMeses} meses` : ""}.`);
     }
 
-    if (p.lotes?.length) {
+    if (p.lotes?.length && p.lotes.every((l) => l.estado === "sin_confirmar")) {
+      lineas.push("Lotes: disponibilidad sin confirmar ahora mismo. No digas cuántos quedan ni ofrezcas uno; que lo confirme el asesor.");
+    } else if (p.lotes?.length) {
       const libres = p.lotes.filter((l) => l.estado === "libre");
       lineas.push(
         `Lotes: ${libres.length} libres de ${p.lotes.length}${
@@ -327,7 +397,7 @@ export function catalogoEnTexto(catalogo: CatalogoDeGolden): string {
       lineas.push(
         enVenta.length
           ? `Unidades en venta: ${enVenta
-              .map((u) => `${u.nombre} (${u.area} m²${u.precio ? `, ${dinero(u.precio)}` : ""})`)
+              .map((u) => `${u.nombre} (${u.area} m²${u.precio ? `, ${dinero(u.precio, c.moneda)}` : ""})`)
               .join("; ")}.`
           : "No quedan unidades en venta.",
       );
