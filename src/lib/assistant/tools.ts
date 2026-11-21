@@ -18,6 +18,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { diasLibres } from "@/lib/agenda/slots";
 import { catalogoDeGolden, esCuentaDeGolden } from "@/lib/golden/catalogo";
+import { buscarLotes, dinero, simularCuotas, type ArgsBuscarLote, type ArgsSimular } from "./lotes";
+import { fechaLima, nombreCoincide, sumarSaldos, type FilaSaldo } from "./coincidencias";
 import { nombreDeCita } from "@/lib/agenda/tipos";
 import { notifyClient } from "@/lib/push/send";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
@@ -143,15 +145,41 @@ export const HERRAMIENTAS = [
     function: {
       name: "buscar_lote",
       description:
-        "Busca lotes concretos en los planos de la app: por proyecto, por manzana o por metraje, y dice cuáles están libres. Para contestar '¿qué te queda de 200 m²?' o '¿está libre el A-12?'.",
+        "Lotes concretos de los planos, con su estado EN VIVO (libre, solicitado, separado, vendido) y su PRECIO EXACTO (lista/financiado, al contado y promoción). Úsala para '¿está libre el A-12?', '¿cuánto cuesta el lote B-3?', '¿qué te queda de 200 m²?', '¿cuántos separados hay en Colinas II?'. Devuelve el recuento por estado.",
       parameters: {
         type: "object",
         properties: {
-          proyecto: { type: "string", description: "Nombre del proyecto, p. ej. 'Colinas II'. Vacío = todos." },
+          proyecto: { type: "string", description: "Nombre del proyecto, p. ej. 'Colinas II' o 'Colinas 2'. Vacío = todos." },
           manzana: { type: "string", description: "Letra de la manzana, p. ej. 'K'." },
           area_minima: { type: "number", description: "Metros cuadrados mínimos." },
           area_maxima: { type: "number", description: "Metros cuadrados máximos." },
-          lote: { type: "string", description: "Código exacto de un lote, p. ej. 'A-12'." },
+          lote: { type: "string", description: "Código del lote como lo digan: 'A-12', 'A12', 'Mz A lote 12'." },
+          estado: {
+            type: "string",
+            enum: ["libre", "solicitado", "separado", "vendido", "todos"],
+            description: "Qué lotes listar. Sin esto lista los libres (o el lote pedido, esté como esté).",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "simular_cuotas",
+      description:
+        "CALCULA cuotas: nunca hagas tú la cuenta. Lote: (precio financiado del lote − inicial) / meses, sin intereses, con la inicial y el plazo del proyecto si no los dicen, y también la cuota con precio de promoción si la hay. Casa o departamento: crédito con cuota fija y la TEA que diga el asesor (si no la dice, la herramienta la pide). Úsala para '¿cuánto pagaría al mes por el A-12?', 'simúlame con S/ 5,000 de inicial a 36 meses'.",
+      parameters: {
+        type: "object",
+        properties: {
+          proyecto: { type: "string", description: "Proyecto, si hace falta para ubicar el lote o para una casa/depa." },
+          lote: { type: "string", description: "Código del lote ('A-12', 'Mz A lote 12')." },
+          precio: { type: "number", description: "Solo si el asesor da otro precio." },
+          inicial: { type: "number", description: "Monto de la inicial, si lo dicen." },
+          inicial_porcentaje: { type: "number", description: "Inicial en %, para casa/depa." },
+          meses: { type: "number", description: "Número de cuotas, si lo dicen." },
+          tea: { type: "number", description: "TEA en % (solo casa/depa), la que diga el asesor." },
         },
         additionalProperties: false,
       },
@@ -398,7 +426,9 @@ async function buscarContacto(
     return { varios: [] };
   }
   const lista = (data ?? []) as ContactoEncontrado[];
-  if (lista.length === 1) return { uno: lista[0] };
+  // Un solo resultado vale si se buscó por teléfono/DNI o si el nombre
+  // coincide de verdad: "Ana" no puede ser "Mariana" sin preguntar.
+  if (lista.length === 1 && (digitos.length >= 6 || nombreCoincide(lista[0].name, q))) return { uno: lista[0] };
   // Si el nombre coincide exacto con uno, ése.
   const exacto = lista.find((c) => (c.name ?? "").toLowerCase() === q.toLowerCase());
   if (exacto) return { uno: exacto };
@@ -528,7 +558,7 @@ async function misClientes(
 
   // Quién debe: una sola consulta a la vista de saldos.
   const ids = filas.map((f) => f.contact?.id).filter(Boolean) as string[];
-  const deuda = new Map<string, { atrasadas: number; monto: number; moneda: string }>();
+  const deuda = new Map<string, ReturnType<typeof sumarSaldos>>();
   const sinCobranzas = await sinAccesoCobranzas(ctx);
   if (sinCobranzas && args.filtro === "atrasados") {
     return { datos: { error: SIN_ACCESO_COBRANZAS } };
@@ -536,15 +566,14 @@ async function misClientes(
   if (ids.length && !sinCobranzas) {
     const { data: saldos } = await ctx.db
       .from("payment_plan_balances")
-      .select("contact_id, overdue_count, overdue_amount, currency")
+      .select("contact_id, overdue_count, overdue_amount, pending_amount, next_due_date, currency")
       .in("contact_id", ids);
-    for (const s of saldos ?? []) {
-      deuda.set(s.contact_id as string, {
-        atrasadas: Number(s.overdue_count) || 0,
-        monto: Number(s.overdue_amount) || 0,
-        moneda: s.currency as string,
-      });
+    // Un cliente con dos lotes tiene dos planes: se suman, por moneda.
+    const porContacto = new Map<string, FilaSaldo[]>();
+    for (const s of (saldos ?? []) as (FilaSaldo & { contact_id: string })[]) {
+      porContacto.set(s.contact_id, [...(porContacto.get(s.contact_id) ?? []), s]);
     }
+    for (const [id, filas] of porContacto) deuda.set(id, sumarSaldos(filas));
   }
 
   if (args.filtro === "atrasados") filas = filas.filter((f) => (deuda.get(f.contact?.id ?? "")?.atrasadas ?? 0) > 0);
@@ -585,7 +614,12 @@ async function misClientes(
           cuando: f.last_message_at ? cuandoLima(f.last_message_at) : null,
           cerrada: f.status === "closed",
           ...(sinCobranzas ? { cobranza: SIN_ACCESO_COBRANZAS } : {}),
-          ...(d ? { cuotas_atrasadas: d.atrasadas, monto_atrasado: `${d.moneda} ${d.monto.toFixed(2)}` } : {}),
+          ...(d
+            ? {
+                cuotas_atrasadas: d.atrasadas,
+                monto_atrasado: d.por_moneda.filter((m) => m.atrasado > 0).map((m) => dinero(m.atrasado, m.moneda)).join(" + ") || null,
+              }
+            : {}),
         };
       }),
     },
@@ -906,6 +940,7 @@ async function catalogo(ctx: ContextoAsistente, args: { buscar?: string }): Prom
   };
 
   let proyectos = datos.proyectos;
+  let noEncontrado = false;
   if (buscado) {
     const tipos = porTipo[buscado];
     proyectos = tipos
@@ -916,13 +951,21 @@ async function catalogo(ctx: ContextoAsistente, args: { buscar?: string }): Prom
             .includes(buscado),
         );
     // Una búsqueda que no encuentra nada no puede dejar al modelo sin
-    // datos: es cuando empieza a inventar.
-    if (!proyectos.length) proyectos = datos.proyectos;
+    // datos: es cuando empieza a inventar. Pero se le dice, para que no
+    // atribuya a "Villa X" los datos de otro proyecto.
+    if (!proyectos.length) {
+      proyectos = datos.proyectos;
+      noEncontrado = true;
+    }
   }
 
   return {
     datos: {
       leido_de: "la Golden App",
+      ...(noEncontrado
+        ? { aviso: `No hay ningún proyecto que se llame "${args.buscar}". Abajo están TODOS: dilo así, no le atribuyas estos datos.` }
+        : {}),
+      nota: "precio_desde es del proyecto, no de un lote: para el precio de un lote usa buscar_lote, y para cuotas simular_cuotas.",
       proyectos: proyectos.map((p) => {
         const c = p.comercial;
         const libres = p.lotes?.filter((l) => l.estado === "libre") ?? null;
@@ -931,25 +974,27 @@ async function catalogo(ctx: ContextoAsistente, args: { buscar?: string }): Prom
           tipo: p.categoria === "residencial" ? "departamentos" : p.categoria,
           estado: p.estado === "ACTIVE" ? "en venta" : p.estado === "SOLD_OUT" ? "vendido" : p.estado,
           donde: [p.donde.direccion, p.donde.ciudad].filter(Boolean).join(", "),
-          precio_desde: c.precioDesde ? `${c.moneda === "PEN" ? "S/" : c.moneda} ${c.precioDesde.toLocaleString("es-PE")}` : null,
+          precio_desde: c.precioDesde ? dinero(c.precioDesde, c.moneda) : null,
           area: c.rangoAreas,
           dormitorios: c.dormitorios,
           financiamiento: c.financiamiento,
-          inicial_desde: c.inicialDesde,
-          cuota_desde: c.cuotaDesde,
+          inicial_desde: c.inicialDesde != null ? dinero(c.inicialDesde, c.moneda) : null,
+          cuota_desde: c.cuotaDesde != null ? dinero(c.cuotaDesde, c.moneda) : null,
           plazo_meses: c.plazoMeses,
-          ...(libres
-            ? {
-                lotes_libres: libres.length,
-                lotes_totales: p.lotes!.length,
-                tamanos_libres: [...new Set(libres.map((l) => Math.round(l.area ?? 0)).filter(Boolean))].sort((a, b) => a - b),
-              }
-            : {}),
+          ...(libres && p.lotes!.every((l) => l.estado === "sin_confirmar")
+            ? { lotes_libres: null, aviso_lotes: "No se pudo leer la disponibilidad ahora: no digas cuántos quedan." }
+            : libres
+              ? {
+                  lotes_libres: libres.length,
+                  lotes_totales: p.lotes!.length,
+                  tamanos_libres: [...new Set(libres.map((l) => Math.round(l.area ?? 0)).filter(Boolean))].sort((a, b) => a - b),
+                }
+              : {}),
           ...(p.unidades
             ? {
                 unidades_en_venta: p.unidades
                   .filter((u) => u.disponible)
-                  .map((u) => `${u.nombre}: ${u.area} m²${u.precio ? `, S/ ${u.precio.toLocaleString("es-PE")}` : ""}`),
+                  .map((u) => `${u.nombre}: ${u.area} m²${u.precio ? `, ${dinero(u.precio, c.moneda)}` : ""}`),
               }
             : {}),
           por_que_gusta: p.puntosVenta.slice(0, 5),
@@ -1005,14 +1050,13 @@ async function resumenDeConversacion(ctx: ContextoAsistente, args: { cliente: st
   const ventanaMin = desde ? Math.round(24 * 60 - (Date.now() - desde) / 60_000) : null;
 
   const sinCobranzas = await sinAccesoCobranzas(ctx);
-  const [{ data: saldo }, { data: citas }] = await Promise.all([
+  const [{ data: planes }, { data: citas }] = await Promise.all([
     sinCobranzas
       ? Promise.resolve({ data: null })
       : ctx.db
           .from("payment_plan_balances")
           .select("currency, pending_amount, overdue_count, next_due_date")
-          .eq("contact_id", uno.id)
-          .maybeSingle(),
+          .eq("contact_id", uno.id),
     ctx.db
       .from("appointments")
       .select("starts_at, kind, status")
@@ -1023,6 +1067,8 @@ async function resumenDeConversacion(ctx: ContextoAsistente, args: { cliente: st
       .limit(2),
   ]);
 
+  // Dos lotes = dos planes: antes .maybeSingle() fallaba y el cliente salía sin deuda.
+  const saldo = planes?.length ? sumarSaldos(planes as FilaSaldo[]) : null;
   const quien = conv.assigned_agent_id ? await nombresDelEquipo(ctx) : new Map<string, string>();
 
   return {
@@ -1044,9 +1090,10 @@ async function resumenDeConversacion(ctx: ContextoAsistente, args: { cliente: st
       ...(sinCobranzas ? { cobranza: SIN_ACCESO_COBRANZAS } : { ya_es_cliente: Boolean(saldo) }),
       ...(saldo
         ? {
-            por_pagar: `${saldo.currency === "PEN" ? "S/" : saldo.currency} ${Number(saldo.pending_amount ?? 0).toFixed(2)}`,
-            cuotas_atrasadas: saldo.overdue_count ?? 0,
-            proxima_cuota: saldo.next_due_date ?? null,
+            planes: saldo.planes,
+            por_pagar: saldo.por_moneda.map((m) => dinero(m.pendiente, m.moneda)).join(" + "),
+            cuotas_atrasadas: saldo.atrasadas,
+            proxima_cuota: saldo.proximo_vencimiento,
           }
         : {}),
       citas: (citas ?? []).map((c) => `${nombreDeCita(c.kind as string)} el ${cuandoLima(c.starts_at as string)}`),
@@ -1062,7 +1109,7 @@ async function resumenDeConversacion(ctx: ContextoAsistente, args: { cliente: st
 /** Lotes concretos del plano: por proyecto, manzana, metraje o código. */
 async function buscarLote(
   ctx: ContextoAsistente,
-  args: { proyecto?: string; manzana?: string; area_minima?: number; area_maxima?: number; lote?: string },
+  args: ArgsBuscarLote,
 ): Promise<Resultado> {
   if (!esCuentaDeGolden(ctx.accountId)) {
     return {
@@ -1074,48 +1121,25 @@ async function buscarLote(
   }
   const datos = await catalogoDeGolden();
   if (!datos) return { datos: { error: "No se pudo leer el catálogo de la app." } };
-
-  const buscadoProyecto = (args.proyecto ?? "").trim().toLowerCase();
-  const mz = (args.manzana ?? "").trim().toUpperCase().replace(/^MZ\.?\s*/i, "");
-  const codigo = (args.lote ?? "").trim().toUpperCase();
-
-  const proyectos = datos.proyectos.filter(
-    (p) =>
-      p.lotes?.length &&
-      (!buscadoProyecto ||
-        `${p.nombre} ${p.nombreCorto ?? ""}`.toLowerCase().includes(buscadoProyecto)),
-  );
-
-  const encontrados: Record<string, unknown>[] = [];
-  for (const p of proyectos) {
-    for (const l of p.lotes ?? []) {
-      if (codigo && l.id.toUpperCase() !== codigo) continue;
-      if (mz && (l.mz ?? "").toUpperCase() !== mz) continue;
-      if (args.area_minima && (l.area ?? 0) < args.area_minima) continue;
-      if (args.area_maxima && (l.area ?? 0) > args.area_maxima) continue;
-      encontrados.push({
-        proyecto: p.nombreCorto || p.nombre,
-        lote: l.id,
-        manzana: l.mz,
-        area: l.area,
-        estado: l.estado,
-        precio_del_proyecto_desde: p.comercial.precioDesde,
-        moneda: p.comercial.moneda,
-      });
-    }
-  }
-
-  const libres = encontrados.filter((l) => l.estado === "libre");
+  const r = buscarLotes(datos, args);
   return {
     datos: {
-      total_encontrados: encontrados.length,
-      libres: libres.length,
-      // Una lista larga no la va a leer nadie por WhatsApp: se dan los
-      // primeros y el recuento, que es lo que se usa para contestar.
-      lotes: (libres.length ? libres : encontrados).slice(0, 25),
-      nota: "El estado de un lote cambia durante el día: confírmalo con el asesor antes de prometérselo a nadie.",
+      ...r,
+      ...((r.por_estado.sin_confirmar ?? 0) > 0
+        ? { aviso: "Hay lotes sin confirmar (no se pudo leer la base): no digas que están libres." }
+        : {}),
+      nota: "El estado se leyó hace menos de 2 minutos; puede cambiar en el día. Precio de lista = financiado.",
     },
   };
+}
+
+async function simularCuotasDe(ctx: ContextoAsistente, args: ArgsSimular): Promise<Resultado> {
+  if (!esCuentaDeGolden(ctx.accountId)) {
+    return { datos: { error: "Esta cuenta no tiene lista de precios ni reglas de financiamiento cargadas en la app." } };
+  }
+  const datos = await catalogoDeGolden();
+  if (!datos) return { datos: { error: "No se pudo leer el catálogo de la app." } };
+  return { datos: simularCuotas(datos, args) };
 }
 
 /** A quién hay que rescatar hoy: escribieron y se callaron. */
@@ -1427,7 +1451,8 @@ async function clienteDeLaCita(
 }
 
 async function agendarCita(ctx: ContextoAsistente, args: ArgsCita): Promise<Resultado> {
-  const cuando = Date.parse(args.inicio);
+  // Sin zona, es hora de Lima (no la del servidor).
+  const cuando = fechaLima(args.inicio);
   if (Number.isNaN(cuando)) return { datos: { error: "La fecha y hora no se entendieron." } };
   if (cuando < Date.now() - 5 * 60_000) return { datos: { error: "Esa hora ya pasó." } };
 
@@ -1574,7 +1599,9 @@ export async function ejecutarHerramienta(
       case "resumen_de_conversacion":
         return await resumenDeConversacion(ctx, args as { cliente: string });
       case "buscar_lote":
-        return await buscarLote(ctx, args as { proyecto?: string; manzana?: string; area_minima?: number; area_maxima?: number; lote?: string });
+        return await buscarLote(ctx, args as ArgsBuscarLote);
+      case "simular_cuotas":
+        return await simularCuotasDe(ctx, args as ArgsSimular);
       case "quien_no_contesta":
         return await quienNoContesta(ctx);
       case "embudo":
