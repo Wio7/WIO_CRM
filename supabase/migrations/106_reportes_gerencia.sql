@@ -452,8 +452,8 @@ BEGIN
   IF a IS NULL OR NOT (
        public.is_owner_or_gerencia(a)
        OR EXISTS (SELECT 1 FROM public.profiles p
-                   WHERE p.user_id = auth.uid() AND p.account_id = a AND p.area IN ('cobranzas', 'contabilidad'))) THEN
-    RAISE EXCEPTION 'Solo gerencia, cobranzas o contabilidad' USING ERRCODE = '42501';
+                   WHERE p.user_id = auth.uid() AND p.account_id = a AND p.area IN ('cobranzas', 'contabilidad', 'administracion'))) THEN
+    RAISE EXCEPTION 'Solo gerencia, cobranzas, contabilidad o administracion' USING ERRCODE = '42501';
   END IF;
   IF p_month IS NULL THEN
     RAISE EXCEPTION 'Mes no válido' USING ERRCODE = '22023';
@@ -722,8 +722,9 @@ DECLARE
   v_inv jsonb; v_porasesor jsonb;
 BEGIN
   SELECT account_id INTO a FROM public.profiles WHERE user_id = auth.uid();
-  IF a IS NULL OR NOT public.is_owner_or_gerencia(a) THEN
-    RAISE EXCEPTION 'Solo gerencia' USING ERRCODE = '42501';
+  -- Gerencia y el equipo de marketing (cualquier rol) ven el embudo.
+  IF a IS NULL OR NOT (public.is_owner_or_gerencia(a) OR public.marketing_role(a) IS NOT NULL) THEN
+    RAISE EXCEPTION 'Solo gerencia o marketing' USING ERRCODE = '42501';
   END IF;
   v_next := (v_mes + interval '1 month')::date;
 
