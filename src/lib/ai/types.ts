@@ -45,6 +45,8 @@ export interface GenerateResult {
    * agenda real es el servidor.
    */
   cita?: { cuandoIso: string; tipo: string } | null
+  /** Etapa que el modelo marcó con `[[ETAPA:…]]` (migración 100). */
+  etapa?: 'seguimiento' | 'perdido' | null
 }
 
 /**

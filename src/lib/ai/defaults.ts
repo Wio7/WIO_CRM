@@ -33,6 +33,12 @@ export const HANDOFF_SENTINEL = '[[HANDOFF]]'
  */
 export const AGENDA_SENTINEL_RE = /\[\[AGENDAR:\s*([^|\]]+?)\s*(?:\|\s*([a-zA-Zá-úÁ-Ú]+)\s*)?\]\]/
 
+/**
+ * Sello de etapa del cliente (migración 100): `[[ETAPA:seguimiento]]` o
+ * `[[ETAPA:perdido]]`. Solo se le enseña a las cuentas con etapas.
+ */
+export const ETAPA_SENTINEL_RE = /\[\[ETAPA:\s*([a-zA-Z_]+)\s*\]\]/i
+
 /** Cap on generated reply length — keeps WhatsApp replies short and
  *  bounds token spend on the caller's own key. */
 export const MAX_OUTPUT_TOKENS = 1024
@@ -84,6 +90,8 @@ export function buildSystemPrompt(args: {
    * evita que la IA derive en cuanto le preguntan cuánto cuesta algo.
    */
   catalogo?: string | null
+  /** La cuenta usa etapas del cliente (100): la IA puede marcar seguimiento o perdido. */
+  etapas?: boolean
 }): string {
   const { userPrompt, mode, knowledge } = args
   const parts: string[] = [
@@ -132,6 +140,26 @@ export function buildSystemPrompt(args: {
           `${HANDOFF_SENTINEL} para que le llegue el aviso a un asesor.`,
     ]
     parts.push(pasos.join('\n'))
+  }
+
+  if (mode === 'auto_reply' && args.etapas) {
+    parts.push(
+      'CUSTOMER STAGE: the team tracks each customer in stages. Add [[ETAPA:seguimiento]] at the very end of your message the first time the customer shows real buying interest (says what size, budget, payment method or zone they want, gives their name to be contacted, or asks to visit). ' +
+        'Add [[ETAPA:perdido]] only if the customer clearly says they are not interested, already bought elsewhere, or asks not to be contacted. ' +
+        'Never add any other stage; booked visits are tracked automatically. The customer never sees these marks.',
+    )
+  }
+
+  if (mode === 'auto_reply' && !args.agenda) {
+    // Sin agenda la IA no puede reservar nada. En Broker Home (2026-11-15)
+    // decía "Queda registrado para el lunes a las 10:00" y "Te agendo para
+    // las 6pm" sin que existiera ninguna cita: el cliente iba y no había nadie.
+    parts.push(
+      'APPOINTMENTS: you CANNOT book, register or confirm appointments, visits or calls yourself. ' +
+        'Never say or imply that a visit, call or meeting is booked, scheduled, registered, confirmed or "agendado" ("queda registrado", "te agendo", "listo, te espero"). ' +
+        'Instead, ask which day and time suits the customer, tell them the team will confirm that time with them, and add ' +
+        `${HANDOFF_SENTINEL} at the very end so an advisor gets the alert and confirms it.`,
+    )
   }
 
   if (userPrompt && userPrompt.trim()) {

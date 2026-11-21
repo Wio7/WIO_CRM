@@ -17,6 +17,35 @@ export function fechaLima(texto: string): number {
   return Date.parse(conZona ? completa : `${completa}-05:00`);
 }
 
+/**
+ * Qué cambio pide el asesor en una cita: hora nueva (no en el pasado),
+ * cumplida o cancelada. Al menos uno de los tres.
+ */
+export function pedidoDeCambioDeCita(
+  args: { nuevo_inicio?: string; estado?: string },
+  ahora: number,
+): { inicio: number | null; estado: "cumplida" | "cancelada" | null } | { error: string } {
+  const estado = args.estado === "cumplida" || args.estado === "cancelada" ? args.estado : null;
+  let inicio: number | null = null;
+  if (args.nuevo_inicio) {
+    inicio = fechaLima(args.nuevo_inicio);
+    if (Number.isNaN(inicio)) return { error: "La nueva fecha y hora no se entendieron." };
+    if (inicio < ahora - 5 * 60_000) return { error: "Esa hora ya pasó." };
+  }
+  if (inicio === null && !estado) return { error: "Dime la nueva hora, o si la cita se cumplió o se canceló." };
+  return { inicio, estado };
+}
+
+/**
+ * La cita que se corrige: la próxima pendiente; si todas ya pasaron, la más
+ * reciente (para marcar "vino" al día siguiente). Las citas vienen en orden.
+ */
+export function elegirCitaACorregir<T extends { starts_at: string }>(citas: T[], ahora: number): T | null {
+  if (!citas.length) return null;
+  const proxima = citas.find((c) => Date.parse(c.starts_at) >= ahora - 2 * 3600_000);
+  return proxima ?? citas[citas.length - 1];
+}
+
 const plano = (s: string) =>
   s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 

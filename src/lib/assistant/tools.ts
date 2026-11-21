@@ -19,7 +19,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { diasLibres } from "@/lib/agenda/slots";
 import { catalogoDeGolden, esCuentaDeGolden } from "@/lib/golden/catalogo";
 import { buscarLotes, dinero, simularCuotas, type ArgsBuscarLote, type ArgsSimular } from "./lotes";
-import { fechaLima, nombreCoincide, sumarSaldos, type FilaSaldo } from "./coincidencias";
+import { elegirCitaACorregir, fechaLima, nombreCoincide, pedidoDeCambioDeCita, sumarSaldos, type FilaSaldo } from "./coincidencias";
+import { claveDeEtapa, cuentaConEtapas, moverEtapa, NOMBRE_DE_ETAPA, type ClaveDeEtapa } from "@/lib/etapas/mover";
 import { nombreDeCita } from "@/lib/agenda/tipos";
 import { notifyClient } from "@/lib/push/send";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
@@ -34,7 +35,7 @@ export interface ContextoAsistente {
 }
 
 export interface Accion {
-  tipo: "cita_agendada" | "nota_guardada";
+  tipo: "cita_agendada" | "nota_guardada" | "cita_cambiada" | "etapa_movida";
   detalle: string;
 }
 
@@ -311,6 +312,44 @@ export const HERRAMIENTAS = [
           notas: { type: "string" },
         },
         required: ["cliente", "inicio", "tipo"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cambiar_cita",
+      description:
+        "Corrige una cita que ya está en la agenda: la cambia de hora, la marca como cumplida (el cliente vino o se hizo la llamada) o la cancela. Toma la próxima cita pendiente de ese cliente. Úsala cuando digan 'cámbiale la cita a Karina para las 5', 'Jhonson ya vino', 'cancela la visita de Elsa'.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente: { type: "string", description: "Nombre, teléfono o DNI del cliente de la cita." },
+          nuevo_inicio: {
+            type: "string",
+            description: "Nueva fecha y hora en ISO 8601 con zona de Lima (2026-11-23T17:00:00-05:00). Solo para cambiar la hora.",
+          },
+          estado: { type: "string", enum: ["cumplida", "cancelada"], description: "Solo si vino o se canceló." },
+        },
+        required: ["cliente"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "mover_etapa",
+      description:
+        "Cambia la etapa de un cliente en el embudo: nuevo, contestó, en seguimiento, agendó visita, visitó, separó/compró o perdido. Úsala cuando la persona lo pida o lo cuente ('Karina ya separó', 'Ronald no le interesa', 'pásalo a seguimiento'). Contestó, agendó y visitó se marcan solos con los mensajes y las citas; esto es para corregir o para lo que solo sabe el equipo.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente: { type: "string", description: "Nombre, teléfono o DNI." },
+          etapa: { type: "string", description: "La etapa como la diga la persona: 'separó', 'compró', 'perdido', 'seguimiento', 'visitó'…" },
+        },
+        required: ["cliente", "etapa"],
         additionalProperties: false,
       },
     },
@@ -1572,6 +1611,93 @@ async function agregarNota(ctx: ContextoAsistente, args: { cliente: string; text
   };
 }
 
+interface ArgsCambiarCita {
+  cliente: string;
+  nuevo_inicio?: string;
+  estado?: string;
+}
+
+/** Corrige la próxima cita pendiente de un cliente (hora, cumplida o cancelada). */
+async function cambiarCita(ctx: ContextoAsistente, args: ArgsCambiarCita): Promise<Resultado> {
+  const pedido = pedidoDeCambioDeCita(args, Date.now());
+  if ("error" in pedido) return { datos: { error: pedido.error } };
+
+  const { uno, varios } = await buscarContacto(ctx, args.cliente);
+  if (!uno) return { datos: candidatos(varios) };
+
+  // La próxima pendiente; si no hay, la última pendiente que ya pasó (para
+  // marcar "vino" el día después).
+  const { data: citas, error } = await ctx.db
+    .from("appointments")
+    .select("id, starts_at, kind, status")
+    .eq("account_id", ctx.accountId)
+    .eq("contact_id", uno.id)
+    .eq("status", "agendada")
+    .order("starts_at", { ascending: true });
+  if (error) return { datos: { error: `No se pudo leer la agenda: ${error.message}` } };
+  const cita = elegirCitaACorregir((citas ?? []) as { id: string; starts_at: string }[], Date.now());
+  if (!cita) return { datos: { error: `${uno.name || uno.phone} no tiene citas pendientes en la agenda.` } };
+
+  const cambios: Record<string, unknown> = {};
+  if (pedido.inicio) cambios.starts_at = new Date(pedido.inicio).toISOString();
+  if (pedido.estado) cambios.status = pedido.estado;
+  const { data: hecha, error: errCambio } = await ctx.db
+    .from("appointments")
+    .update(cambios)
+    .eq("id", cita.id)
+    .eq("account_id", ctx.accountId)
+    .select("id, starts_at, kind, status")
+    .maybeSingle();
+  if (errCambio) {
+    return {
+      datos: {
+        error: (errCambio as { code?: string }).code === "23505"
+          ? "A esa hora ya hay otra cita de la misma persona del equipo."
+          : `No se pudo cambiar: ${errCambio.message}`,
+      },
+    };
+  }
+  if (!hecha) return { datos: { error: "No tienes permiso para cambiar esa cita." } };
+
+  const quien = uno.name || uno.phone;
+  const texto =
+    pedido.estado === "cumplida"
+      ? `${quien}: cita marcada como cumplida`
+      : pedido.estado === "cancelada"
+        ? `${quien}: cita cancelada`
+        : `${quien}: ${nombreDeCita(hecha.kind as string)} pasada al ${cuandoLima(hecha.starts_at as string)}`;
+  return {
+    datos: {
+      ok: true,
+      cliente: quien,
+      cita: `${nombreDeCita(hecha.kind as string)} el ${cuandoLima(hecha.starts_at as string)}`,
+      estado: hecha.status,
+      ...(pedido.inicio ? { aviso: "Al cliente no se le avisó solo: díselo por su chat." } : {}),
+    },
+    accion: { tipo: "cita_cambiada", detalle: texto },
+  };
+}
+
+/** Mueve a un cliente de etapa (a mano: puede retroceder). */
+async function moverEtapaDe(ctx: ContextoAsistente, args: { cliente: string; etapa: string }): Promise<Resultado> {
+  const clave = claveDeEtapa(args.etapa);
+  if (!clave) {
+    return { datos: { error: "No entendí la etapa. Puede ser: nuevo, contestó, seguimiento, agendó, visitó, separó/compró o perdido." } };
+  }
+  if (!(await cuentaConEtapas(ctx.db, ctx.accountId))) {
+    return { datos: { error: "Esta cuenta todavía no tiene etapas de clientes configuradas." } };
+  }
+  const { uno, varios } = await buscarContacto(ctx, args.cliente);
+  if (!uno) return { datos: candidatos(varios) };
+  const quedo = await moverEtapa(ctx.db, { accountId: ctx.accountId, contactId: uno.id, clave, forzar: true });
+  if (!quedo) return { datos: { error: "No se pudo mover la etapa." } };
+  const nombre = NOMBRE_DE_ETAPA[quedo as ClaveDeEtapa] ?? quedo;
+  return {
+    datos: { ok: true, cliente: uno.name || uno.phone, etapa: nombre },
+    accion: { tipo: "etapa_movida", detalle: `${uno.name || uno.phone} → ${nombre}` },
+  };
+}
+
 /** Ejecuta una herramienta por nombre. Nunca lanza: devuelve el error como dato. */
 export async function ejecutarHerramienta(
   ctx: ContextoAsistente,
@@ -1620,6 +1746,10 @@ export async function ejecutarHerramienta(
         return await cuotasAtrasadas(ctx);
       case "agregar_nota":
         return await agregarNota(ctx, args as { cliente: string; texto: string });
+      case "cambiar_cita":
+        return await cambiarCita(ctx, args as unknown as ArgsCambiarCita);
+      case "mover_etapa":
+        return await moverEtapaDe(ctx, args as { cliente: string; etapa: string });
       default:
         return { datos: { error: `Herramienta desconocida: ${nombre}` } };
     }

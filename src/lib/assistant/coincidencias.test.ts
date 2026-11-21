@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 
-import { fechaLima, nombreCoincide, sumarSaldos } from "./coincidencias";
+import { elegirCitaACorregir, fechaLima, nombreCoincide, pedidoDeCambioDeCita, sumarSaldos } from "./coincidencias";
 
 describe("fechaLima", () => {
   it("una hora sin zona es hora de Lima, no UTC", () => {
@@ -44,5 +44,31 @@ describe("sumarSaldos", () => {
       ],
       proximo_vencimiento: "2026-11-30",
     });
+  });
+});
+
+describe("cambiar una cita", () => {
+  const ahora = Date.parse("2026-11-21T12:00:00-05:00");
+  it("hora nueva en hora de Lima, o estado", () => {
+    expect(pedidoDeCambioDeCita({ nuevo_inicio: "2026-11-23T17:00:00" }, ahora)).toEqual({
+      inicio: Date.parse("2026-11-23T17:00:00-05:00"),
+      estado: null,
+    });
+    expect(pedidoDeCambioDeCita({ estado: "cumplida" }, ahora)).toEqual({ inicio: null, estado: "cumplida" });
+  });
+  it("no acepta horas pasadas ni pedidos vacíos", () => {
+    expect(pedidoDeCambioDeCita({ nuevo_inicio: "2026-11-20T10:00:00" }, ahora)).toEqual({ error: "Esa hora ya pasó." });
+    expect("error" in pedidoDeCambioDeCita({}, ahora)).toBe(true);
+    expect("error" in pedidoDeCambioDeCita({ estado: "borrada" }, ahora)).toBe(true);
+  });
+  it("elige la próxima pendiente, o la última si todas pasaron", () => {
+    const citas = [
+      { id: "a", starts_at: "2026-11-19T10:00:00-05:00" },
+      { id: "b", starts_at: "2026-11-23T10:00:00-05:00" },
+      { id: "c", starts_at: "2026-11-25T10:00:00-05:00" },
+    ];
+    expect(elegirCitaACorregir(citas, ahora)?.id).toBe("b");
+    expect(elegirCitaACorregir(citas.slice(0, 1), ahora)?.id).toBe("a");
+    expect(elegirCitaACorregir([], ahora)).toBeNull();
   });
 });
