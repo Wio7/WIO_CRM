@@ -9,6 +9,7 @@ import { engineSendText } from '@/lib/flows/meta-send'
 import { notifyConversation } from '@/lib/push/send'
 import { diasLibres, equipoQuePuedeAgendar } from '@/lib/agenda/slots'
 import { agendaEnTexto, esTipoDeCita, reservarCita } from '@/lib/agenda/reservar'
+import { cuentaConEtapas, moverEtapa } from '@/lib/etapas/mover'
 import { catalogoDeGolden, catalogoEnTexto, esCuentaDeGolden, sinCatalogoPegado } from '@/lib/golden/catalogo'
 
 /** Respuestas por chat cuando la cuenta pide que la IA nunca se calle. */
@@ -126,6 +127,7 @@ export async function dispatchInboundToAiReply(
     // casas, los lotes y los departamentos.
     const catalogo = esCuentaDeGolden(accountId) ? await catalogoDeGolden() : null
     const instrucciones = catalogo ? sinCatalogoPegado(config.systemPrompt) : config.systemPrompt
+    const etapas = await cuentaConEtapas(db, accountId)
 
     const systemPrompt = buildSystemPrompt({
       userPrompt: [instrucciones, ficha].filter(Boolean).join('\n\n'),
@@ -134,11 +136,18 @@ export async function dispatchInboundToAiReply(
       agenda,
       nuncaSeCalla: modo.soloElBoton,
       catalogo: catalogo ? catalogoEnTexto(catalogo) : null,
+      etapas,
     })
 
     const generado = await generateReply({ config, systemPrompt, messages })
     let text = generado.text
     const { handoff, cita } = generado
+
+    // Seguimiento o perdido, según lo que dijo el cliente (100). Solo
+    // avanza: un cliente que ya agendó no vuelve a "seguimiento".
+    if (etapas && generado.etapa && contactId) {
+      await moverEtapa(db, { accountId, contactId, conversationId, clave: generado.etapa })
+    }
 
     // El modelo pidió una hora. Quien reserva es la base, que vuelve a
     // mirar si sigue libre: un sello es una intención, no una cita.

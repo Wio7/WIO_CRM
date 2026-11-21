@@ -28,16 +28,12 @@ import { getRequestAuth } from "@/lib/supabase/request-auth";
 import { corsPreflight, withCors } from "@/lib/cors";
 import { sendMessageToConversation, SendMessageError } from "@/lib/whatsapp/send-message";
 import { retomarConLaIa } from "@/lib/ai/retomar";
+import { avisoAsesor, avisoIa, hayQueAvisar } from "@/lib/ai/avisos";
+import { marcaDeLaCuenta } from "@/lib/assistant/tools";
 
 export function OPTIONS(request: Request) {
   return corsPreflight(request);
 }
-
-const AVISO_ASESOR = (nombre: string) =>
-  `${nombre ? `Hola, soy ${nombre}` : "Hola, soy un asesor"} de Golden Habitat 👋 Desde aquí te atiendo yo.`;
-
-const AVISO_IA =
-  "Te dejo con la asistente virtual de Golden Habitat, que te responde al instante a cualquier hora. Si necesitas a una persona, dilo y te paso con un asesor. 🙌";
 
 /** La columna `ai_resumed_at` no existe todavía (056 sin correr). */
 const faltaColumna = (error: { code?: string; message?: string } | null) =>
@@ -93,6 +89,16 @@ export async function POST(request: Request) {
   }
   const accountId = perfil.account_id as string;
 
+  // Cómo estaba antes del toque: si el botón no cambia nada (doble toque),
+  // no se le vuelve a mandar el saludo al cliente.
+  const { data: antes } = await supabase
+    .from("conversations")
+    .select("ai_autoreply_disabled")
+    .eq("id", conversationId)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  const avisar = hayQueAvisar(antes?.ai_autoreply_disabled as boolean | null | undefined, ia);
+
   // Con SU cliente: si la base no le deja ver esta conversación, no hay
   // fila que actualizar y no se cambia nada.
   const cambios: Record<string, unknown> = ia
@@ -123,25 +129,30 @@ export async function POST(request: Request) {
   // WhatsApp cerrada, por ejemplo), el cambio ya quedó hecho igual y se
   // devuelve el motivo para poder decírselo al asesor.
   const nombre = (perfil.full_name as string | null)?.trim().split(/\s+/)[0] ?? "";
-  let avisado = true;
+  let avisado = false;
   let motivo: string | undefined;
   let mensajeDelAviso: string | null = null;
-  try {
-    const r = await sendMessageToConversation(supabase, accountId, {
-      conversationId,
-      messageType: "text",
-      contentText: ia ? AVISO_IA : AVISO_ASESOR(nombre),
-    });
-    mensajeDelAviso = r.messageId ?? null;
-  } catch (err) {
-    avisado = false;
-    motivo = err instanceof SendMessageError ? err.message : "No se pudo entregar el aviso.";
-    if (!(err instanceof SendMessageError)) console.error("[conversations/ai] aviso falló:", err);
+  if (avisar) {
+    try {
+      const marca = await marcaDeLaCuenta(accountId);
+      const r = await sendMessageToConversation(supabase, accountId, {
+        conversationId,
+        messageType: "text",
+        contentText: ia ? avisoIa(marca) : avisoAsesor(nombre, marca),
+      });
+      mensajeDelAviso = r.messageId ?? null;
+      avisado = true;
+    } catch (err) {
+      motivo = err instanceof SendMessageError ? err.message : "No se pudo entregar el aviso.";
+      if (!(err instanceof SendMessageError)) console.error("[conversations/ai] aviso falló:", err);
+    }
+  } else {
+    motivo = "Ya estaba así: no se repitió el aviso al cliente.";
   }
 
   // Ya con el aviso guardado, la raya se corre hasta él: si no, el propio
   // aviso —que es un mensaje del equipo— volvería a callar a la IA.
-  if (ia) {
+  if (ia && avisar) {
     await correrLaRaya(supabase, conversationId, accountId, mensajeDelAviso);
     // Y la IA retoma la conversación ella misma, sin esperar a que el
     // cliente vuelva a escribir: si nadie dice nada, el hilo se muere

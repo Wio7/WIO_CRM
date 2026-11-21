@@ -1,5 +1,5 @@
 import { AiError, type AiConfig, type ChatMessage, type GenerateResult } from './types'
-import { AGENDA_SENTINEL_RE, HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
+import { AGENDA_SENTINEL_RE, ETAPA_SENTINEL_RE, HANDOFF_SENTINEL, aiRequestTimeoutMs } from './defaults'
 import { generateOpenAi } from './providers/openai'
 import { generateAnthropic } from './providers/anthropic'
 
@@ -69,5 +69,15 @@ export function parseGeneration(raw: string): GenerateResult {
   // que uno suelto en el chat se lee fatal.
   while (AGENDA_SENTINEL_RE.test(text)) text = text.replace(AGENDA_SENTINEL_RE, '')
 
-  return { text: text.trim(), handoff, cita }
+  // Etapa del cliente (100): solo las dos que la IA puede decidir por la
+  // conversación. Agendó y Visitó las pone la base con la cita.
+  let etapa: GenerateResult['etapa'] = null
+  const marca = text.match(ETAPA_SENTINEL_RE)
+  if (marca) {
+    const clave = marca[1].toLowerCase()
+    if (clave === 'seguimiento' || clave === 'perdido') etapa = clave
+  }
+  text = text.replace(new RegExp(ETAPA_SENTINEL_RE.source, 'gi'), '')
+
+  return { text: text.trim(), handoff, cita, ...(etapa ? { etapa } : {}) }
 }
