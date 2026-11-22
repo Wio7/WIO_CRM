@@ -112,31 +112,32 @@ export interface TeamPush {
   tag: string;
 }
 
+export interface UsersPush {
+  userIds: string[];
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+}
+
 /**
- * Avisar a TODO el equipo de una cuenta (todos menos "solo lectura", que
- * son clientes e invitados). Lo usa la Golden App cuando se reserva un lote.
- * Nunca lanza; las suscripciones vencidas (404/410) se borran.
+ * Parte común de `notifyTeam` y `notifyUsers`: manda el aviso a todos los
+ * celulares suscritos de esas personas. Nunca lanza; las suscripciones
+ * vencidas (404/410) se borran.
  * @returns cuántos celulares recibieron el aviso.
  */
-export async function notifyTeam(db: SupabaseClient, push: TeamPush): Promise<number> {
+async function sendToUsers(
+  db: SupabaseClient,
+  userIds: string[],
+  push: { title: string; body: string; url: string; tag: string }
+): Promise<number> {
   if (!ensureConfigured()) return 0;
-
-  const { data: perfiles } = await db
-    .from('profiles')
-    .select('user_id, account_role, area')
-    .eq('account_id', push.accountId)
-    .neq('account_role', 'viewer');
-  // Los asesores externos (Promueve) no son del equipo: no reciben avisos internos.
-  const recipients = (perfiles ?? [])
-    .filter((p) => p.area !== 'promueve')
-    .map((p) => p.user_id as string)
-    .filter((id) => id && id !== push.exceptUserId);
-  if (recipients.length === 0) return 0;
+  if (userIds.length === 0) return 0;
 
   const { data: subscriptions } = await db
     .from('push_subscriptions')
     .select('id, endpoint, p256dh, auth')
-    .in('user_id', recipients);
+    .in('user_id', userIds);
   if (!subscriptions?.length) return 0;
 
   const payload = JSON.stringify({
@@ -161,12 +162,43 @@ export async function notifyTeam(db: SupabaseClient, push: TeamPush): Promise<nu
         if (status === 404 || status === 410) {
           await db.from('push_subscriptions').delete().eq('id', s.id);
         } else {
-          console.error('[push] team send failed:', status, (err as Error).message);
+          console.error('[push] send failed:', status, (err as Error).message);
         }
       }
     })
   );
   return sent;
+}
+
+/**
+ * Avisar a TODO el equipo de una cuenta (todos menos "solo lectura", que
+ * son clientes e invitados). Lo usa la Golden App cuando se reserva un lote.
+ * Nunca lanza; las suscripciones vencidas (404/410) se borran.
+ * @returns cuántos celulares recibieron el aviso.
+ */
+export async function notifyTeam(db: SupabaseClient, push: TeamPush): Promise<number> {
+  if (!ensureConfigured()) return 0;
+
+  const { data: perfiles } = await db
+    .from('profiles')
+    .select('user_id, account_role, area')
+    .eq('account_id', push.accountId)
+    .neq('account_role', 'viewer');
+  // Los asesores externos (Promueve) no son del equipo: no reciben avisos internos.
+  const recipients = (perfiles ?? [])
+    .filter((p) => p.area !== 'promueve')
+    .map((p) => p.user_id as string)
+    .filter((id) => id && id !== push.exceptUserId);
+  return sendToUsers(db, recipients, push);
+}
+
+/**
+ * Avisar sólo a personas concretas (por ejemplo, quienes deben decidir algo).
+ * Nunca lanza; las suscripciones vencidas (404/410) se borran.
+ * @returns cuántos celulares recibieron el aviso.
+ */
+export async function notifyUsers(db: SupabaseClient, push: UsersPush): Promise<number> {
+  return sendToUsers(db, push.userIds, push);
 }
 
 /**
