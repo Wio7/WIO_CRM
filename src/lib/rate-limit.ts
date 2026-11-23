@@ -159,6 +159,9 @@ export const RATE_LIMITS = {
    *  key past the provider's own rate limit. 60/min ≈ three busy agents
    *  drafting flat-out. */
   aiDraftAccount: { limit: 60, windowMs: 60_000 },
+  /** Relevo de sesion hacia las apps de area, por usuario. 20/min sobra
+   *  para abrir apps a mano y frena un script que mine enlaces. */
+  sesionRelevo: { limit: 20, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't
