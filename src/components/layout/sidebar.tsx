@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { nombreVisible } from "@/lib/cuenta-wio";
 import { useAuth } from "@/hooks/use-auth";
 import { useUnread } from "@/components/layout/unread-provider";
 import { MODULES, MODULE_AREAS, isModuleVisible } from "@/lib/modules";
@@ -308,8 +309,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               {/* `title=` exposes the full name on hover when it
                   gets truncated (long account names + narrow
                   sidebars). Cheap a11y win. */}
-              <span className="truncate" title={account.name}>
-                {account.name}
+              <span className="truncate" title={nombreVisible(account)}>
+                {nombreVisible(account)}
               </span>
               {accountRole ? (
                 // Always render the chip — owners used to be
