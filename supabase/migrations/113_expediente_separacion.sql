@@ -267,7 +267,8 @@ BEGIN
     'observaciones', s.observaciones,
     'forma_pago', s.forma_pago,
     'tipo_separacion', v_js ->> 'tipo_separacion',
-    'medio_pago', s.medio_pago
+    'medio_pago', s.medio_pago,
+    'moneda', s.moneda
   ));
 END;
 $$;
