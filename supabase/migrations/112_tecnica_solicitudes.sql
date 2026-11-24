@@ -56,7 +56,7 @@
 --     flujo_app                    6e3bd37fff5a476099e6951d40f13697  (101)
 --     flujo_solicitudes_pagina     0a79837ead37801b2cb2725c1577bb90  (101)
 --     solicitud_crear              116a99b3441f193be2d7bddf38a330cd  (101)
---     solicitud_cancelar           92caa97310af7a39c6734667ea40afbf  (101)
+--     solicitud_cancelar           92caa97310af7a39c6734667ea40afbf  (101) o 181818bcc323b1bd1361a600fb6782fe (101 sin el comentario, la viva al 2026-11-24)
 --     mis_solicitudes              9deb52e55c17e0d975f3e7eb45630798  (101)
 --     gerencia_solicitudes_conteo  3e5cbe9efff2a46adf68cf6eda5b870a  (101)
 --   Si ya corrió la 112, el cuerpo lleva la marca '112_tecnica_solicitudes' y también pasa.
@@ -108,7 +108,10 @@ BEGIN
   LOOP
     SELECT p.prosrc INTO v_src FROM pg_proc p WHERE p.oid = to_regprocedure('public.' || f.firma);
     IF position('112_tecnica_solicitudes' IN v_src) = 0
-       AND md5(regexp_replace(v_src, '\s', '', 'g')) <> f.huella THEN
+       AND md5(regexp_replace(v_src, '\s', '', 'g')) <> f.huella
+       -- La base real tiene solicitud_cancelar sin su línea de comentario (mismo código que la 101).
+       AND NOT (f.firma = 'solicitud_cancelar(uuid)'
+                AND md5(regexp_replace(v_src, '\s', '', 'g')) = '181818bcc323b1bd1361a600fb6782fe') THEN
       RAISE EXCEPTION 'HUELLA_DISTINTA: public.% no es la del repo (md5 vivo %, esperado %). La base real se desvía: NO aplicar la 112 hasta revisarla.',
         f.firma, md5(regexp_replace(v_src, '\s', '', 'g')), f.huella;
     END IF;
