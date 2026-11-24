@@ -6,9 +6,9 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/dashboard",
-    name: "Wio CRM",
-    short_name: "Wio CRM",
-    description: "CRM de WhatsApp potente y autohospedado.",
+    name: "Wio Suite",
+    short_name: "Wio Suite",
+    description: "Clientes, ventas y operación de tu empresa en un solo lugar.",
     lang: "es-PE",
     start_url: "/dashboard",
     scope: "/",

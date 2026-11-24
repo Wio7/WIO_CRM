@@ -434,7 +434,7 @@ export default function SaasOwnerPage() {
             CUENTAS
           </h1>
           <p className="text-muted-foreground text-xs uppercase tracking-widest mt-1 font-bold">
-            Panel Maestro de Control de Cuentas y Tenants — Wio CRM
+            Panel Maestro de Control de Cuentas y Tenants — Wio Suite
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -700,7 +700,7 @@ export default function SaasOwnerPage() {
               CREAR NUEVA CUENTA / PROYECTO
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Registra un nuevo tenant en Wio CRM y configura las credenciales de su propietario inicial.
+              Registra un nuevo tenant en Wio Suite y configura las credenciales de su propietario inicial.
             </DialogDescription>
           </DialogHeader>
 

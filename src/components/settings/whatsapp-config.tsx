@@ -375,7 +375,7 @@ export function WhatsAppConfig() {
       <section className="animate-in fade-in-50 duration-200">
         <SettingsPanelHead
           title="Conexión de WhatsApp"
-          description="Conecta tu número de WhatsApp Business con Wio CRM."
+          description="Conecta tu número de WhatsApp Business con Wio Suite."
         />
         <div className="flex items-center justify-center py-12">
           <Loader2 className="size-6 animate-spin text-primary" />
@@ -390,7 +390,7 @@ export function WhatsAppConfig() {
     <section className="animate-in fade-in-50 duration-200">
       <SettingsPanelHead
         title="Conexión de WhatsApp"
-        description="Conecta tu número de WhatsApp Business con Wio CRM."
+        description="Conecta tu número de WhatsApp Business con Wio Suite."
       />
       <WhatsAppEmbeddedSignup key={accountId} onConnected={() => { if (accountId) void fetchConfig(accountId); }} />
       <details open={Boolean(config)}>

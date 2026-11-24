@@ -22,10 +22,10 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "Wio CRM",
-    template: "%s — Wio CRM",
+    default: "Wio Suite",
+    template: "%s — Wio Suite",
   },
-  description: "CRM de WhatsApp potente y autohospedado.",
+  description: "Clientes, ventas y operación de tu empresa en un solo lugar.",
   robots: {
     index: false,
     follow: false,
@@ -37,7 +37,7 @@ export const metadata: Metadata = {
   // iOS ignores the web manifest for "Add to Home Screen" chrome.
   appleWebApp: {
     capable: true,
-    title: "Wio CRM",
+    title: "Wio Suite",
     statusBarStyle: "black",
   },
   formatDetection: {

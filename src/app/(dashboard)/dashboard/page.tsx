@@ -37,6 +37,7 @@ import { ConversationsChart } from '@/components/dashboard/conversations-chart'
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
+import { MobileHero } from '@/components/dashboard/mobile-hero'
 import { SimpleHome } from '@/components/dashboard/simple-home'
 import { isSimpleAccount } from '@/lib/modules'
 
@@ -133,8 +134,10 @@ function FullDashboard() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div>
+      <MobileHero />
+
+      {/* Header (PC; en el celular va el saludo) */}
+      <div className="hidden lg:block">
         <h1 className="text-2xl font-bold text-foreground">Panel Principal</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Analíticas en vivo de conversaciones, contactos, tratos, difusiones y automatizaciones.
@@ -142,7 +145,7 @@ function FullDashboard() {
       </div>
 
       {/* Metric cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
         {metricsLoading || !metrics ? (
           Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
         ) : (
@@ -151,6 +154,7 @@ function FullDashboard() {
               title="Conversaciones Activas"
               value={metrics.activeConversations.current.toLocaleString()}
               icon={MessageSquare}
+              tone="sky"
               delta={{
                 sign: metrics.activeConversations.previous,
                 label: deltaLabel(metrics.activeConversations.previous, 'nuevas hoy vs ayer'),
@@ -160,6 +164,7 @@ function FullDashboard() {
               title="Nuevos Contactos Hoy"
               value={metrics.newContactsToday.current.toLocaleString()}
               icon={UserPlus}
+              tone="emerald"
               delta={{
                 sign:
                   metrics.newContactsToday.current - metrics.newContactsToday.previous,
@@ -173,12 +178,14 @@ function FullDashboard() {
               title="Valor de Tratos Abiertos"
               value={formatCurrency(metrics.openDealsValue, defaultCurrency)}
               icon={DollarSign}
+              tone="amber"
               subtitle={`${metrics.openDealsCount} ${metrics.openDealsCount === 1 ? 'trato abierto' : 'tratos abiertos'}`}
             />
             <MetricCard
               title="Mensajes Enviados Hoy"
               value={metrics.messagesSentToday.current.toLocaleString()}
               icon={Send}
+              tone="violet"
               delta={{
                 sign:
                   metrics.messagesSentToday.current - metrics.messagesSentToday.previous,
@@ -201,32 +208,38 @@ function FullDashboard() {
           metrics.realEstate.unitsSold +
           metrics.realEstate.activeReservations) >
           0 && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
             <MetricCard
               title="Unidades Disponibles"
               value={metrics.realEstate.unitsAvailable.toLocaleString()}
               icon={Home}
+              tone="emerald"
             />
             <MetricCard
               title="Unidades Reservadas"
               value={metrics.realEstate.unitsReserved.toLocaleString()}
               icon={Clock}
+              tone="amber"
             />
             <MetricCard
               title="Unidades Vendidas"
               value={metrics.realEstate.unitsSold.toLocaleString()}
               icon={CheckCircle2}
+              tone="sky"
             />
             <MetricCard
               title="Separaciones Activas"
               value={metrics.realEstate.activeReservations.toLocaleString()}
               icon={CalendarCheck}
+              tone="rose"
             />
           </div>
         )}
 
-      {/* Quick actions */}
-      <QuickActions />
+      {/* Quick actions (en el celular van en el saludo) */}
+      <div className="hidden lg:block">
+        <QuickActions />
+      </div>
 
       {/* Charts row */}
       {/* items-stretch (the grid default) stretches the two columns to
