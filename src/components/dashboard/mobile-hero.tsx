@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Ondas } from "@/components/layout/ondas";
 import { navItems } from "@/components/layout/nav-items";
 import { useAuth } from "@/hooks/use-auth";
 import { useUnread } from "@/components/layout/unread-provider";
@@ -23,11 +24,12 @@ export function MobileHero() {
 
   return (
     <div className="space-y-4 lg:hidden">
-      <section className="relative overflow-hidden rounded-3xl bg-[#0b1622] bg-[radial-gradient(20rem_12rem_at_100%_0,#14597a,transparent)] p-5 text-white">
-        <p className="text-2xl font-bold">Hola{name ? `, ${name}` : ""} 👋</p>
+      <section className="wio-banda">
+        <Ondas />
+        <p className="wio-titulo text-3xl">Hola{name ? `, ${name}` : ""}</p>
         {inbox &&
           (unread > 0 ? (
-            <Link href="/inbox" className="mt-4 flex min-h-16 items-center gap-3 rounded-2xl bg-[#55cbef] px-4 text-[#0b1622]">
+            <Link href="/inbox" className="wio-cta mt-4">
               <span className="text-3xl font-bold tabular-nums">{unread}</span>
               <span className="flex-1 leading-tight font-semibold">{unread === 1 ? "chat por responder" : "chats por responder"}</span>
               <span aria-hidden className="text-xl">→</span>
@@ -43,7 +45,7 @@ export function MobileHero() {
           return (
             <li key={href}>
               <Link href={href} className="flex flex-col items-center gap-1.5 text-center text-xs font-semibold text-foreground">
-                <span className={cn("flex size-14 items-center justify-center rounded-2xl", TONES[tone].icon)}>
+                <span className={cn("flex size-14 items-center justify-center rounded-[6px_6px_20px_6px]", TONES[tone].icon)}>
                   <item.icon className="size-6" aria-hidden />
                 </span>
                 {TAB_LABEL[href] ?? item.label}

@@ -5,6 +5,7 @@ import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ThemedToaster } from "@/components/themed-toaster";
 import { AuthProvider } from "@/hooks/use-auth";
+import { sansWio, serifWio } from "@/fonts/tumi";
 import { PlatformAdminBanner } from "@/components/platform-admin-banner";
 import {
   DEFAULT_MODE,
@@ -76,7 +77,10 @@ const THEME_BOOT_SCRIPT = `
     var MODE_DEFAULT = ${JSON.stringify(DEFAULT_MODE)};
     var MODES = ${JSON.stringify(MODES)};
     var savedMode = localStorage.getItem(MODE_KEY);
-    d.dataset.mode = MODES.indexOf(savedMode) !== -1 ? savedMode : MODE_DEFAULT;
+    // Wio Suite (azul, claro por defecto) salvo cuentas con marca propia y apps de área.
+    var wio = localStorage.getItem("wacrm.marca") !== "propia" && !/^\\/(caja|cobranzas|administracion)(\\/|$)/.test(location.pathname);
+    if (wio) d.dataset.wio = "";
+    d.dataset.mode = MODES.indexOf(savedMode) !== -1 ? savedMode : wio ? "light" : MODE_DEFAULT;
   } catch (_e) {
     d.dataset.theme = ${JSON.stringify(DEFAULT_THEME)};
     d.dataset.mode = ${JSON.stringify(DEFAULT_MODE)};
@@ -94,7 +98,7 @@ export default function RootLayout({
       lang="es"
       data-theme={DEFAULT_THEME}
       data-mode={DEFAULT_MODE}
-      className={`${inter.variable} h-full antialiased`}
+      className={`${inter.variable} ${serifWio.variable} ${sansWio.variable} h-full antialiased`}
       // The `theme-boot` script below rewrites `data-theme` and
       // `data-mode` on <html> from localStorage before React hydrates,
       // so for any non-default choice the client DOM intentionally

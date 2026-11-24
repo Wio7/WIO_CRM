@@ -1,0 +1,90 @@
+/* ============================================================
+   WIO SUITE: azul, negro y blanco (rojo solo para alertas y borrar).
+   Formas y letras de Club El Tumi. Solo con html[data-wio]: las cuentas
+   con marca propia y las apps de área conservan sus colores.
+   Los verdes, morados y celestes de Tailwind pasan a azul; los
+   amarillos y naranjas, a gris.
+   ============================================================ */
+html[data-wio][data-theme] {
+  --color-blue-50: #eff5ff; --color-blue-100: #dbe8fe; --color-blue-200: #bfd7fe; --color-blue-300: #93bbfd; --color-blue-400: #609afa; --color-blue-500: #2f74ee; --color-blue-600: #1d5bd8; --color-blue-700: #1a49ae; --color-blue-800: #193d8c; --color-blue-900: #17356f; --color-blue-950: #0f2147;
+  --color-sky-50: #eff5ff; --color-sky-100: #dbe8fe; --color-sky-200: #bfd7fe; --color-sky-300: #93bbfd; --color-sky-400: #609afa; --color-sky-500: #2f74ee; --color-sky-600: #1d5bd8; --color-sky-700: #1a49ae; --color-sky-800: #193d8c; --color-sky-900: #17356f; --color-sky-950: #0f2147;
+  --color-cyan-50: #eff5ff; --color-cyan-100: #dbe8fe; --color-cyan-200: #bfd7fe; --color-cyan-300: #93bbfd; --color-cyan-400: #609afa; --color-cyan-500: #2f74ee; --color-cyan-600: #1d5bd8; --color-cyan-700: #1a49ae; --color-cyan-800: #193d8c; --color-cyan-900: #17356f; --color-cyan-950: #0f2147;
+  --color-teal-50: #eff5ff; --color-teal-100: #dbe8fe; --color-teal-200: #bfd7fe; --color-teal-300: #93bbfd; --color-teal-400: #609afa; --color-teal-500: #2f74ee; --color-teal-600: #1d5bd8; --color-teal-700: #1a49ae; --color-teal-800: #193d8c; --color-teal-900: #17356f; --color-teal-950: #0f2147;
+  --color-emerald-50: #eff5ff; --color-emerald-100: #dbe8fe; --color-emerald-200: #bfd7fe; --color-emerald-300: #93bbfd; --color-emerald-400: #609afa; --color-emerald-500: #2f74ee; --color-emerald-600: #1d5bd8; --color-emerald-700: #1a49ae; --color-emerald-800: #193d8c; --color-emerald-900: #17356f; --color-emerald-950: #0f2147;
+  --color-green-50: #eff5ff; --color-green-100: #dbe8fe; --color-green-200: #bfd7fe; --color-green-300: #93bbfd; --color-green-400: #609afa; --color-green-500: #2f74ee; --color-green-600: #1d5bd8; --color-green-700: #1a49ae; --color-green-800: #193d8c; --color-green-900: #17356f; --color-green-950: #0f2147;
+  --color-lime-50: #eff5ff; --color-lime-100: #dbe8fe; --color-lime-200: #bfd7fe; --color-lime-300: #93bbfd; --color-lime-400: #609afa; --color-lime-500: #2f74ee; --color-lime-600: #1d5bd8; --color-lime-700: #1a49ae; --color-lime-800: #193d8c; --color-lime-900: #17356f; --color-lime-950: #0f2147;
+  --color-violet-50: #eff5ff; --color-violet-100: #dbe8fe; --color-violet-200: #bfd7fe; --color-violet-300: #93bbfd; --color-violet-400: #609afa; --color-violet-500: #2f74ee; --color-violet-600: #1d5bd8; --color-violet-700: #1a49ae; --color-violet-800: #193d8c; --color-violet-900: #17356f; --color-violet-950: #0f2147;
+  --color-purple-50: #eff5ff; --color-purple-100: #dbe8fe; --color-purple-200: #bfd7fe; --color-purple-300: #93bbfd; --color-purple-400: #609afa; --color-purple-500: #2f74ee; --color-purple-600: #1d5bd8; --color-purple-700: #1a49ae; --color-purple-800: #193d8c; --color-purple-900: #17356f; --color-purple-950: #0f2147;
+  --color-fuchsia-50: #eff5ff; --color-fuchsia-100: #dbe8fe; --color-fuchsia-200: #bfd7fe; --color-fuchsia-300: #93bbfd; --color-fuchsia-400: #609afa; --color-fuchsia-500: #2f74ee; --color-fuchsia-600: #1d5bd8; --color-fuchsia-700: #1a49ae; --color-fuchsia-800: #193d8c; --color-fuchsia-900: #17356f; --color-fuchsia-950: #0f2147;
+  --color-indigo-50: #eff5ff; --color-indigo-100: #dbe8fe; --color-indigo-200: #bfd7fe; --color-indigo-300: #93bbfd; --color-indigo-400: #609afa; --color-indigo-500: #2f74ee; --color-indigo-600: #1d5bd8; --color-indigo-700: #1a49ae; --color-indigo-800: #193d8c; --color-indigo-900: #17356f; --color-indigo-950: #0f2147;
+  --color-pink-50: #eff5ff; --color-pink-100: #dbe8fe; --color-pink-200: #bfd7fe; --color-pink-300: #93bbfd; --color-pink-400: #609afa; --color-pink-500: #2f74ee; --color-pink-600: #1d5bd8; --color-pink-700: #1a49ae; --color-pink-800: #193d8c; --color-pink-900: #17356f; --color-pink-950: #0f2147;
+  --color-amber-50: #f6f8fb; --color-amber-100: #e9edf3; --color-amber-200: #d5dce6; --color-amber-300: #b3bfce; --color-amber-400: #8c9bb0; --color-amber-500: #64748b; --color-amber-600: #4d5b70; --color-amber-700: #3c4859; --color-amber-800: #293241; --color-amber-900: #18202c; --color-amber-950: #0c1119;
+  --color-yellow-50: #f6f8fb; --color-yellow-100: #e9edf3; --color-yellow-200: #d5dce6; --color-yellow-300: #b3bfce; --color-yellow-400: #8c9bb0; --color-yellow-500: #64748b; --color-yellow-600: #4d5b70; --color-yellow-700: #3c4859; --color-yellow-800: #293241; --color-yellow-900: #18202c; --color-yellow-950: #0c1119;
+  --color-orange-50: #f6f8fb; --color-orange-100: #e9edf3; --color-orange-200: #d5dce6; --color-orange-300: #b3bfce; --color-orange-400: #8c9bb0; --color-orange-500: #64748b; --color-orange-600: #4d5b70; --color-orange-700: #3c4859; --color-orange-800: #293241; --color-orange-900: #18202c; --color-orange-950: #0c1119;
+  --color-rose-50: #fef2f2; --color-rose-100: #fee2e2; --color-rose-200: #fecaca; --color-rose-300: #fca5a5; --color-rose-400: #f87171; --color-rose-500: #e5303f; --color-rose-600: #cf1f2f; --color-rose-700: #ab1725; --color-rose-800: #8d1722; --color-rose-900: #761922; --color-rose-950: #400810;
+  --color-red-50: #fef2f2; --color-red-100: #fee2e2; --color-red-200: #fecaca; --color-red-300: #fca5a5; --color-red-400: #f87171; --color-red-500: #e5303f; --color-red-600: #cf1f2f; --color-red-700: #ab1725; --color-red-800: #8d1722; --color-red-900: #761922; --color-red-950: #400810;
+  --font-sans: var(--font-wio-sans), system-ui, sans-serif;
+  --primary: #1d5bd8; --primary-foreground: #ffffff; --primary-hover: #1a49ae;
+  --primary-soft: rgb(29 91 216 / 0.12); --primary-soft-2: rgb(29 91 216 / 0.2);
+  --ring: #2f74ee; --destructive: #cf1f2f;
+  --chart-1: #1d5bd8; --chart-2: #609afa; --chart-3: #93bbfd; --chart-4: #4d5b70; --chart-5: #b3bfce;
+  --sidebar-primary: #1d5bd8; --sidebar-primary-foreground: #ffffff; --sidebar-ring: #2f74ee;
+  --wio-banda: linear-gradient(160deg, #0b2a66, #05070d 72%);
+}
+html[data-wio][data-theme][data-mode="light"] {
+  --color-blue-50: #eff5ff; --color-blue-100: #dbe8fe; --color-blue-200: #1a49ae; --color-blue-300: #1a49ae; --color-blue-400: #1d5bd8; --color-blue-500: #2f74ee; --color-blue-600: #1d5bd8; --color-blue-700: #1a49ae; --color-blue-800: #193d8c; --color-blue-900: #17356f; --color-blue-950: #0f2147;
+  --color-sky-50: #eff5ff; --color-sky-100: #dbe8fe; --color-sky-200: #1a49ae; --color-sky-300: #1a49ae; --color-sky-400: #1d5bd8; --color-sky-500: #2f74ee; --color-sky-600: #1d5bd8; --color-sky-700: #1a49ae; --color-sky-800: #193d8c; --color-sky-900: #17356f; --color-sky-950: #0f2147;
+  --color-cyan-50: #eff5ff; --color-cyan-100: #dbe8fe; --color-cyan-200: #1a49ae; --color-cyan-300: #1a49ae; --color-cyan-400: #1d5bd8; --color-cyan-500: #2f74ee; --color-cyan-600: #1d5bd8; --color-cyan-700: #1a49ae; --color-cyan-800: #193d8c; --color-cyan-900: #17356f; --color-cyan-950: #0f2147;
+  --color-teal-50: #eff5ff; --color-teal-100: #dbe8fe; --color-teal-200: #1a49ae; --color-teal-300: #1a49ae; --color-teal-400: #1d5bd8; --color-teal-500: #2f74ee; --color-teal-600: #1d5bd8; --color-teal-700: #1a49ae; --color-teal-800: #193d8c; --color-teal-900: #17356f; --color-teal-950: #0f2147;
+  --color-emerald-50: #eff5ff; --color-emerald-100: #dbe8fe; --color-emerald-200: #1a49ae; --color-emerald-300: #1a49ae; --color-emerald-400: #1d5bd8; --color-emerald-500: #2f74ee; --color-emerald-600: #1d5bd8; --color-emerald-700: #1a49ae; --color-emerald-800: #193d8c; --color-emerald-900: #17356f; --color-emerald-950: #0f2147;
+  --color-green-50: #eff5ff; --color-green-100: #dbe8fe; --color-green-200: #1a49ae; --color-green-300: #1a49ae; --color-green-400: #1d5bd8; --color-green-500: #2f74ee; --color-green-600: #1d5bd8; --color-green-700: #1a49ae; --color-green-800: #193d8c; --color-green-900: #17356f; --color-green-950: #0f2147;
+  --color-lime-50: #eff5ff; --color-lime-100: #dbe8fe; --color-lime-200: #1a49ae; --color-lime-300: #1a49ae; --color-lime-400: #1d5bd8; --color-lime-500: #2f74ee; --color-lime-600: #1d5bd8; --color-lime-700: #1a49ae; --color-lime-800: #193d8c; --color-lime-900: #17356f; --color-lime-950: #0f2147;
+  --color-violet-50: #eff5ff; --color-violet-100: #dbe8fe; --color-violet-200: #1a49ae; --color-violet-300: #1a49ae; --color-violet-400: #1d5bd8; --color-violet-500: #2f74ee; --color-violet-600: #1d5bd8; --color-violet-700: #1a49ae; --color-violet-800: #193d8c; --color-violet-900: #17356f; --color-violet-950: #0f2147;
+  --color-purple-50: #eff5ff; --color-purple-100: #dbe8fe; --color-purple-200: #1a49ae; --color-purple-300: #1a49ae; --color-purple-400: #1d5bd8; --color-purple-500: #2f74ee; --color-purple-600: #1d5bd8; --color-purple-700: #1a49ae; --color-purple-800: #193d8c; --color-purple-900: #17356f; --color-purple-950: #0f2147;
+  --color-fuchsia-50: #eff5ff; --color-fuchsia-100: #dbe8fe; --color-fuchsia-200: #1a49ae; --color-fuchsia-300: #1a49ae; --color-fuchsia-400: #1d5bd8; --color-fuchsia-500: #2f74ee; --color-fuchsia-600: #1d5bd8; --color-fuchsia-700: #1a49ae; --color-fuchsia-800: #193d8c; --color-fuchsia-900: #17356f; --color-fuchsia-950: #0f2147;
+  --color-indigo-50: #eff5ff; --color-indigo-100: #dbe8fe; --color-indigo-200: #1a49ae; --color-indigo-300: #1a49ae; --color-indigo-400: #1d5bd8; --color-indigo-500: #2f74ee; --color-indigo-600: #1d5bd8; --color-indigo-700: #1a49ae; --color-indigo-800: #193d8c; --color-indigo-900: #17356f; --color-indigo-950: #0f2147;
+  --color-pink-50: #eff5ff; --color-pink-100: #dbe8fe; --color-pink-200: #1a49ae; --color-pink-300: #1a49ae; --color-pink-400: #1d5bd8; --color-pink-500: #2f74ee; --color-pink-600: #1d5bd8; --color-pink-700: #1a49ae; --color-pink-800: #193d8c; --color-pink-900: #17356f; --color-pink-950: #0f2147;
+  --color-amber-50: #f6f8fb; --color-amber-100: #e9edf3; --color-amber-200: #3c4859; --color-amber-300: #3c4859; --color-amber-400: #4d5b70; --color-amber-500: #64748b; --color-amber-600: #4d5b70; --color-amber-700: #3c4859; --color-amber-800: #293241; --color-amber-900: #18202c; --color-amber-950: #0c1119;
+  --color-yellow-50: #f6f8fb; --color-yellow-100: #e9edf3; --color-yellow-200: #3c4859; --color-yellow-300: #3c4859; --color-yellow-400: #4d5b70; --color-yellow-500: #64748b; --color-yellow-600: #4d5b70; --color-yellow-700: #3c4859; --color-yellow-800: #293241; --color-yellow-900: #18202c; --color-yellow-950: #0c1119;
+  --color-orange-50: #f6f8fb; --color-orange-100: #e9edf3; --color-orange-200: #3c4859; --color-orange-300: #3c4859; --color-orange-400: #4d5b70; --color-orange-500: #64748b; --color-orange-600: #4d5b70; --color-orange-700: #3c4859; --color-orange-800: #293241; --color-orange-900: #18202c; --color-orange-950: #0c1119;
+  --color-rose-50: #fef2f2; --color-rose-100: #fee2e2; --color-rose-200: #ab1725; --color-rose-300: #ab1725; --color-rose-400: #cf1f2f; --color-rose-500: #e5303f; --color-rose-600: #cf1f2f; --color-rose-700: #ab1725; --color-rose-800: #8d1722; --color-rose-900: #761922; --color-rose-950: #400810;
+  --color-red-50: #fef2f2; --color-red-100: #fee2e2; --color-red-200: #ab1725; --color-red-300: #ab1725; --color-red-400: #cf1f2f; --color-red-500: #e5303f; --color-red-600: #cf1f2f; --color-red-700: #ab1725; --color-red-800: #8d1722; --color-red-900: #761922; --color-red-950: #400810;
+  --background: #f5f7fb; --foreground: #0a0d14; --card: #ffffff; --card-2: #f7f9fc; --card-foreground: #0a0d14;
+  --popover: #ffffff; --popover-foreground: #0a0d14; --secondary: #edf1f7; --secondary-foreground: #0a0d14;
+  --muted: #edf1f7; --muted-foreground: #4d5b70; --accent: #e8effc; --accent-foreground: #0a0d14;
+  --border: #dde4ee; --input: #cfd8e5; --sidebar: #ffffff; --sidebar-foreground: #0a0d14; --sidebar-border: #dde4ee;
+}
+html[data-wio][data-theme][data-mode="dark"] {
+  --background: #05070b; --foreground: #f7f9fc; --card: #0d121b; --card-2: #121926; --card-foreground: #f7f9fc;
+  --popover: #0d121b; --popover-foreground: #f7f9fc; --secondary: #172031; --secondary-foreground: #f7f9fc;
+  --muted: #172031; --muted-foreground: #9aa8bc; --accent: #172339; --accent-foreground: #f7f9fc;
+  --border: #212c3e; --input: #2b384d; --sidebar: #05070b; --sidebar-foreground: #f7f9fc; --sidebar-border: #212c3e;
+}
+
+html[data-wio][data-theme][data-mode="dark"] { --primary: #2563eb; }
+
+/* text-primary en oscuro: el azul del botón no alcanza contraste como texto */
+html[data-wio][data-mode="dark"] .text-primary { color: #7fb0ff; }
+
+/* Formas de Tumi: esquina inferior derecha redondeada */
+html[data-wio] .platform-dashboard :is(.bg-card.border, .wio-tarjeta):is(.rounded-xl, .rounded-2xl, .rounded-3xl, .wio-tarjeta) {
+  border-radius: 6px 6px 24px 6px;
+  box-shadow: 0 1px 2px rgb(10 13 20 / 0.05), 0 8px 24px rgb(10 13 20 / 0.06);
+}
+html[data-wio] .platform-dashboard :is(h1, h2, .wio-titulo) { font-family: var(--font-wio-serif), Georgia, serif; font-weight: 600; letter-spacing: -0.01em; }
+html[data-wio] [data-inbox] :is(h1, h2, h3) { font-family: inherit; }
+
+/* Banda de bienvenida */
+.wio-banda { position: relative; isolation: isolate; overflow: hidden; background: #0b1622; color: #fff; border-radius: 6px 6px 34px 6px; padding: 22px 20px; }
+html[data-wio] .wio-banda { background: var(--wio-banda); border-bottom: 4px solid #2f74ee; }
+.wio-banda > svg { position: absolute; right: -44px; bottom: -64px; width: 170px; z-index: -1; opacity: 0.45; --tb-detalle: #1d5bd8; --tb-sobre-banda: #93bbfd; }
+.wio-cta { display: flex; min-height: 64px; align-items: center; gap: 12px; padding: 0 16px; border-radius: 0 0 20px 0; background: #fff; color: #0a0d14; }
+
+/* Barra inferior flotante */
+html[data-wio] [data-tab-bar] { border: 0; background: transparent; padding: 0 12px calc(10px + env(safe-area-inset-bottom)); }
+html[data-wio] [data-tab-bar] > ul { border: 1px solid var(--border); border-radius: 24px; background: var(--card); box-shadow: 0 14px 34px -10px rgb(5 10 25 / 0.4); }
+html[data-wio] [data-tab-bar] a:active, html[data-wio] [data-tab-bar] button:active { transform: scale(0.94); }
+@media (prefers-reduced-motion: reduce) { html[data-wio] * { transition: none !important; animation-duration: 0.01ms !important; } }
+html[data-mode="dark"] .dark-tono { background: #f7f9fc; color: #0a0d14; }
+.wio-tarjeta { background: var(--card); border-color: var(--border); }
+@media (max-width: 1023px) { .wio-banda-movil { background: #0b1622; background-image: var(--wio-banda, none); color: #fff; border-radius: 6px 6px 34px 6px; border-bottom: 4px solid #2f74ee; padding: 22px 20px; } .wio-banda-movil button { border: 0; } .wio-banda-movil button:last-child { background: rgb(255 255 255 / 0.16); color: #fff; } }

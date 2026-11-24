@@ -570,6 +570,7 @@ export default function InboxPage() {
 
   return (
     <div
+      data-inbox
       data-chat-abierto={hasActiveConv ? "" : undefined}
       className="-m-4 flex h-[calc(100%+2rem)] flex-col overflow-hidden sm:-m-6 sm:h-[calc(100%+3rem)]"
     >

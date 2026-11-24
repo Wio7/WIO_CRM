@@ -245,7 +245,7 @@ export default function SaasOwnerPage() {
           onClick={() => handleEnterAccount(account.id)}
           disabled={enteringId !== null || (isVisiting && accountId === account.id)}
           variant="outline"
-          className="h-12 rounded-xl border-primary/30 text-primary max-lg:col-span-5 max-lg:border-0 max-lg:bg-[#55cbef] max-lg:text-base max-lg:font-bold max-lg:text-[#0b1622] lg:h-9"
+          className="h-12 rounded-xl border-primary/30 text-primary max-lg:col-span-5 max-lg:border-0 max-lg:bg-primary max-lg:text-primary-foreground max-lg:text-base max-lg:font-bold lg:h-9"
         >
           <LogIn className="h-4 w-4" />
           {isVisiting && accountId === account.id ? "Dentro" : enteringId === account.id ? "Entrando…" : "Entrar"}
@@ -265,7 +265,7 @@ export default function SaasOwnerPage() {
         <Button
           onClick={() => setModulesTarget(account)}
           variant="ghost"
-          className="h-12 w-full lg:h-9 lg:w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+          className="h-12 w-full lg:h-9 lg:w-9 rounded-xl border border-border bg-muted hover:bg-muted p-0 text-muted-foreground hover:text-foreground"
           title="Secciones que ve esta cuenta"
           aria-label="Secciones que ve esta cuenta"
         >
@@ -277,7 +277,7 @@ export default function SaasOwnerPage() {
           onClick={() => setBusinessTarget(account)}
           disabled={!canEditBusiness}
           variant="ghost"
-          className="h-12 w-full lg:h-9 lg:w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+          className="h-12 w-full lg:h-9 lg:w-9 rounded-xl border border-border bg-muted hover:bg-muted p-0 text-muted-foreground hover:text-foreground"
           title={canEditBusiness ? "Negocio y apps de esta cuenta" : "Falta correr la migración 081 en Supabase"}
           aria-label={canEditBusiness ? "Negocio y apps de esta cuenta" : "Falta correr la migración 081 en Supabase"}
         >
@@ -289,7 +289,7 @@ export default function SaasOwnerPage() {
           onClick={() => handleToggleStatus(account)}
           disabled={togglingId === account.id}
           variant="ghost"
-          className="h-12 w-full lg:h-9 lg:w-9 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+          className="h-12 w-full lg:h-9 lg:w-9 rounded-xl border border-border bg-muted hover:bg-muted p-0 text-muted-foreground hover:text-foreground"
           title={account.status === "active" ? "Desactivar Acceso" : "Activar Acceso"}
           aria-label={account.status === "active" ? "Desactivar Acceso" : "Activar Acceso"}
         >
@@ -369,7 +369,7 @@ export default function SaasOwnerPage() {
         <DropdownMenu>
           <DropdownMenuTrigger
             aria-label="Más acciones de la cuenta aparte"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/5 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:bg-muted hover:text-foreground"
           >
             <MoreHorizontal className="h-4 w-4" />
           </DropdownMenuTrigger>
@@ -415,7 +415,7 @@ export default function SaasOwnerPage() {
 
   if (authLoading || !isSuperAdmin) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#070708]">
+      <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           <p className="text-sm text-muted-foreground">Verificando Credenciales...</p>
@@ -425,7 +425,7 @@ export default function SaasOwnerPage() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#070708] text-white max-lg:-m-4 max-lg:min-h-full p-4 lg:p-10 space-y-4 lg:space-y-8 relative">
+    <div className="flex-1 overflow-y-auto bg-background text-foreground max-lg:-m-4 max-lg:min-h-full p-4 lg:p-10 space-y-4 lg:space-y-8 relative">
       {/* Background neon glows */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-10">
         <div className="absolute top-[5%] right-[10%] w-[40%] h-[40%] bg-primary/30 rounded-full blur-[140px]" />
@@ -433,10 +433,10 @@ export default function SaasOwnerPage() {
       </div>
 
       {/* Header */}
-      <div className="relative z-10 flex flex-col justify-between gap-4 max-lg:rounded-3xl max-lg:bg-[#0b1622] max-lg:bg-[radial-gradient(20rem_12rem_at_100%_0,#14597a,transparent)] max-lg:p-5 lg:flex-row lg:items-center">
+      <div className="relative z-10 flex flex-col justify-between gap-4 wio-banda-movil lg:flex-row lg:items-center">
         <div>
-          <p className="text-2xl font-bold lg:hidden">🏢 Cuentas</p>
-          <h1 className="hidden lg:block text-3xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-neutral-200 to-neutral-400">
+          <p className="wio-titulo text-3xl lg:hidden">Cuentas</p>
+          <h1 className="hidden lg:block text-3xl font-black tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground">
             CUENTAS
           </h1>
           <p className="hidden lg:block text-muted-foreground text-xs uppercase tracking-widest mt-1 font-bold">
@@ -446,7 +446,7 @@ export default function SaasOwnerPage() {
         <div className="grid grid-cols-[1fr_auto] items-center gap-2 lg:flex lg:gap-3">
           <Button 
             onClick={() => setIsCreateModalOpen(true)}
-            className="bg-primary hover:bg-primary/95 text-[#070708] hover:text-black font-black rounded-xl h-12 lg:h-10 px-5 text-sm lg:text-xs lg:uppercase lg:tracking-widest max-lg:bg-[#55cbef] max-lg:hover:bg-[#55cbef] flex items-center gap-2 shadow-lg shadow-primary/10 transition-all duration-300 active:scale-95"
+            className="bg-primary hover:bg-primary/95 text-primary-foreground hover:text-primary-foreground font-black rounded-xl h-12 lg:h-10 px-5 text-sm lg:text-xs lg:uppercase lg:tracking-widest flex items-center gap-2 shadow-lg shadow-primary/10 transition-all duration-300 active:scale-95"
           >
             <Plus className="h-4 w-4 stroke-[3]" />
             <span className="lg:hidden">Nueva cuenta</span>
@@ -455,7 +455,7 @@ export default function SaasOwnerPage() {
           <Button 
             onClick={fetchAccounts} 
             variant="outline" 
-            className="border-white/5 bg-white/5 hover:bg-white/10 text-white rounded-xl h-12 lg:h-10 px-4 text-sm lg:text-xs lg:uppercase lg:tracking-widest font-bold"
+            className="border-border bg-muted hover:bg-muted text-foreground rounded-xl h-12 lg:h-10 px-4 text-sm lg:text-xs lg:uppercase lg:tracking-widest font-bold"
           >
             Refrescar
           </Button>
@@ -465,12 +465,12 @@ export default function SaasOwnerPage() {
       {/* Stats Cards */}
       <div className="grid grid-cols-3 gap-2 lg:gap-6 relative z-10">
         {/* Card 1 */}
-        <div className="bg-[#121214] border border-white/5 rounded-2xl lg:rounded-3xl p-3 lg:p-6 relative overflow-hidden group shadow-lg">
+        <div className="bg-card border border-border rounded-2xl lg:rounded-3xl p-3 lg:p-6 relative overflow-hidden group shadow-lg">
           <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
           <div className="flex flex-col-reverse gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-muted-foreground text-xs lg:text-[10px] lg:uppercase font-bold lg:tracking-widest">Total</p>
-              <h3 className="text-3xl font-black lg:mt-2 text-white">{stats.total}</h3>
+              <h3 className="text-3xl font-black lg:mt-2 text-foreground">{stats.total}</h3>
             </div>
             <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center shadow-inner">
               <Building2 className="h-5 w-5" />
@@ -483,12 +483,12 @@ export default function SaasOwnerPage() {
         </div>
 
         {/* Card 2 */}
-        <div className="bg-[#121214] border border-white/5 rounded-2xl lg:rounded-3xl p-3 lg:p-6 relative overflow-hidden group shadow-lg">
+        <div className="bg-card border border-border rounded-2xl lg:rounded-3xl p-3 lg:p-6 relative overflow-hidden group shadow-lg">
           <div className="absolute inset-0 bg-gradient-to-tr from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
           <div className="flex flex-col-reverse gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-muted-foreground text-xs lg:text-[10px] lg:uppercase font-bold lg:tracking-widest">Activas</p>
-              <h3 className="text-3xl font-black lg:mt-2 text-white">{stats.active}</h3>
+              <h3 className="text-3xl font-black lg:mt-2 text-foreground">{stats.active}</h3>
             </div>
             <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center justify-center shadow-inner">
               <CheckCircle className="h-5 w-5" />
@@ -501,12 +501,12 @@ export default function SaasOwnerPage() {
         </div>
 
         {/* Card 3 */}
-        <div className="bg-[#121214] border border-white/5 rounded-2xl lg:rounded-3xl p-3 lg:p-6 relative overflow-hidden group shadow-lg">
+        <div className="bg-card border border-border rounded-2xl lg:rounded-3xl p-3 lg:p-6 relative overflow-hidden group shadow-lg">
           <div className="absolute inset-0 bg-gradient-to-tr from-rose-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
           <div className="flex flex-col-reverse gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="text-muted-foreground text-xs lg:text-[10px] lg:uppercase font-bold lg:tracking-widest">Suspendidas</p>
-              <h3 className="text-3xl font-black lg:mt-2 text-white">{stats.inactive}</h3>
+              <h3 className="text-3xl font-black lg:mt-2 text-foreground">{stats.inactive}</h3>
             </div>
             <div className="h-12 w-12 rounded-2xl bg-rose-500/10 text-rose-500 border border-rose-500/20 flex items-center justify-center shadow-inner">
               <XCircle className="h-5 w-5" />
@@ -520,7 +520,7 @@ export default function SaasOwnerPage() {
       </div>
 
       {/* Control Panel Section */}
-      <div className="lg:bg-[#121214] lg:border border-white/5 rounded-[2rem] lg:p-6 space-y-4 lg:space-y-6 relative z-10 lg:shadow-2xl">
+      <div className="lg:bg-card lg:border border-border rounded-[2rem] lg:p-6 space-y-4 lg:space-y-6 relative z-10 lg:shadow-2xl">
         {/* Search & Actions */}
         <div className="flex flex-col md:flex-row md:items-center gap-4 justify-between">
           <div className="relative w-full md:max-w-md">
@@ -529,7 +529,7 @@ export default function SaasOwnerPage() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Buscar cuenta"
-              className="pl-10 h-11 bg-[#0d0d0f] border-white/5 rounded-xl text-white placeholder-muted-foreground focus-visible:ring-primary focus-visible:ring-offset-0 focus-visible:border-primary transition-all text-base lg:text-xs"
+              className="pl-10 h-11 bg-background border-border rounded-xl text-foreground placeholder-muted-foreground focus-visible:ring-primary focus-visible:ring-offset-0 focus-visible:border-primary transition-all text-base lg:text-xs"
             />
           </div>
           <div className="text-xs lg:text-[10px] text-muted-foreground uppercase font-bold tracking-widest">
@@ -544,7 +544,7 @@ export default function SaasOwnerPage() {
             <p className="text-xs text-muted-foreground uppercase tracking-widest font-bold">Cargando Tenants...</p>
           </div>
         ) : filteredGroups.length === 0 ? (
-          <div className="text-center py-16 border border-dashed border-white/5 rounded-3xl bg-[#0d0d0f]">
+          <div className="text-center py-16 border border-dashed border-border rounded-3xl bg-background">
             <Building2 className="h-10 w-10 text-muted-foreground/30 mx-auto" />
             <p className="mt-4 text-sm text-muted-foreground">No se encontraron cuentas registradas</p>
           </div>
@@ -552,7 +552,7 @@ export default function SaasOwnerPage() {
           <div className="lg:overflow-x-auto">
             <table className="w-full text-left border-collapse max-lg:block">
               <thead className="max-lg:hidden">
-                <tr className="border-b border-white/5 text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
+                <tr className="border-b border-border text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
                   <th className="py-4 px-4">Cuenta / Identificador</th>
                   <th className="py-4 px-4">Moneda</th>
                   <th className="py-4 px-4">Creada el</th>
@@ -560,7 +560,7 @@ export default function SaasOwnerPage() {
                   <th className="py-4 px-4 text-right">Acciones</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5 text-xs max-lg:block max-lg:divide-y-0">
+              <tbody className="divide-y divide-border text-xs max-lg:block max-lg:divide-y-0">
                 {filteredGroups.map(group => {
                   const isOpen = expanded.has(group.key) || searchOpened.has(group.key);
                   const otras = otrasDe(group);
@@ -568,17 +568,17 @@ export default function SaasOwnerPage() {
                   const dentro = (otras ?? group.members).length;
                   return (
                   <Fragment key={group.key}>
-                  <tr className="bg-white/[0.03] max-lg:mt-3 max-lg:block max-lg:overflow-hidden max-lg:rounded-2xl max-lg:border max-lg:border-white/10 max-lg:bg-[#121a24]">
+                  <tr className="bg-muted max-lg:mt-3 max-lg:block max-lg:overflow-hidden max-lg:rounded-2xl max-lg:border max-lg:border-border max-lg:bg-card wio-tarjeta">
                     <td colSpan={4} className="p-0 max-lg:block">
                       <button
                         type="button"
                         onClick={() => toggleExpanded(group.key)}
                         aria-expanded={isOpen}
-                        className="flex w-full flex-wrap items-center gap-2 min-h-14 py-3 px-4 text-left hover:bg-white/[0.03] transition-colors"
+                        className="flex w-full flex-wrap items-center gap-2 min-h-14 py-3 px-4 text-left hover:bg-muted transition-colors"
                       >
                         <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`} />
                         <Building2 className="h-4 w-4 text-primary" />
-                        <span className="text-base font-bold text-white lg:text-sm lg:font-black lg:uppercase lg:tracking-wider">{group.name}</span>
+                        <span className="text-base font-bold text-foreground lg:text-sm lg:font-black lg:uppercase lg:tracking-wider">{group.name}</span>
                         {group.apps.map(app => (
                           <span key={app} className="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">
                             {app}
@@ -626,9 +626,9 @@ export default function SaasOwnerPage() {
                     </tr>
                   )}
                   {isOpen && otrasVisibles.map(account => (
-                  <tr key={account.id} className="group hover:bg-white/[0.01] transition-colors max-lg:mt-2 max-lg:ml-2 max-lg:block max-lg:rounded-2xl max-lg:border max-lg:border-white/10 max-lg:p-1">
+                  <tr key={account.id} className="group hover:bg-muted transition-colors max-lg:mt-2 max-lg:ml-2 max-lg:block max-lg:rounded-2xl max-lg:border max-lg:border-border max-lg:p-1">
                     <td className={`py-4 px-4 space-y-1 max-lg:block ${account.id === group.primary.id ? "lg:pl-10" : "lg:pl-16"}`}>
-                      <div className="font-bold text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-1.5 text-sm">
+                      <div className="font-bold text-foreground group-hover:text-primary transition-colors flex flex-wrap items-center gap-1.5 text-sm">
                         {account.name}
                         {account.id === group.primary.id ? (
                           <span className="rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">
@@ -636,7 +636,7 @@ export default function SaasOwnerPage() {
                           </span>
                         ) : (
                           <>
-                            <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                            <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
                               Pertenece a {group.name}
                             </span>
                             {(account.apps ?? []).map(app => (
@@ -652,7 +652,7 @@ export default function SaasOwnerPage() {
                       </div>
                     </td>
                     <td className="py-4 px-4 max-lg:hidden">
-                      <span className="bg-white/5 border border-white/10 px-2 py-0.5 rounded-md text-[10px] font-bold text-muted-foreground">
+                      <span className="bg-muted border border-border px-2 py-0.5 rounded-md text-[10px] font-bold text-muted-foreground">
                         {account.default_currency || "USD"}
                       </span>
                     </td>
@@ -691,19 +691,19 @@ export default function SaasOwnerPage() {
 
       {/* Creation Modal */}
       <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-        <DialogContent className="bg-[#121214] border border-white/5 text-white max-w-md rounded-[2rem] p-6 shadow-2xl relative">
+        <DialogContent className="bg-card border border-border text-foreground max-w-md rounded-[2rem] p-6 shadow-2xl relative">
           <div className="absolute right-4 top-4">
             <Button
               onClick={() => setIsCreateModalOpen(false)}
               variant="ghost"
-              className="h-8 w-8 rounded-full border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+              className="h-8 w-8 rounded-full border border-border bg-muted hover:bg-muted p-0 text-muted-foreground hover:text-foreground"
             >
               <X className="h-4 w-4" />
             </Button>
           </div>
 
           <DialogHeader className="space-y-2">
-            <DialogTitle className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-white to-neutral-400">
+            <DialogTitle className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground">
               CREAR NUEVA CUENTA / PROYECTO
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
@@ -722,7 +722,7 @@ export default function SaasOwnerPage() {
                 value={newAccount.accountName}
                 onChange={e => setNewAccount(prev => ({ ...prev, accountName: e.target.value }))}
                 placeholder="Ej. Aurex, Golden Habitat..."
-                className="h-11 bg-[#0d0d0f] border-white/5 rounded-xl text-white placeholder-muted-foreground/45 focus-visible:ring-primary focus-visible:ring-offset-0 text-xs"
+                className="h-11 bg-background border-border rounded-xl text-foreground placeholder-muted-foreground/45 focus-visible:ring-primary focus-visible:ring-offset-0 text-xs"
                 required
               />
             </div>
@@ -737,7 +737,7 @@ export default function SaasOwnerPage() {
                 value={newAccount.ownerName}
                 onChange={e => setNewAccount(prev => ({ ...prev, ownerName: e.target.value }))}
                 placeholder="Ej. Luis Bryce, Bryan..."
-                className="h-11 bg-[#0d0d0f] border-white/5 rounded-xl text-white placeholder-muted-foreground/45 focus-visible:ring-primary focus-visible:ring-offset-0 text-xs"
+                className="h-11 bg-background border-border rounded-xl text-foreground placeholder-muted-foreground/45 focus-visible:ring-primary focus-visible:ring-offset-0 text-xs"
                 required
               />
             </div>
@@ -753,7 +753,7 @@ export default function SaasOwnerPage() {
                 value={newAccount.email}
                 onChange={e => setNewAccount(prev => ({ ...prev, email: e.target.value }))}
                 placeholder="ejemplo@wiocrm.com"
-                className="h-11 bg-[#0d0d0f] border-white/5 rounded-xl text-white placeholder-muted-foreground/45 focus-visible:ring-primary focus-visible:ring-offset-0 text-xs"
+                className="h-11 bg-background border-border rounded-xl text-foreground placeholder-muted-foreground/45 focus-visible:ring-primary focus-visible:ring-offset-0 text-xs"
                 required
               />
             </div>
@@ -769,25 +769,25 @@ export default function SaasOwnerPage() {
                 value={newAccount.password}
                 onChange={e => setNewAccount(prev => ({ ...prev, password: e.target.value }))}
                 placeholder="Mínimo 6 caracteres"
-                className="h-11 bg-[#0d0d0f] border-white/5 rounded-xl text-white placeholder-muted-foreground/45 focus-visible:ring-primary focus-visible:ring-offset-0 text-xs"
+                className="h-11 bg-background border-border rounded-xl text-foreground placeholder-muted-foreground/45 focus-visible:ring-primary focus-visible:ring-offset-0 text-xs"
                 required
                 minLength={6}
               />
             </div>
 
-            <DialogFooter className="pt-4 border-t border-white/5 flex gap-2">
+            <DialogFooter className="pt-4 border-t border-border flex gap-2">
               <Button
                 type="button"
                 onClick={() => setIsCreateModalOpen(false)}
                 variant="outline"
-                className="border-white/5 bg-white/5 hover:bg-white/10 text-white rounded-xl h-11 text-xs uppercase tracking-widest font-bold flex-1"
+                className="border-border bg-muted hover:bg-muted text-foreground rounded-xl h-11 text-xs uppercase tracking-widest font-bold flex-1"
               >
                 Cancelar
               </Button>
               <Button
                 type="submit"
                 disabled={isCreating}
-                className="bg-primary hover:bg-primary/95 text-[#070708] hover:text-black font-black rounded-xl h-11 text-xs uppercase tracking-widest flex-1 flex items-center justify-center gap-2"
+                className="bg-primary hover:bg-primary/95 text-primary-foreground hover:text-primary-foreground font-black rounded-xl h-11 text-xs uppercase tracking-widest flex-1 flex items-center justify-center gap-2"
               >
                 {isCreating ? (
                   <>

@@ -52,7 +52,7 @@ export interface CuentaAparte {
 function estiloRama(rama: RamaArbol) {
   return rama.acento === "celeste"
     ? { seccion: "border-sky-400/40 bg-sky-400/[0.07]", icono: "text-sky-300", titulo: "text-sky-200" }
-    : { seccion: "border-white/5 bg-[#0d0d0f]", icono: "text-primary", titulo: "text-white" };
+    : { seccion: "border-border bg-background", icono: "text-primary", titulo: "text-foreground" };
 }
 
 function origenActual(): string | undefined {
@@ -76,14 +76,14 @@ interface AparteProps {
 function Persona({ p, cuentasAparte, renderCuentaAparte }: { p: PersonaArbol } & AparteProps) {
   const aparte = cuentasAparte?.get(p.id);
   return (
-    <li className="flex items-start gap-2 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2">
+    <li className="flex items-start gap-2 rounded-xl border border-border bg-muted px-3 py-2">
       <User className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-white">{p.full_name || p.email || "Sin nombre"}</p>
+        <p className="truncate text-sm font-semibold text-foreground">{p.full_name || p.email || "Sin nombre"}</p>
         {p.email && p.full_name && <p className="truncate text-[11px] text-muted-foreground">{p.email}</p>}
         <div className="mt-1 flex flex-wrap gap-1">
           {p.account_role && (
-            <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
+            <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
               {ROLE_LABEL[p.account_role] ?? p.account_role}
             </span>
           )}
@@ -92,7 +92,7 @@ function Persona({ p, cuentasAparte, renderCuentaAparte }: { p: PersonaArbol } &
           </span>
           {aparte && (
             <span
-              className="rounded-md border border-white/10 bg-white/[0.03] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
               title={`Cuenta aparte: ${aparte.name}`}
             >
               Tiene una cuenta aparte
@@ -159,7 +159,7 @@ function Acciones({
     <Button
       type="button"
       variant="outline"
-      className={`${tam} border-white/10`}
+      className={`${tam} border-border`}
       disabled
       title="Esta gente es externa: no tiene acceso al ERP"
     >
@@ -179,7 +179,7 @@ function Acciones({
       {entrandoHref === rama.erpHref ? "Entrando…" : "ERP"}
     </Button>
   ) : apagada ? (
-    <Button type="button" variant="outline" className={`${tam} border-white/10`} disabled title={titleApagada}>
+    <Button type="button" variant="outline" className={`${tam} border-border`} disabled title={titleApagada}>
       <LogIn className="h-4 w-4" />
       ERP
     </Button>
@@ -200,7 +200,7 @@ function Acciones({
         target="_blank"
         rel="noopener noreferrer"
         title={`Abrir ${rama.app.nombre} en otra pestaña`}
-        className={`${tam} inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-white/10 bg-white/5 px-3 text-sm font-medium text-white transition-colors hover:bg-white/10`}
+        className={`${tam} inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-border bg-muted px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted`}
       >
         <ExternalLink className="h-4 w-4" />
         App web
@@ -208,7 +208,7 @@ function Acciones({
       <Button
         type="button"
         variant="ghost"
-        className={`${ancho ? "h-11 w-full" : "h-9"} rounded-xl border border-white/5 bg-white/5 text-muted-foreground hover:bg-white/10 hover:text-white`}
+        className={`${ancho ? "h-11 w-full" : "h-9"} rounded-xl border border-border bg-muted text-muted-foreground hover:bg-muted hover:text-foreground`}
         title="Copiar el link de la app (sirve para instalarla en el celular)"
         onClick={() => copiarLink(rama.app!.url)}
       >
@@ -217,7 +217,7 @@ function Acciones({
       </Button>
     </>
   ) : (
-    <Button type="button" variant="outline" className={`${tam} border-white/10`} disabled>
+    <Button type="button" variant="outline" className={`${tam} border-border`} disabled>
       <Smartphone className="h-4 w-4" />
       App en camino
     </Button>

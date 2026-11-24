@@ -86,8 +86,8 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
       </div>
 
       <footer className="flex items-center gap-4 border-t border-border px-5 py-3 text-xs text-muted-foreground">
-        <LegendDot color="#3b82f6" label="Entrantes" />
-        <LegendDot color="#7c3aed" label="Salientes" />
+        <LegendDot color="var(--chart-2)" label="Entrantes" />
+        <LegendDot color="var(--chart-1)" label="Salientes" />
       </footer>
     </section>
   )
@@ -242,7 +242,7 @@ function LineSvg({
         <path
           d={outgoingPath}
           fill="none"
-          stroke="#7c3aed"
+          stroke="var(--chart-1)"
           strokeWidth={2}
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -251,7 +251,7 @@ function LineSvg({
         <path
           d={incomingPath}
           fill="none"
-          stroke="#3b82f6"
+          stroke="var(--chart-2)"
           strokeWidth={2}
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -268,8 +268,8 @@ function LineSvg({
               stroke="var(--muted-foreground)"
               strokeDasharray="3 3"
             />
-            <circle cx={hoverX} cy={yFor(data[hover.idx].incoming)} r={3.5} fill="#3b82f6" />
-            <circle cx={hoverX} cy={yFor(data[hover.idx].outgoing)} r={3.5} fill="#7c3aed" />
+            <circle cx={hoverX} cy={yFor(data[hover.idx].incoming)} r={3.5} fill="var(--chart-2)" />
+            <circle cx={hoverX} cy={yFor(data[hover.idx].outgoing)} r={3.5} fill="var(--chart-1)" />
           </g>
         )}
       </svg>
