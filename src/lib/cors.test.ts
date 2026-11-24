@@ -7,6 +7,7 @@ describe('origenPermitido', () => {
   it('deja entrar a cualquier app en un subdominio de wiocompany.com', () => {
     expect(origenPermitido('https://broker.wiocompany.com')).toBe(true)
     expect(origenPermitido('https://golden.wiocompany.com')).toBe(true)
+    expect(origenPermitido('https://administracion-golden.vercel.app')).toBe(true)
   })
 
   it('no deja entrar a dominios que solo se parecen', () => {
@@ -15,6 +16,7 @@ describe('origenPermitido', () => {
     expect(origenPermitido('http://broker.wiocompany.com')).toBe(false)
     expect(origenPermitido('https://broker.wiocompany.com:8443')).toBe(false)
     expect(origenPermitido('https://broker-home.vercel.app')).toBe(false)
+    expect(origenPermitido('http://administracion-golden.vercel.app')).toBe(false)
     expect(origenPermitido(null)).toBe(false)
   })
 

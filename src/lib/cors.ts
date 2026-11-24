@@ -18,6 +18,10 @@
 
 const DOMINIO_PROPIO = 'wiocompany.com';
 
+// Apps propias en vercel.app que piden el relevo de sesión hacia otra app.
+// Administración abre Golden Caja para registrar la caja chica.
+const APPS_PROPIAS = ['https://administracion-golden.vercel.app'];
+
 function allowedOrigins(): string[] {
   return (process.env.APP_CORS_ORIGINS ?? '')
     .split(',')
@@ -42,7 +46,10 @@ function esSubdominioPropio(origin: string): boolean {
 }
 
 export function origenPermitido(origin: string | null): boolean {
-  return !!origin && (allowedOrigins().includes(origin) || esSubdominioPropio(origin));
+  return (
+    !!origin &&
+    (APPS_PROPIAS.includes(origin) || allowedOrigins().includes(origin) || esSubdominioPropio(origin))
+  );
 }
 
 /** CORS headers for this request, or `{}` if its origin isn't allowed. */
