@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const getRequestAuth = vi.fn();
 const consultar = vi.fn();
 const notifyTeam = vi.fn();
+const notifyUsers = vi.fn();
+const asesorDe = vi.fn();
 const insert = vi.fn();
 const eqEvento = vi.fn(async () => ({}));
 const eqDelete = vi.fn(() => ({ eq: eqEvento }));
@@ -13,7 +15,7 @@ vi.mock("@/lib/rate-limit", () => ({
   checkRateLimit: () => ({ success: true }),
   rateLimitResponse: () => new Response("limit", { status: 429 }),
 }));
-vi.mock("@/lib/push/send", () => ({ notifyTeam: (...a: unknown[]) => notifyTeam(...a) }));
+vi.mock("@/lib/push/send", () => ({ notifyTeam: (...a: unknown[]) => notifyTeam(...a), notifyUsers: (...a: unknown[]) => notifyUsers(...a) }));
 vi.mock("@/lib/flows/admin-client", () => ({
   supabaseAdmin: () => ({
     from: () => ({ insert: (...a: unknown[]) => insert(...a), delete: () => ({ eq: eqDelete }) }),
@@ -22,6 +24,7 @@ vi.mock("@/lib/flows/admin-client", () => ({
 vi.mock("@/lib/golden/aviso-separacion", async (importarOriginal) => ({
   ...(await importarOriginal<typeof import("@/lib/golden/aviso-separacion")>()),
   consultarAvisoSeparacion: (...a: unknown[]) => consultar(...a),
+  asesorDeSolicitud: (...a: unknown[]) => asesorDe(...a),
 }));
 
 const { POST } = await import("./route");
@@ -51,6 +54,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   insert.mockResolvedValue({ error: null });
   notifyTeam.mockResolvedValue(4);
+  notifyUsers.mockResolvedValue(1);
+  asesorDe.mockResolvedValue(null);
   sesion();
   aprobada();
 });
@@ -97,11 +102,9 @@ describe("POST /api/golden/separacion-aprobada", () => {
     expect(notifyTeam).not.toHaveBeenCalled();
   });
 
-  it("catálogo caído o sin configurar: no avisa por las dudas", async () => {
+  it("base caída: no avisa por las dudas", async () => {
     consultar.mockResolvedValue({ estado: "error" });
     expect((await POST(pedido({ solicitud_id: ID }))).status).toBe(502);
-    consultar.mockResolvedValue({ estado: "sin_config" });
-    expect((await POST(pedido({ solicitud_id: ID }))).status).toBe(503);
     expect(notifyTeam).not.toHaveBeenCalled();
   });
 
@@ -122,7 +125,7 @@ describe("POST /api/golden/separacion-aprobada", () => {
 
   it("sin evento en el cuerpo (cliente anterior): consulta y avisa como aprobada", async () => {
     await POST(pedido({ solicitud_id: ID }));
-    expect(consultar).toHaveBeenCalledWith(ID, "aprobada");
+    expect(consultar).toHaveBeenCalledWith(expect.anything(), ID, "aprobada");
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ solicitud_id: ID, evento: "aprobada" }));
   });
 
@@ -133,10 +136,46 @@ describe("POST /api/golden/separacion-aprobada", () => {
   ])("evento %s: lo confirma en el catálogo, reserva (solicitud, evento) y titula %s", async (evento, titulo) => {
     const res = await POST(pedido({ solicitud_id: ID, evento, nombre_proyecto: "Colinas 2" }));
     expect(await res.json()).toEqual({ ok: true, enviados: 4 });
-    expect(consultar).toHaveBeenCalledWith(ID, evento);
+    expect(consultar).toHaveBeenCalledWith(expect.anything(), ID, evento);
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ solicitud_id: ID, evento }));
     const [, push] = notifyTeam.mock.calls[0] as [unknown, Record<string, string>];
     expect(push).toMatchObject({ title: titulo, body: "Colinas 2 · H-26 (Carlos)", url: "/#/lotes/colinas-2" });
+  });
+
+  it("al aprobar, el asesor recibe su aviso (abre el expediente) y no el general", async () => {
+    asesorDe.mockResolvedValue("ase1");
+    const res = await POST(pedido({ solicitud_id: ID, nombre_proyecto: "Colinas 2" }));
+    expect(await res.json()).toEqual({ ok: true, enviados: 5 });
+    expect(asesorDe).toHaveBeenCalledWith(expect.anything(), ID, "acc");
+    expect(notifyUsers.mock.calls[0][1]).toMatchObject({
+      userIds: ["ase1"],
+      title: "Separación aprobada",
+      body: "Colinas 2 · H-26. Arma el expediente y envíalo a Legal.",
+      url: `/#/expediente/${ID}`,
+    });
+    expect(notifyTeam.mock.calls[0][1]).toMatchObject({ exceptUserId: "ase1" });
+  });
+
+  it("si al asesor no le llegó, queda incluido en el general", async () => {
+    asesorDe.mockResolvedValue("ase1");
+    notifyUsers.mockResolvedValue(0);
+    await POST(pedido({ solicitud_id: ID }));
+    expect(notifyTeam.mock.calls[0][1]).toMatchObject({ exceptUserId: null });
+  });
+
+  it("si sólo le llegó al asesor, la reserva queda (no se repite)", async () => {
+    asesorDe.mockResolvedValue("ase1");
+    notifyTeam.mockResolvedValue(0);
+    expect(await (await POST(pedido({ solicitud_id: ID }))).json()).toEqual({ ok: true, enviados: 1 });
+    expect(eqDelete).not.toHaveBeenCalled();
+  });
+
+  it("separación sin asesor enlazado, o evento que no es aprobar: sin aviso propio", async () => {
+    await POST(pedido({ solicitud_id: ID }));
+    asesorDe.mockClear();
+    await POST(pedido({ solicitud_id: ID, evento: "vendida" }));
+    expect(notifyUsers).not.toHaveBeenCalled();
+    expect(asesorDe).not.toHaveBeenCalled();
   });
 
   it("evento desconocido: 400 y no consulta", async () => {

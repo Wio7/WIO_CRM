@@ -7,17 +7,17 @@
 //        { solicitud_id, nombre_proyecto?, evento? }   evento por defecto: "aprobada"
 //     → { ok: true, enviados, duplicado? } | { ok: false, reason }
 //
-// La aprobación vive en la base del catálogo (otra base); las
-// suscripciones push y las claves VAPID, aquí. Para que nadie pueda
+// La aprobación vive en WioSuite, igual que las suscripciones push. Para que nadie pueda
 // disparar avisos falsos, el cuerpo NO trae lote ni asesor: sólo el id
 // de la solicitud. El servidor:
 //   1. exige una sesión del CRM de un miembro (no "solo lectura");
-//   2. le pregunta al catálogo si el lote de esa solicitud está de verdad
+//   2. le pregunta a la base si el lote de esa solicitud está de verdad
 //      en la etapa del evento y es reciente (función gh_aviso_separacion,
 //      sin datos del cliente);
 //   3. reserva el aviso en golden_separacion_avisos (088 + 090): un solo
 //      aviso por solicitud Y evento, aunque la llamen diez veces;
-//   4. arma él mismo el texto y avisa a todo el equipo de la cuenta.
+//   4. arma él mismo el texto y avisa a todo el equipo de la cuenta; al aprobar, el asesor
+//      que la pidió recibe uno propio que abre su expediente.
 // Si no salió a ningún celular, libera la reserva para poder reintentar.
 // ============================================================
 
@@ -26,7 +26,9 @@ import { NextResponse } from "next/server";
 import { corsPreflight, withCors } from "@/lib/cors";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import {
+  armarAvisoExpediente,
   armarAvisoSeparacion,
+  asesorDeSolicitud,
   consultarAvisoSeparacion,
   esEvento,
   esUuid,
@@ -34,7 +36,7 @@ import {
   instanteDelEvento,
   solicitudReciente,
 } from "@/lib/golden/aviso-separacion";
-import { notifyTeam } from "@/lib/push/send";
+import { notifyTeam, notifyUsers } from "@/lib/push/send";
 import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getRequestAuth } from "@/lib/supabase/request-auth";
 
@@ -69,8 +71,7 @@ export async function POST(request: Request) {
   const evento = body?.evento ?? EVENTO_POR_DEFECTO;
   if (!esEvento(evento)) return responder(request, { ok: false, reason: "invalid_input" }, 400);
 
-  const consulta = await consultarAvisoSeparacion(solicitudId, evento);
-  if (consulta.estado === "sin_config") return responder(request, { ok: false, reason: "not_configured" }, 503);
+  const consulta = await consultarAvisoSeparacion(supabase, solicitudId, evento);
   if (consulta.estado === "error") return responder(request, { ok: false, reason: "catalog_unavailable" }, 502);
   if (consulta.estado === "no_aprobada") {
     return responder(request, { ok: false, reason: evento === "aprobada" ? "not_approved" : "not_in_stage" }, 409);
@@ -103,7 +104,22 @@ export async function POST(request: Request) {
 
   let enviados = 0;
   try {
-    enviados = await notifyTeam(db, { accountId, ...aviso });
+    // Al aprobar, quien pidió la separación recibe SU aviso (abre el expediente)
+    // en lugar del general. Si a ese asesor no le llega, queda en el general.
+    const asesorId = evento === "aprobada" ? await asesorDeSolicitud(db, solicitudId, accountId) : null;
+    const alAsesor = asesorId
+      ? await notifyUsers(db, {
+          userIds: [asesorId],
+          ...armarAvisoExpediente({
+            solicitudId,
+            proyecto,
+            nombreProyecto: typeof body?.nombre_proyecto === "string" ? body.nombre_proyecto : "",
+            lote,
+          }),
+        })
+      : 0;
+    enviados = alAsesor;
+    enviados += await notifyTeam(db, { accountId, exceptUserId: alAsesor > 0 ? asesorId : null, ...aviso });
   } catch (err) {
     console.error("[golden/separacion-aprobada] no se pudo avisar:", (err as Error).message);
   }
