@@ -1,31 +1,25 @@
 -- ============================================================
--- 110_administracion_fase4.sql — Estado de cuenta de solo lectura para contabilidad,
--- lista de contratos en firma para contabilidad, lista de verificación del contrato
--- y cajas de gerencia (El Hato, Efectivo Eric, Caja Grande)
+-- 110_administracion_fase4.sql — Lista de contratos en firma para contabilidad,
+-- lista de verificación del contrato y cajas de gerencia (El Hato, Efectivo Eric, Caja Grande)
 -- WIO_CRM main. Correr en el SQL Editor de wioCRM (WioSuite).
 --
 -- Qué cambia:
---   1. Estado de cuenta del banco (093). Contabilidad sigue LEYENDO los movimientos
---      (bank_statement_access no cambia), pero ya no puede importar ni conciliar.
---        - Nueva bank_statement_write_access(cuenta): igual que bank_statement_access,
---          pero las áreas son solo 'administracion' y 'gerencia' (más has_full_access).
---        - import_bank_statement y set_movement_match (la 093) ahora piden esa.
---          set_movement_matches llama a set_movement_match, así que hereda la regla
---          sin tocarla. Firmas y comportamiento iguales; solo cambia el permiso y
---          el search_path pasa a 'public, pg_temp'.
---   2. Contratos en firma (102). contratos_en_firma_lista ahora también la puede
+--   Contabilidad sigue importando y conciliando el estado de cuenta del banco (093), como antes:
+--   esta migración no toca bank_statement_access, import_bank_statement ni set_movement_match
+--   (decisión de Bryce, 2026-11-24).
+--   1. Contratos en firma (102). contratos_en_firma_lista ahora también la puede
 --      llamar contabilidad (flujo_rol / flujo_exigir de la 101 ya aceptan esa área:
 --      no hizo falta tocarlas). Registrar legalización y verificar siguen sin
 --      contabilidad. Cada item suma la clave 'verificacion' (jsonb o null); las
 --      claves que ya tenía no cambian.
---   3. Lista de verificación del contrato:
+--   2. Lista de verificación del contrato:
 --        - Tabla contrato_verificaciones (una fila por solicitud; sin políticas,
 --          sin GRANT: solo se llega por funciones, como contrato_legalizaciones).
 --        - contrato_verificacion_completa(...): función pura que dice si está completo.
 --        - contrato_verificar(solicitud, datos): administración y gerencia; crea o
 --          actualiza la fila, deja huella en erp_audit_events y devuelve el jsonb.
 --        - contrato_verificacion_json(...): ayudante interno (sin GRANT).
---   4. Cajas de gerencia (solo la cuenta Golden Habitat):
+--   3. Cajas de gerencia (solo la cuenta Golden Habitat):
 --        - 'La Jato · Hacienda' pasa a llamarse 'El Hato' (si 'El Hato' no existe).
 --        - Se crean 'Efectivo Eric' y 'Caja Grande' si faltan.
 --        - Columna cash_companies.solo_duenos (true para 'Efectivo Eric').
@@ -37,7 +31,7 @@
 --      y el trigger de auditoría que sí lo pide (cash_entry_audit_trigger) es de
 --      cash_entries, que esta migración no toca. No se desactiva ningún trigger.
 --
--- Requiere (la migración se detiene con un mensaje claro si falta algo): 092, 093, 094,
+-- Requiere (la migración se detiene con un mensaje claro si falta algo): 092, 094,
 -- 099 (erp_audit_log), 101 (flujo_*), 102 (contrato_legalizaciones), la Golden App 098
 -- (gh_lotes_solicitudes) y la Golden Caja 065/069/074 (cash_companies, cash_owners,
 -- cash_company_role).
@@ -47,11 +41,8 @@
 -- md5 del cuerpo SIN espacios ni saltos de línea (así no importa CRLF/LF):
 --   SELECT p.proname, md5(regexp_replace(p.prosrc, '\s', '', 'g')) FROM pg_proc p
 --    WHERE p.pronamespace = 'public'::regnamespace
---      AND p.proname IN ('import_bank_statement', 'set_movement_match',
---                        'contratos_en_firma_lista', 'cash_panel_companies');
+--      AND p.proname IN ('contratos_en_firma_lista', 'cash_panel_companies');
 --   Deben salir:
---     import_bank_statement     95c1826543b1847f39c9b40468eb9757  (093)
---     set_movement_match        f3e79fde95f9987719145c4537d714e5  (093)
 --     contratos_en_firma_lista  8c23879e5744b66064dac060edea6d91  (102)
 --     cash_panel_companies      3bbe67f192252976e0052c67e51b636a  (094)
 --   Si ya corrió la 110, el cuerpo lleva la marca '110_administracion_fase4' y también pasa.
@@ -72,26 +63,23 @@ DECLARE
 BEGIN
   SELECT string_agg(t, ', ') INTO v_faltan
     FROM unnest(ARRAY['accounts', 'profiles', 'gh_lotes_solicitudes', 'contrato_legalizaciones',
-                      'cash_companies', 'cash_owners', 'bank_statement_movements']) AS t
+                      'cash_companies', 'cash_owners']) AS t
    WHERE to_regclass('public.' || t) IS NULL;
   IF v_faltan IS NOT NULL THEN
-    RAISE EXCEPTION 'FALTAN_TABLAS_PARA_LA_110: % (aplicar antes 093, 098, 102 y la Golden Caja 065/069)', v_faltan;
+    RAISE EXCEPTION 'FALTAN_TABLAS_PARA_LA_110: % (aplicar antes 098, 102 y la Golden Caja 065/069)', v_faltan;
   END IF;
 
   SELECT string_agg(t, ', ') INTO v_faltan
-    FROM unnest(ARRAY['bank_statement_access(uuid)', 'can_access_module(uuid,text)', 'has_full_access(uuid)',
-                      'flujo_exigir(text[],text)', 'flujo_rol()', 'flujo_cuenta()',
+    FROM unnest(ARRAY['flujo_exigir(text[],text)', 'flujo_rol()', 'flujo_cuenta()',
                       'flujo_nombre()', 'flujo_audit(text,text,text,text,jsonb)', 'flujo_texto(text,text,integer,integer)',
                       'flujo_app(text)', 'gh_entregas_cuenta()', 'gh_solicitud_vigente(uuid)', 'is_owner_or_gerencia(uuid)',
                       'cash_company_role(uuid)']) AS t
    WHERE to_regprocedure('public.' || t) IS NULL;
   IF v_faltan IS NOT NULL THEN
-    RAISE EXCEPTION 'FALTAN_FUNCIONES_PARA_LA_110: % (aplicar antes 092, 093, 098, 101 y 102)', v_faltan;
+    RAISE EXCEPTION 'FALTAN_FUNCIONES_PARA_LA_110: % (aplicar antes 092, 098, 101 y 102)', v_faltan;
   END IF;
 
   FOR f IN SELECT * FROM (VALUES
-      ('import_bank_statement(jsonb)',                  '95c1826543b1847f39c9b40468eb9757'),
-      ('set_movement_match(uuid,text,uuid,text)',       'f3e79fde95f9987719145c4537d714e5'),
       ('contratos_en_firma_lista(integer,integer)',     '8c23879e5744b66064dac060edea6d91'),
       ('cash_panel_companies(uuid)',                    '3bbe67f192252976e0052c67e51b636a')
     ) AS v(firma, huella)
@@ -110,170 +98,7 @@ END
 $$;
 
 -- ============================================================
--- 1. Estado de cuenta del banco: contabilidad solo lee
--- ============================================================
-CREATE OR REPLACE FUNCTION public.bank_statement_write_access(p_account uuid)
-RETURNS boolean
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp
-AS $$
-  SELECT auth.uid() IS NOT NULL AND p_account IS NOT NULL
-     AND public.can_access_module(p_account, 'cobranzas')
-     AND (
-       public.has_full_access(p_account)
-       OR EXISTS (
-         SELECT 1 FROM public.profiles p
-          WHERE p.user_id = auth.uid()
-            AND p.account_id = p_account
-            AND p.area IN ('administracion', 'gerencia'))
-     );
-$$;
-ALTER FUNCTION public.bank_statement_write_access(uuid) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.bank_statement_write_access(uuid) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.bank_statement_write_access(uuid) TO authenticated;
-
--- import_bank_statement (093): igual, pero exige escritura.
-CREATE OR REPLACE FUNCTION public.import_bank_statement(p_payload jsonb)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  -- 110_administracion_fase4: exige bank_statement_write_access (escritura solo administración y gerencia).
-DECLARE
-  v_account uuid;
-  v_filas   jsonb := COALESCE(p_payload -> 'filas', '[]'::jsonb);
-  v_import  uuid;
-  v_total   integer;
-  v_nuevos  integer;
-  v_banco   text := COALESCE(NULLIF(p_payload ->> 'banco', ''), 'caja_ica');
-BEGIN
-  IF auth.uid() IS NULL THEN
-    RAISE EXCEPTION 'Unauthorized' USING ERRCODE = '42501';
-  END IF;
-  SELECT account_id INTO v_account FROM public.profiles WHERE user_id = auth.uid();
-  IF v_account IS NULL OR NOT public.bank_statement_write_access(v_account) THEN
-    RAISE EXCEPTION 'Sin acceso al estado de cuenta del banco' USING ERRCODE = '42501';
-  END IF;
-
-  IF jsonb_typeof(v_filas) <> 'array' THEN
-    RAISE EXCEPTION 'filas debe ser una lista' USING ERRCODE = '22023';
-  END IF;
-  v_total := jsonb_array_length(v_filas);
-  IF v_total = 0 THEN
-    RAISE EXCEPTION 'El estado de cuenta no trae movimientos' USING ERRCODE = '22023';
-  END IF;
-  IF v_total > 5000 THEN
-    RAISE EXCEPTION 'Demasiados movimientos en un archivo (máximo 5000)' USING ERRCODE = '22023';
-  END IF;
-  IF v_banco <> 'caja_ica' THEN
-    RAISE EXCEPTION 'Banco no soportado: %', v_banco USING ERRCODE = '22023';
-  END IF;
-
-  -- Al importar solo se aceptan estados iniciales: nada llega "conciliado" sin pago.
-  IF EXISTS (
-    SELECT 1 FROM jsonb_to_recordset(v_filas) AS r(estado text)
-     WHERE COALESCE(r.estado, 'por_conciliar') NOT IN ('por_conciliar', 'no_es_cuota')
-  ) THEN
-    RAISE EXCEPTION 'Estado inicial no válido en el archivo' USING ERRCODE = '22023';
-  END IF;
-
-  INSERT INTO public.bank_statement_imports
-    (account_id, banco, cuenta, periodo_desde, periodo_hasta, archivo, importado_por, filas, total_depositos)
-  SELECT v_account, v_banco, NULLIF(p_payload ->> 'cuenta', ''),
-         NULLIF(p_payload ->> 'periodo_desde', '')::date, NULLIF(p_payload ->> 'periodo_hasta', '')::date,
-         NULLIF(p_payload ->> 'archivo', ''), auth.uid(), v_total,
-         COALESCE((SELECT sum(COALESCE(r.deposito, 0)) FROM jsonb_to_recordset(v_filas) AS r(deposito numeric)), 0)
-  RETURNING id INTO v_import;
-
-  WITH ins AS (
-    INSERT INTO public.bank_statement_movements
-      (account_id, import_id, banco, cuenta, fecha_hora, fecha, descripcion, tipo, propio,
-       deposito, retiro, saldo, agencia, huella, estado)
-    SELECT v_account, v_import, v_banco, NULLIF(p_payload ->> 'cuenta', ''),
-           r.fecha_hora, (r.fecha_hora AT TIME ZONE 'America/Lima')::date, r.descripcion, r.tipo,
-           COALESCE(r.propio, false), COALESCE(r.deposito, 0), COALESCE(r.retiro, 0), r.saldo,
-           NULLIF(r.agencia, ''), r.huella, COALESCE(r.estado, 'por_conciliar')
-      FROM jsonb_to_recordset(v_filas) AS r(
-        fecha_hora timestamptz, descripcion text, tipo text, propio boolean,
-        deposito numeric, retiro numeric, saldo numeric, agencia text, huella text, estado text)
-    ON CONFLICT (account_id, huella) DO NOTHING
-    RETURNING 1
-  )
-  SELECT count(*) INTO v_nuevos FROM ins;
-
-  UPDATE public.bank_statement_imports SET filas_nuevas = v_nuevos WHERE id = v_import;
-
-  RETURN jsonb_build_object('import_id', v_import, 'filas', v_total, 'nuevos', v_nuevos, 'duplicados', v_total - v_nuevos);
-END;
-$$;
-ALTER FUNCTION public.import_bank_statement(jsonb) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.import_bank_statement(jsonb) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.import_bank_statement(jsonb) TO authenticated;
-
--- set_movement_match (093): igual, pero exige escritura. set_movement_matches (lote) la llama.
-CREATE OR REPLACE FUNCTION public.set_movement_match(
-  p_movement_id uuid,
-  p_estado      text,
-  p_payment_id  uuid DEFAULT NULL,
-  p_nota        text DEFAULT NULL
-) RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-  -- 110_administracion_fase4: exige bank_statement_write_access (escritura solo administración y gerencia).
-DECLARE
-  v_mov public.bank_statement_movements%ROWTYPE;
-  v_pay public.installment_payments%ROWTYPE;
-BEGIN
-  IF auth.uid() IS NULL THEN
-    RAISE EXCEPTION 'Unauthorized' USING ERRCODE = '42501';
-  END IF;
-  SELECT * INTO v_mov FROM public.bank_statement_movements WHERE id = p_movement_id FOR UPDATE;
-  IF NOT FOUND OR NOT public.bank_statement_write_access(v_mov.account_id) THEN
-    RAISE EXCEPTION 'Movimiento no encontrado' USING ERRCODE = '42501';
-  END IF;
-  IF p_estado IS NULL OR p_estado NOT IN ('por_conciliar', 'conciliado', 'no_es_cuota', 'revisar') THEN
-    RAISE EXCEPTION 'Estado no válido: %', COALESCE(p_estado, 'vacío') USING ERRCODE = '22023';
-  END IF;
-
-  IF p_estado = 'conciliado' THEN
-    IF p_payment_id IS NULL THEN
-      RAISE EXCEPTION 'Para conciliar hay que indicar el pago del ERP' USING ERRCODE = '22023';
-    END IF;
-    IF v_mov.deposito <= 0 THEN
-      RAISE EXCEPTION 'Solo un depósito se concilia con un pago' USING ERRCODE = '22023';
-    END IF;
-    SELECT * INTO v_pay FROM public.installment_payments WHERE id = p_payment_id;
-    IF NOT FOUND OR v_pay.account_id <> v_mov.account_id THEN
-      RAISE EXCEPTION 'Pago no encontrado' USING ERRCODE = '22023';
-    END IF;
-    IF v_pay.voided_at IS NOT NULL THEN
-      RAISE EXCEPTION 'Ese pago está anulado' USING ERRCODE = '22023';
-    END IF;
-  ELSIF p_payment_id IS NOT NULL THEN
-    RAISE EXCEPTION 'Solo un movimiento conciliado lleva pago' USING ERRCODE = '22023';
-  END IF;
-
-  BEGIN
-    UPDATE public.bank_statement_movements
-       SET estado = p_estado,
-           payment_id = CASE WHEN p_estado = 'conciliado' THEN p_payment_id ELSE NULL END,
-           nota = COALESCE(p_nota, nota),
-           conciliado_por = CASE WHEN p_estado = 'conciliado' THEN auth.uid() ELSE NULL END,
-           conciliado_en = CASE WHEN p_estado = 'conciliado' THEN now() ELSE NULL END
-     WHERE id = p_movement_id;
-  EXCEPTION WHEN unique_violation THEN
-    RAISE EXCEPTION 'Ese pago ya está enlazado a otro movimiento del banco' USING ERRCODE = '23505';
-  END;
-END;
-$$;
-ALTER FUNCTION public.set_movement_match(uuid, text, uuid, text) OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.set_movement_match(uuid, text, uuid, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.set_movement_match(uuid, text, uuid, text) TO authenticated;
-
--- ============================================================
--- 2. Lista de verificación del contrato
+-- 1. Lista de verificación del contrato
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.contrato_verificaciones (
   id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -418,7 +243,7 @@ END;
 $$;
 
 -- ============================================================
--- 3. Contratos en firma (102): también contabilidad, más la clave 'verificacion'
+-- 2. Contratos en firma (102): también contabilidad, más la clave 'verificacion'
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.contratos_en_firma_lista(p_limit integer DEFAULT 100, p_offset integer DEFAULT 0)
 RETURNS jsonb
@@ -470,7 +295,7 @@ END;
 $$;
 
 -- ============================================================
--- 4. Cajas de gerencia (cuenta Golden Habitat)
+-- 3. Cajas de gerencia (cuenta Golden Habitat)
 -- ============================================================
 ALTER TABLE public.cash_companies ADD COLUMN IF NOT EXISTS solo_duenos boolean NOT NULL DEFAULT false;
 
@@ -523,7 +348,7 @@ REVOKE ALL ON FUNCTION public.cash_panel_companies(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.cash_panel_companies(uuid) TO authenticated;
 
 -- ============================================================
--- 5. Permisos de lo nuevo
+-- 4. Permisos de lo nuevo
 -- ============================================================
 DO $$
 DECLARE
