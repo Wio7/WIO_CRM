@@ -2,12 +2,14 @@
 // Avisos de etapa de un lote (Golden App): "Lote en proceso",
 // "Lote separado" y "Lote vendido".
 //
-// Los cambios de etapa ocurren en la base del catálogo (otra base);
+// Los cambios de etapa los hace la Golden App en WioSuite (esta misma base);
 // aquí sólo se arma el aviso y se confirma, del lado del servidor, que
 // el lote de verdad está en la etapa que se avisa. El texto lo arma este
 // módulo, no el cliente: el aviso lleva proyecto, lote y asesor, nunca
 // datos del cliente comprador.
 // ============================================================
+
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const EVENTOS_SEPARACION = ["solicitada", "aprobada", "vendida"] as const;
 export type EventoSeparacion = (typeof EVENTOS_SEPARACION)[number];
@@ -87,7 +89,6 @@ export interface SolicitudAprobada {
 export type ResultadoConsulta =
   | { estado: "aprobada"; solicitud: SolicitudAprobada }
   | { estado: "no_aprobada" }
-  | { estado: "sin_config" }
   | { estado: "error" };
 
 /** Instante que acredita la etapa recién ocurrida: de ahí se mide la vigencia del aviso. */
@@ -97,35 +98,71 @@ export function instanteDelEvento(s: SolicitudAprobada, evento: EventoSeparacion
 }
 
 /**
- * Pregunta a la base del catálogo (función `gh_aviso_separacion`, migración
- * 0010 de la Golden App) si la solicitud y su lote están de verdad en la
- * etapa del evento. Usa la clave pública que el CRM ya tiene para leer el
- * catálogo; la función no devuelve datos del cliente. Ante cualquier duda
- * responde "error": jamás se avisa por las dudas. `estado: "aprobada"`
+ * Pregunta a WioSuite (función `gh_aviso_separacion`) si la solicitud y su
+ * lote están de verdad en la etapa del evento, con la sesión de quien actuó.
+ * Hasta 2026-11-24 preguntaba a la base vieja de la app, que quedó congelada
+ * el 2026-11-15. La función no devuelve datos del cliente. Ante cualquier
+ * duda responde "error": jamás se avisa por las dudas. `estado: "aprobada"`
  * significa "la etapa se confirmó" (nombre heredado del primer evento).
  */
 export async function consultarAvisoSeparacion(
+  db: SupabaseClient,
   solicitudId: string,
   evento: EventoSeparacion = EVENTO_POR_DEFECTO,
 ): Promise<ResultadoConsulta> {
-  const url = process.env.GOLDEN_SUPABASE_URL?.trim();
-  const key = process.env.GOLDEN_SUPABASE_ANON_KEY?.trim();
-  if (!url || !key) return { estado: "sin_config" };
   try {
-    const res = await fetch(`${url.replace(/\/+$/, "")}/rest/v1/rpc/gh_aviso_separacion`, {
-      method: "POST",
-      headers: { apikey: key, Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ p_solicitud: solicitudId, p_evento: evento }),
-      cache: "no-store",
-    });
-    if (!res.ok) return { estado: "error" };
-    const filas = (await res.json()) as SolicitudAprobada[];
-    return filas?.[0] ? { estado: "aprobada", solicitud: filas[0] } : { estado: "no_aprobada" };
+    const { data, error } = await db.rpc("gh_aviso_separacion", { p_solicitud: solicitudId, p_evento: evento });
+    if (error) {
+      console.error("[golden/aviso-separacion]", error.message);
+      return { estado: "error" };
+    }
+    const fila = (data as SolicitudAprobada[] | null)?.[0];
+    return fila ? { estado: "aprobada", solicitud: fila } : { estado: "no_aprobada" };
   } catch {
     return { estado: "error" };
   }
 }
 
-/** Versión de siempre: ¿está aprobada? */
-export const consultarSeparacionAprobada = (solicitudId: string) =>
-  consultarAvisoSeparacion(solicitudId, "aprobada");
+/** Aviso sólo para el asesor de la separación: ya puede armar su expediente. */
+export function armarAvisoExpediente(datos: {
+  solicitudId: string;
+  proyecto: string;
+  nombreProyecto?: string;
+  lote: string;
+}): AvisoSeparacion {
+  const nombre = limpio(datos.nombreProyecto, 40) || datos.proyecto;
+  return {
+    title: "Separación aprobada",
+    body: `${nombre} · ${limpio(datos.lote, 12)}. Arma el expediente y envíalo a Legal.`.slice(0, 140),
+    url: `/#/expediente/${datos.solicitudId}`,
+    tag: `expediente-${datos.solicitudId}`,
+  };
+}
+
+/**
+ * El usuario que pidió la separación (migración 113), sólo si hoy es miembro
+ * de esa cuenta y no de "solo lectura". Null en las separaciones viejas.
+ */
+export async function asesorDeSolicitud(
+  admin: SupabaseClient,
+  solicitudId: string,
+  accountId: string,
+): Promise<string | null> {
+  try {
+    const { data: s } = await admin
+      .from("gh_lotes_solicitudes")
+      .select("asesor_uid")
+      .eq("id", solicitudId)
+      .maybeSingle();
+    const uid = s?.asesor_uid as string | null | undefined;
+    if (!uid) return null;
+    const { data: perfil } = await admin
+      .from("profiles")
+      .select("account_id, account_role")
+      .eq("user_id", uid)
+      .maybeSingle();
+    return perfil?.account_id === accountId && perfil.account_role !== "viewer" ? uid : null;
+  } catch {
+    return null;
+  }
+}

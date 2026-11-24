@@ -1,9 +1,10 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   armarAvisoSeparacion,
+  asesorDeSolicitud,
   consultarAvisoSeparacion,
-  consultarSeparacionAprobada,
   esEvento,
   esUuid,
   instanteDelEvento,
@@ -13,9 +14,7 @@ import {
 const ID = "11111111-1111-4111-8111-111111111111";
 
 afterEach(() => {
-  vi.unstubAllGlobals();
-  delete process.env.GOLDEN_SUPABASE_URL;
-  delete process.env.GOLDEN_SUPABASE_ANON_KEY;
+  vi.restoreAllMocks();
 });
 
 describe("armarAvisoSeparacion", () => {
@@ -105,57 +104,43 @@ describe("esUuid / solicitudReciente", () => {
   });
 });
 
-describe("consultarSeparacionAprobada", () => {
-  it("sin variables de entorno devuelve sin_config", async () => {
-    expect(await consultarSeparacionAprobada(ID)).toEqual({ estado: "sin_config" });
+describe("consultarAvisoSeparacion", () => {
+  const base = (respuesta: unknown) => {
+    const rpc = vi.fn(async () => respuesta);
+    return { db: { rpc } as unknown as SupabaseClient, rpc };
+  };
+
+  it("pregunta a la base con el evento pedido y devuelve la solicitud", async () => {
+    const fila = { proyecto: "colinas-2", lote: "H-26", asesor: "Carlos", resuelta: "2026-11-11T09:29:00Z" };
+    const { db, rpc } = base({ data: [fila], error: null });
+    expect(await consultarAvisoSeparacion(db, ID, "vendida")).toEqual({ estado: "aprobada", solicitud: fila });
+    expect(rpc).toHaveBeenCalledWith("gh_aviso_separacion", { p_solicitud: ID, p_evento: "vendida" });
   });
 
-  it("llama al RPC del catálogo con la clave pública y devuelve la solicitud aprobada", async () => {
-    process.env.GOLDEN_SUPABASE_URL = "https://cat.test/";
-    process.env.GOLDEN_SUPABASE_ANON_KEY = "anon";
-    const fetchMock = vi.fn(async () => new Response(
-      JSON.stringify([{ proyecto: "colinas-2", lote: "H-26", asesor: "Carlos", resuelta: "2026-11-11T09:29:00Z" }]),
-      { status: 200 },
-    ));
-    vi.stubGlobal("fetch", fetchMock);
-    const r = await consultarSeparacionAprobada(ID);
-    expect(r).toEqual({
-      estado: "aprobada",
-      solicitud: { proyecto: "colinas-2", lote: "H-26", asesor: "Carlos", resuelta: "2026-11-11T09:29:00Z" },
-    });
-    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://cat.test/rest/v1/rpc/gh_aviso_separacion");
-    expect(JSON.parse(init.body as string)).toEqual({ p_solicitud: ID, p_evento: "aprobada" });
+  it("lista vacía: no_aprobada; error o caída: error (nunca avisa por las dudas)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await consultarAvisoSeparacion(base({ data: [], error: null }).db, ID)).toEqual({ estado: "no_aprobada" });
+    expect(await consultarAvisoSeparacion(base({ data: null, error: { message: "x" } }).db, ID)).toEqual({ estado: "error" });
+    const caida = { rpc: async () => { throw new Error("red"); } } as unknown as SupabaseClient;
+    expect(await consultarAvisoSeparacion(caida, ID)).toEqual({ estado: "error" });
   });
+});
 
-  it("pasa el evento pedido al RPC", async () => {
-    process.env.GOLDEN_SUPABASE_URL = "https://cat.test";
-    process.env.GOLDEN_SUPABASE_ANON_KEY = "anon";
-    const fetchMock = vi.fn(async (..._args: unknown[]) => new Response("[]", { status: 200 }));
-    vi.stubGlobal("fetch", fetchMock);
-    for (const evento of ["solicitada", "vendida"] as const) {
-      expect(await consultarAvisoSeparacion(ID, evento)).toEqual({ estado: "no_aprobada" });
-    }
-    const cuerpos = fetchMock.mock.calls.map((c) => JSON.parse((c[1] as RequestInit).body as string));
-    expect(cuerpos).toEqual([
-      { p_solicitud: ID, p_evento: "solicitada" },
-      { p_solicitud: ID, p_evento: "vendida" },
-    ]);
-  });
+describe("asesorDeSolicitud", () => {
+  const base = (uid: string | null, perfil: object | null) =>
+    ({
+      from: (t: string) => ({
+        select: () => ({
+          eq: () => ({ maybeSingle: async () => ({ data: t === "profiles" ? perfil : { asesor_uid: uid } }) }),
+        }),
+      }),
+    }) as unknown as SupabaseClient;
 
-  it("si la solicitud no está aprobada (lista vacía) devuelve no_aprobada", async () => {
-    process.env.GOLDEN_SUPABASE_URL = "https://cat.test";
-    process.env.GOLDEN_SUPABASE_ANON_KEY = "anon";
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("[]", { status: 200 })));
-    expect(await consultarSeparacionAprobada(ID)).toEqual({ estado: "no_aprobada" });
-  });
-
-  it("si la base responde error devuelve error (nunca avisa por las dudas)", async () => {
-    process.env.GOLDEN_SUPABASE_URL = "https://cat.test";
-    process.env.GOLDEN_SUPABASE_ANON_KEY = "anon";
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 404 })));
-    expect(await consultarSeparacionAprobada(ID)).toEqual({ estado: "error" });
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("red"); }));
-    expect(await consultarSeparacionAprobada(ID)).toEqual({ estado: "error" });
+  it("devuelve al asesor sólo si es miembro de la misma cuenta y no de solo lectura", async () => {
+    expect(await asesorDeSolicitud(base("a", { account_id: "acc", account_role: "agent" }), ID, "acc")).toBe("a");
+    expect(await asesorDeSolicitud(base("a", { account_id: "otra", account_role: "agent" }), ID, "acc")).toBeNull();
+    expect(await asesorDeSolicitud(base("a", { account_id: "acc", account_role: "viewer" }), ID, "acc")).toBeNull();
+    expect(await asesorDeSolicitud(base("a", null), ID, "acc")).toBeNull();
+    expect(await asesorDeSolicitud(base(null, null), ID, "acc")).toBeNull();
   });
 });
