@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, Copy, ExternalLink, Link2, MessageCircle } from "lucide-react";
 import { toast } from "sonner";
+import { Ondas } from "@/components/layout/ondas";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -100,8 +101,9 @@ export function ProspectosPanel() {
   return (
     <div className="mx-auto max-w-7xl gap-6 lg:grid lg:grid-cols-[380px_minmax(0,1fr)]">
       <div className={cn("space-y-4", actual && "hidden lg:block")}>
-        <section className="rounded-3xl bg-[#0b1622] bg-[radial-gradient(20rem_12rem_at_100%_0,#14597a,transparent)] p-5 text-white">
-          <h1 className="text-2xl font-bold">🎯 Prospectos</h1>
+        <section className="wio-banda">
+          <Ondas />
+          <h1 className="text-2xl font-bold">Prospectos</h1>
           <div className="mt-4 grid grid-cols-4 gap-2">
             {GRUPOS.map((g) => (
               <button
@@ -109,7 +111,7 @@ export function ProspectosPanel() {
                 type="button"
                 aria-pressed={grupo === g.id}
                 onClick={() => setGrupo(g.id)}
-                className={cn("min-h-16 rounded-2xl text-xs font-medium", grupo === g.id ? "bg-[#55cbef] text-[#0b1622]" : "bg-white/10")}
+                className={cn("min-h-16 rounded-2xl text-xs font-medium", grupo === g.id ? "bg-white text-[#0a0d14]" : "bg-white/15")}
               >
                 <span className="block text-2xl leading-tight font-bold">{datos.prospectos.filter(g.es).length}</span>
                 {g.label}
@@ -127,7 +129,7 @@ export function ProspectosPanel() {
                 onClick={() => setSel(p.id)}
                 className={cn("flex w-full gap-3 rounded-2xl border border-border bg-card p-4 text-left", p.id === sel && "ring-2 ring-primary")}
               >
-                <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-sky-500/15 text-3xl" aria-hidden>{p.rubro.emoji}</span>
+                <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-3xl" aria-hidden>{p.rubro.emoji}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-lg leading-tight font-semibold break-words">{p.empresa}</span>
                   <span className="block text-sm text-muted-foreground">{p.nombre} · {fecha(p.creado)}</span>
@@ -211,7 +213,7 @@ function Detalle({ p, estados, onBack, onSave }: { p: Prospecto; estados: [strin
         <p className="mt-1 text-sm text-muted-foreground">{[p.nombre, p.cargo, p.ciudad, fecha(p.creado)].filter(Boolean).join(" · ")}</p>
         <div className="mt-2 flex flex-wrap gap-1.5"><Chip>{p.temperatura.emoji} {p.temperatura.texto}</Chip><Chip>{p.rubro.texto}</Chip></div>
         <div className="mt-4 grid grid-cols-2 gap-2 lg:max-w-md">
-          <a href={wa} target="_blank" rel="noopener noreferrer" className="flex h-12 items-center justify-center gap-2 rounded-lg bg-[#0b7a43] font-semibold text-white"><MessageCircle className="size-5" aria-hidden /> WhatsApp</a>
+          <a href={wa} target="_blank" rel="noopener noreferrer" className="flex h-12 items-center justify-center gap-2 rounded-lg bg-primary font-semibold text-primary-foreground"><MessageCircle className="size-5" aria-hidden /> WhatsApp</a>
           <Button variant="outline" className="h-12" onClick={() => copiar(resumen, "Resumen copiado")}><Copy aria-hidden /> Resumen</Button>
         </div>
       </div>
@@ -222,7 +224,7 @@ function Detalle({ p, estados, onBack, onSave }: { p: Prospecto; estados: [strin
             {p.ofrecer.map((o) => (
               <div key={o.id} className="mt-3">
                 <p className="flex justify-between font-semibold"><span>{o.emoji} {o.texto}</span><span>{o.puntos}</span></p>
-                <div className="my-1.5 h-3 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-gradient-to-r from-[#08779b] to-[#55cbef]" style={{ width: `${o.puntos}%` }} /></div>
+                <div className="my-1.5 h-3 overflow-hidden rounded-full bg-muted"><div className="h-full rounded-full bg-gradient-to-r from-[#0b2a66] to-[#2f74ee]" style={{ width: `${o.puntos}%` }} /></div>
                 <p className="text-sm text-muted-foreground">{o.motivos.join(" · ")}</p>
               </div>
             ))}

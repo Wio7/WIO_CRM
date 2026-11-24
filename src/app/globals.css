@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "./wio-suite.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -242,7 +243,7 @@ body:has([data-platform-admin-banner]) {
   }
 }
 .platform-dashboard {
-  height: calc(100vh - var(--platform-banner-height, 0px));
+  height: calc(100dvh - var(--platform-banner-height, 0px));
 }
 @media (max-width: 1023px) {
   body:has([data-platform-admin-banner]) [data-dashboard-sidebar] {

@@ -137,7 +137,7 @@ export function AccountBusinessDialog({
                   className={`rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors ${
                     on
                       ? "border-primary/40 bg-primary/15 text-primary"
-                      : "border-white/10 bg-white/5 text-muted-foreground hover:text-foreground"
+                      : "border-border bg-muted text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {app}

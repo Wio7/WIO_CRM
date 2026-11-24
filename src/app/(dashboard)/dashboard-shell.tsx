@@ -7,6 +7,7 @@ import { resolveAccountBrand } from "@/lib/account-brand";
 import { useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { WioLook } from "@/components/layout/wio-look";
 import { UnreadProvider } from "@/components/layout/unread-provider";
 import { MobileTabBar } from "@/components/layout/mobile-tab-bar";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
@@ -80,6 +81,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
       {/* Reports this tab's online/away presence once we know a user is
           signed in. Headless — renders nothing. */}
       <PresenceHeartbeat />
+      {account && <WioLook custom={brand.custom} />}
       {brand.custom && <BrandedHomeScreen name={brand.name} logo={brand.logo} />}
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">

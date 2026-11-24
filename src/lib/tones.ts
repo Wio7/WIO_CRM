@@ -1,10 +1,14 @@
-// Colores por área para tarjetas e íconos (claro y oscuro).
+// Tonos por área: solo azules y negro (en cuentas con marca propia, sus colores de siempre).
 export type Tone = "sky" | "emerald" | "amber" | "violet" | "rose";
 
+const azul = "bg-blue-600 text-white";
+const negro = "bg-[#0a0d14] text-white dark-tono";
+const marino = "bg-blue-900 text-white";
+
 export const TONES: Record<Tone, { icon: string; card: string }> = {
-  sky: { icon: "bg-sky-500 text-white", card: "max-lg:border-sky-500/25 max-lg:bg-sky-500/10" },
-  emerald: { icon: "bg-emerald-600 text-white", card: "max-lg:border-emerald-500/25 max-lg:bg-emerald-500/10" },
-  amber: { icon: "bg-amber-500 text-black", card: "max-lg:border-amber-500/25 max-lg:bg-amber-500/10" },
-  violet: { icon: "bg-violet-600 text-white", card: "max-lg:border-violet-500/25 max-lg:bg-violet-500/10" },
-  rose: { icon: "bg-rose-600 text-white", card: "max-lg:border-rose-500/25 max-lg:bg-rose-500/10" },
+  sky: { icon: azul, card: "wio-tarjeta" },
+  emerald: { icon: marino, card: "wio-tarjeta" },
+  amber: { icon: negro, card: "wio-tarjeta" },
+  violet: { icon: azul, card: "wio-tarjeta" },
+  rose: { icon: marino, card: "wio-tarjeta" },
 };

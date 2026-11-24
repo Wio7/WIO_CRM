@@ -130,12 +130,12 @@ export function SaasInviteDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="bg-[#121214] border border-white/5 text-white max-w-md rounded-[2rem] p-6 shadow-2xl relative">
+      <DialogContent className="bg-card border border-border text-foreground max-w-md rounded-[2rem] p-6 shadow-2xl relative">
         <div className="absolute right-4 top-4">
           <Button
             onClick={() => onOpenChange(false)}
             variant="ghost"
-            className="h-8 w-8 rounded-full border border-white/5 bg-white/5 hover:bg-white/10 p-0 text-muted-foreground hover:text-white"
+            className="h-8 w-8 rounded-full border border-border bg-muted hover:bg-muted p-0 text-muted-foreground hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </Button>
@@ -144,14 +144,14 @@ export function SaasInviteDialog({
         {result ? (
           <>
             <DialogHeader className="space-y-2">
-              <DialogTitle className="flex items-center gap-2 text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-white to-neutral-400">
+              <DialogTitle className="flex items-center gap-2 text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground">
                 <Sparkles className="size-4 text-primary" />
                 INVITACIÓN CREADA
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
                 Comparte este link para que se una a{" "}
-                <span className="font-semibold text-white">{accountName}</span> como{" "}
-                <span className="font-semibold text-white">{result.role}</span>. Válido por{" "}
+                <span className="font-semibold text-foreground">{accountName}</span> como{" "}
+                <span className="font-semibold text-foreground">{result.role}</span>. Válido por{" "}
                 {result.expiresInDays} día{result.expiresInDays === 1 ? "" : "s"}.
               </DialogDescription>
             </DialogHeader>
@@ -162,12 +162,12 @@ export function SaasInviteDialog({
                   readOnly
                   value={result.url}
                   onFocus={(e) => e.currentTarget.select()}
-                  className="h-11 bg-[#0d0d0f] border-white/5 rounded-xl text-white font-mono text-xs"
+                  className="h-11 bg-background border-border rounded-xl text-foreground font-mono text-xs"
                 />
                 <Button
                   type="button"
                   onClick={copyToClipboard}
-                  className="bg-primary hover:bg-primary/95 text-[#070708] font-black rounded-xl shrink-0"
+                  className="bg-primary hover:bg-primary/95 text-primary-foreground font-black rounded-xl shrink-0"
                 >
                   <Copy className="h-4 w-4" />
                   Copiar
@@ -183,17 +183,17 @@ export function SaasInviteDialog({
                 href={whatsappShareUrl(result.url)}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/5 bg-white/5 hover:bg-white/10 h-11 text-xs uppercase tracking-widest font-bold text-white transition-colors"
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-muted hover:bg-muted h-11 text-xs uppercase tracking-widest font-bold text-foreground transition-colors"
               >
                 <MessageCircle className="h-4 w-4" />
                 Enviar por WhatsApp
               </a>
             </div>
 
-            <DialogFooter className="pt-2 border-t border-white/5">
+            <DialogFooter className="pt-2 border-t border-border">
               <Button
                 onClick={() => onOpenChange(false)}
-                className="w-full bg-primary hover:bg-primary/95 text-[#070708] font-black rounded-xl h-11 text-xs uppercase tracking-widest"
+                className="w-full bg-primary hover:bg-primary/95 text-primary-foreground font-black rounded-xl h-11 text-xs uppercase tracking-widest"
               >
                 Listo
               </Button>
@@ -202,7 +202,7 @@ export function SaasInviteDialog({
         ) : (
           <>
             <DialogHeader className="space-y-2">
-              <DialogTitle className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-white to-neutral-400">
+              <DialogTitle className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground">
                 INVITAR A {accountName.toUpperCase()}
               </DialogTitle>
               <DialogDescription className="text-xs text-muted-foreground">
@@ -219,7 +219,7 @@ export function SaasInviteDialog({
                 <select
                   value={role}
                   onChange={(e) => setRole(e.target.value as InviteRole)}
-                  className="h-11 w-full rounded-xl border border-white/5 bg-[#0d0d0f] px-3 text-xs text-white outline-none focus:border-primary"
+                  className="h-11 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none focus:border-primary"
                 >
                   <option value="admin">Admin</option>
                   <option value="agent">Agente</option>
@@ -235,7 +235,7 @@ export function SaasInviteDialog({
                 <select
                   value={expiry}
                   onChange={(e) => setExpiry(e.target.value)}
-                  className="h-11 w-full rounded-xl border border-white/5 bg-[#0d0d0f] px-3 text-xs text-white outline-none focus:border-primary"
+                  className="h-11 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none focus:border-primary"
                 >
                   {EXPIRY_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
@@ -255,7 +255,7 @@ export function SaasInviteDialog({
                   value={label}
                   onChange={(e) => setLabel(e.target.value)}
                   maxLength={MAX_LABEL_LEN}
-                  className="h-11 bg-[#0d0d0f] border-white/5 rounded-xl text-white placeholder-muted-foreground/45 text-xs"
+                  className="h-11 bg-background border-border rounded-xl text-foreground placeholder-muted-foreground/45 text-xs"
                 />
                 <p className="text-[10px] text-muted-foreground">
                   Solo para tu referencia — el link no queda atado a esa dirección.
@@ -263,19 +263,19 @@ export function SaasInviteDialog({
               </div>
             </div>
 
-            <DialogFooter className="pt-4 border-t border-white/5 flex gap-2">
+            <DialogFooter className="pt-4 border-t border-border flex gap-2">
               <Button
                 type="button"
                 onClick={() => onOpenChange(false)}
                 variant="outline"
-                className="border-white/5 bg-white/5 hover:bg-white/10 text-white rounded-xl h-11 text-xs uppercase tracking-widest font-bold flex-1"
+                className="border-border bg-muted hover:bg-muted text-foreground rounded-xl h-11 text-xs uppercase tracking-widest font-bold flex-1"
               >
                 Cancelar
               </Button>
               <Button
                 onClick={handleCreate}
                 disabled={submitting}
-                className="bg-primary hover:bg-primary/95 text-[#070708] font-black rounded-xl h-11 text-xs uppercase tracking-widest flex-1 flex items-center justify-center gap-2"
+                className="bg-primary hover:bg-primary/95 text-primary-foreground font-black rounded-xl h-11 text-xs uppercase tracking-widest flex-1 flex items-center justify-center gap-2"
               >
                 {submitting ? (
                   <>

@@ -84,19 +84,19 @@ export function AccountTeam({ accountId, apps }: { accountId: string; apps: stri
       {members.map((m) => {
         const memberApps = appsForMember(m.area, apps);
         return (
-          <li key={m.id} className="flex items-start gap-2 rounded-xl border border-white/5 bg-white/[0.02] px-3 py-2">
+          <li key={m.id} className="flex items-start gap-2 rounded-xl border border-border bg-muted px-3 py-2">
             <User className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 space-y-1">
-              <p className="truncate text-sm font-semibold text-white">{m.full_name || m.email || "Sin nombre"}</p>
+              <p className="truncate text-sm font-semibold text-foreground">{m.full_name || m.email || "Sin nombre"}</p>
               {m.email && m.full_name && <p className="truncate text-[11px] text-muted-foreground">{m.email}</p>}
               <div className="flex flex-wrap gap-1">
                 {m.account_role && (
-                  <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
+                  <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
                     {ROLE_LABEL[m.account_role] ?? m.account_role}
                   </span>
                 )}
                 {m.area && (
-                  <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
+                  <span className="rounded-md border border-border bg-muted px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
                     {AREA_LABEL[m.area] ?? m.area}
                   </span>
                 )}
