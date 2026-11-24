@@ -21,6 +21,7 @@
 --        - contrato_verificacion_json(...): ayudante interno (sin GRANT).
 --   3. Cajas de gerencia (solo la cuenta Golden Habitat):
 --        - 'La Jato · Hacienda' pasa a llamarse 'El Hato' (si 'El Hato' no existe).
+--        - 'Efectivo 1' (efectivo personal de Eric) pasa a llamarse 'Efectivo Eric'.
 --        - Se crean 'Efectivo Eric' y 'Caja Grande' si faltan.
 --        - Columna cash_companies.solo_duenos (true para 'Efectivo Eric').
 --        - cash_panel_companies (094): una caja solo_duenos aparece solo para quienes
@@ -314,7 +315,13 @@ BEGIN
    WHERE account_id = v_golden AND name = 'La Jato · Hacienda'
      AND NOT EXISTS (SELECT 1 FROM public.cash_companies x WHERE x.account_id = v_golden AND x.name = 'El Hato');
 
-  -- Cajas nuevas. El trigger de 087 deja a created_by como responsable; no usa auth.uid().
+  -- 'Efectivo 1' es el efectivo personal de Eric (Bryce, 2026-11-24): pasa a 'Efectivo Eric'.
+  UPDATE public.cash_companies
+     SET name = 'Efectivo Eric'
+   WHERE account_id = v_golden AND name = 'Efectivo 1'
+     AND NOT EXISTS (SELECT 1 FROM public.cash_companies x WHERE x.account_id = v_golden AND x.name = 'Efectivo Eric');
+
+  -- Cajas nuevas (solo si faltan). El trigger de 087 deja a created_by como responsable; no usa auth.uid().
   INSERT INTO public.cash_companies (account_id, name, created_by, icon, sort_order)
   SELECT a.id, n.name, a.owner_user_id, n.icon,
          (SELECT COALESCE(max(c.sort_order), 0) FROM public.cash_companies c WHERE c.account_id = a.id) + n.ord
