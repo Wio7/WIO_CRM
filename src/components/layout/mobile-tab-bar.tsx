@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Building2, LogOut, MoreHorizontal, Network, Settings, User } from "lucide-react";
+import { Building2, LogOut, MoreHorizontal, Network, Settings, Target, User } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { navItems } from "@/components/layout/nav-items";
 import { useAuth } from "@/hooks/use-auth";
@@ -32,7 +32,7 @@ export function MobileTabBar() {
 
   const general = [
     ...(isSuperAdmin
-      ? [{ href: "/saas-owner", label: "Cuentas", icon: Building2 }]
+      ? [{ href: "/saas-owner", label: "Cuentas", icon: Building2 }, { href: "/prospectos", label: "Prospectos", icon: Target }]
       : puedeVerCuentas({ role: accountRole, area })
         ? [{ href: "/cuentas", label: "Cuentas", icon: Network }]
         : []),

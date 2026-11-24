@@ -18,6 +18,7 @@ import {
   LogOut,
   Network,
   Settings,
+  Target,
   Shield,
   User,
   UserCog,
@@ -244,7 +245,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               agrupados por área del ERP. Un área sin módulos encendidos no sale. */}
           <ul className="flex flex-col gap-1">
             {(isSuperAdmin
-              ? [navItems[0], { href: "/saas-owner", label: "Cuentas", icon: Building2 }]
+              ? [navItems[0], { href: "/saas-owner", label: "Cuentas", icon: Building2 }, { href: "/prospectos", label: "Prospectos", icon: Target }]
               : puedeVerCuentas({ role: accountRole, area: miArea })
                 ? // Dueño o Gerencia: el árbol por áreas de su propio negocio.
                   [navItems[0], { href: "/cuentas", label: "Cuentas", icon: Network }]
