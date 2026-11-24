@@ -118,7 +118,7 @@ export function SaasInviteDialog({
   }
 
   function whatsappShareUrl(url: string): string {
-    const message = `Únete a ${accountName} en Wio CRM con este link (válido por ${result?.expiresInDays} días): ${url}`;
+    const message = `Únete a ${accountName} en Wio Suite con este link (válido por ${result?.expiresInDays} días): ${url}`;
     return `https://wa.me/?text=${encodeURIComponent(message)}`;
   }
 

@@ -77,7 +77,7 @@ export default function ForgotPasswordPage() {
       <Card className="w-full max-w-md border-border bg-card">
         <CardHeader className="items-center text-center">
           <div className="mb-4 flex items-center justify-center">
-            <img src="/logo.png" alt="Wio CRM" className="h-16 w-auto object-contain rounded-lg" />
+            <img src="/logo.png" alt="Wio Suite" className="h-16 w-auto object-contain rounded-lg" />
           </div>
           <CardTitle className="text-xl text-foreground">Restablecer contraseña</CardTitle>
           <CardDescription className="text-muted-foreground">

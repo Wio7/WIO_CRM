@@ -10,7 +10,7 @@
 // una fila a MODULES y, si aplica, a las plantillas.
 
 /** Rutas que nunca se apagan: sin ellas no se puede entrar ni configurar. */
-const ALWAYS_ON = ["/dashboard", "/settings", "/saas-owner"];
+const ALWAYS_ON = ["/dashboard", "/settings", "/saas-owner", "/prospectos"];
 
 export type ModuleArea =
   | "comunicacion"

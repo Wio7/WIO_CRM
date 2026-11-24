@@ -7,8 +7,8 @@ export interface AccountBrand {
 export function resolveAccountBrand(account?: Partial<AccountBrand> | null) {
   const logo = account?.logo_url?.trim();
   return logo
-    ? { name: account?.brand_name?.trim() || "Wio CRM", logo, custom: true }
-    : { name: "Wio CRM", logo: "/logo.png", custom: false };
+    ? { name: account?.brand_name?.trim() || "Wio Suite", logo, custom: true }
+    : { name: "Wio Suite", logo: "/logo.png", custom: false };
 }
 
 /** Aísla errores de esquema, permisos o red de los datos obligatorios de sesión. */

@@ -255,3 +255,8 @@ body:has([data-platform-admin-banner]) {
     top: var(--platform-banner-height);
   }
 }
+
+/* Celular: con un chat abierto, la barra inferior deja su lugar al teclado. */
+.platform-dashboard:has([data-chat-abierto]) [data-tab-bar] {
+  display: none;
+}

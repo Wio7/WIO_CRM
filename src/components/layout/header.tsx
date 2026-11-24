@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, Menu, Settings as SettingsIcon, User } from "lucide-react";
+import { resolveAccountBrand } from "@/lib/account-brand";
+import { LogOut, Settings as SettingsIcon, User } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -21,6 +22,7 @@ import { ModeToggle } from "@/components/layout/mode-toggle";
 const pageTitles: Record<string, string> = {
   "/dashboard": "Panel Principal",
   "/saas-owner": "Cuentas",
+  "/prospectos": "Prospectos",
   "/inbox": "Bandeja de Entrada",
   "/notifications": "Notificaciones",
   "/contacts": "Contactos",
@@ -44,15 +46,10 @@ function getPageTitle(pathname: string): string {
   return match ? match[1] : "Dashboard";
 }
 
-interface HeaderProps {
-  /** Wired to the shell's drawer state. Used only on mobile — the
-   *  hamburger button is hidden on lg+. */
-  onOpenSidebar?: () => void;
-}
-
-export function Header({ onOpenSidebar }: HeaderProps) {
+export function Header() {
   const pathname = usePathname();
-  const { profile, signOut } = useAuth();
+  const { profile, account, signOut } = useAuth();
+  const brand = resolveAccountBrand(account);
   const title = getPageTitle(pathname);
 
   const initial =
@@ -63,17 +60,23 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4 lg:px-6">
       <div className="flex min-w-0 items-center gap-2">
-        {/* Hamburger — mobile only. 44×44 hit target per Apple HIG. */}
-        <button
-          type="button"
-          onClick={onOpenSidebar}
-          aria-label="Open menu"
-          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
+        {/* Celular: logo de la cuenta; el menú vive en la barra inferior. */}
+        <Link href="/dashboard" aria-label="Inicio" className="shrink-0 lg:hidden">
+          <img
+            src={brand.custom ? brand.logo : "/app-icon-192.png"}
+            alt=""
+            className={`size-9 rounded-xl object-contain ${brand.custom ? "bg-[#021736]" : ""}`}
+          />
+        </Link>
         <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
-          {title}
+          {pathname === "/dashboard" ? (
+            <>
+              <span className="lg:hidden">{brand.name}</span>
+              <span className="hidden lg:inline">{title}</span>
+            </>
+          ) : (
+            title
+          )}
         </h1>
       </div>
 
