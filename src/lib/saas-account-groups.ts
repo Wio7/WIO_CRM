@@ -1,3 +1,5 @@
+import { esCuentaWio, nombreVisible } from "@/lib/cuenta-wio";
+
 export interface SaasAccount {
   id: string;
   name: string;
@@ -69,7 +71,8 @@ export const hasBusinessColumns = (accounts: SaasAccount[]) =>
  * la base (parent_account_id y apps); sin ella, el nombre de la cuenta.
  */
 export function groupAccountsByBusiness(accounts: SaasAccount[]): BusinessGroup[] {
-  return hasBusinessColumns(accounts) ? groupByColumns(accounts) : groupByName(accounts);
+  const groups = hasBusinessColumns(accounts) ? groupByColumns(accounts) : groupByName(accounts);
+  return groups.map((g) => (esCuentaWio(g.primary.id) ? { ...g, name: nombreVisible(g.primary) } : g));
 }
 
 function groupByColumns(accounts: SaasAccount[]): BusinessGroup[] {

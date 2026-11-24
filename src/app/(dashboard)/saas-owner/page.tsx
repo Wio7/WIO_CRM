@@ -1,5 +1,6 @@
 "use client";
 
+import { APP_WIO_URL, esCuentaWio, nombreVisible } from "@/lib/cuenta-wio";
 import { Fragment, useCallback, useEffect, useState, useMemo } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { createClient } from "@/lib/supabase/client";
@@ -101,6 +102,11 @@ export default function SaasOwnerPage() {
 
   /** Entra a la cuenta y abre `destino` (por defecto el panel del ERP). true = entró. */
   const handleEnterAccount = async (id: string, destino?: string): Promise<boolean> => {
+    // La cuenta Wio Suite se usa en su app; desde ahí también se entra a su CRM.
+    if (esCuentaWio(id) && !destino) {
+      window.location.assign(APP_WIO_URL);
+      return true;
+    }
     setEnteringId(id);
     try {
       await switchPlatformAccount(supabase, id, destino);
@@ -596,7 +602,7 @@ export default function SaasOwnerPage() {
                     <tr>
                       <td colSpan={5} className="pb-5 pl-10 pr-4 pt-1">
                         <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                          Áreas y personas de {group.primary.name}
+                          Áreas y personas de {nombreVisible(group.primary)}
                         </p>
                         <AccountAreaTreeAdmin
                           cuenta={group.primary}
@@ -622,7 +628,7 @@ export default function SaasOwnerPage() {
                   <tr key={account.id} className="group hover:bg-white/[0.01] transition-colors">
                     <td className={`py-4 px-4 space-y-1 ${account.id === group.primary.id ? "pl-10" : "pl-16"}`}>
                       <div className="font-bold text-white group-hover:text-primary transition-colors flex flex-wrap items-center gap-1.5 text-sm">
-                        {account.name}
+                        {nombreVisible(account)}
                         {account.id === group.primary.id ? (
                           <span className="rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-primary">
                             Cuenta principal

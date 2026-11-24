@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { LogOut, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
+import { nombreVisible } from "@/lib/cuenta-wio";
 import { useAuth } from "@/hooks/use-auth";
 import { createClient } from "@/lib/supabase/client";
 import { ACCOUNT_SWITCH_EVENT, switchPlatformAccount } from "@/lib/auth/account-switch";
@@ -49,7 +50,7 @@ export function PlatformAdminBanner() {
       <div className="h-20 sm:h-14" aria-hidden="true" />
       <div data-platform-admin-banner role="status" className="fixed inset-x-0 top-0 z-[100] flex h-20 items-center justify-center gap-3 border-b border-amber-700 bg-amber-300 px-4 text-sm font-semibold text-amber-950 shadow-md sm:h-14">
         <ShieldAlert className="h-5 w-5 shrink-0" aria-hidden="true" />
-        <span>Estás dentro de «{account?.name ?? accountId ?? "la cuenta seleccionada"}» como superadmin</span>
+        <span>Estás dentro de «{(account && nombreVisible(account)) ?? accountId ?? "la cuenta seleccionada"}» como superadmin</span>
         <Button variant="outline" disabled={exiting} onClick={exit} className="shrink-0 border-amber-900 bg-amber-100 text-amber-950 hover:bg-amber-200">
           <LogOut className="h-4 w-4" /> {exiting ? "Saliendo…" : "Salir"}
         </Button>
