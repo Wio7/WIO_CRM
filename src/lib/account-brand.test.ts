@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadAccountBrand, resolveAccountBrand } from "./account-brand";
 
 const broker = { brand_name: "Broker Home", logo_url: "/brands/broker-home.png" };
-const wio = { name: "Wio CRM", logo: "/logo.png", custom: false };
+const wio = { name: "Wio Suite", logo: "/logo.png", custom: false };
 
 describe("marca por cuenta", () => {
   it.each([undefined, null, {}, { brand_name: "Broker Home" }, { logo_url: "  " }])(
@@ -15,7 +15,7 @@ describe("marca por cuenta", () => {
       .toEqual({ name: "Broker Home", logo: broker.logo_url, custom: true });
   });
   it("conserva un nombre accesible si solo hay logo", () => {
-    expect(resolveAccountBrand({ logo_url: broker.logo_url }).name).toBe("Wio CRM");
+    expect(resolveAccountBrand({ logo_url: broker.logo_url }).name).toBe("Wio Suite");
   });
   it("no retiene la marca de otra cuenta", () => {
     expect(resolveAccountBrand(broker).custom).toBe(true);

@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { isModuleDisabled } from "@/lib/modules";
 import { resolveAccountBrand } from "@/lib/account-brand";
 import { useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { UnreadProvider } from "@/components/layout/unread-provider";
+import { MobileTabBar } from "@/components/layout/mobile-tab-bar";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 import { InstallAppHint } from "@/components/layout/install-app-hint";
 import { BrandedHomeScreen } from "@/components/layout/branded-home-screen";
@@ -21,11 +23,6 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   const { user, loading, isAccountInactive, signOut, account } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-
-  // Sidebar drawer state — only used on mobile. On lg+ the sidebar is
-  // always visible and this stays at `false` (ignored by the component).
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -78,16 +75,17 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   const brand = resolveAccountBrand(account);
 
   return (
-    <div className="platform-dashboard flex h-screen overflow-hidden bg-background">
+    <UnreadProvider>
+    <div className="platform-dashboard flex h-dvh overflow-hidden bg-background">
       {/* Reports this tab's online/away presence once we know a user is
           signed in. Headless — renders nothing. */}
       <PresenceHeartbeat />
       {brand.custom && <BrandedHomeScreen name={brand.name} logo={brand.logo} />}
-      <Sidebar open={sidebarOpen} onClose={closeSidebar} />
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Header onOpenSidebar={() => setSidebarOpen(true)} />
+      <Sidebar />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <Header />
         {/* Thinner horizontal padding on mobile so cards have room to breathe. */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
           <InstallAppHint appName={brand.name} />
           {moduleOff ? (
             <div className="mx-auto mt-16 max-w-sm text-center space-y-2">
@@ -101,8 +99,10 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
             children
           )}
         </main>
+        <MobileTabBar />
       </div>
     </div>
+    </UnreadProvider>
   );
 }
 

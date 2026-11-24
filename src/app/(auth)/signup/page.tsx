@@ -143,7 +143,7 @@ function SignupPageInner() {
       <Card className="w-full max-w-md border-border bg-card">
         <CardHeader className="items-center text-center">
           <div className="mb-4 flex items-center justify-center">
-            <img src="/logo.png" alt="Wio CRM" className="h-16 w-auto object-contain rounded-lg" />
+            <img src="/logo.png" alt="Wio Suite" className="h-16 w-auto object-contain rounded-lg" />
           </div>
           <CardTitle className="text-xl text-foreground">
             {inviteToken ? "Crear cuenta y unirse" : "Crear cuenta"}
@@ -151,7 +151,7 @@ function SignupPageInner() {
           <CardDescription className="text-muted-foreground">
             {inviteToken
               ? "Verifica tu correo para unirte a tu equipo."
-              : "Comienza a gestionar tus ventas con Wio CRM"}
+              : "Comienza a gestionar tus ventas con Wio Suite"}
           </CardDescription>
         </CardHeader>
         <CardContent>

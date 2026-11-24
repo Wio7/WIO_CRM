@@ -400,7 +400,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
     ) ?? [];
   if (!selectedCompanyId && !demo && (soloPanel || (accessPanel && !loading && companies.length === 0))) return (
     <div className="cash-company-screen">
-      <header className="cash-company-header"><span className="cash-company-logo"><Wallet size={24} /> Panel de gerencia</span><Link href="/dashboard">Ir a Wio CRM <ArrowUpRight size={15} /></Link></header>
+      <header className="cash-company-header"><span className="cash-company-logo"><Wallet size={24} /> Panel de gerencia</span><Link href="/dashboard">Ir a Wio Suite <ArrowUpRight size={15} /></Link></header>
       <main className="cash-company-main">
         {companies.length > 0 && <button className="cash-button secondary" onClick={() => setSoloPanel(false)}>Volver a las cajas</button>}
         <PanelGerencia />
@@ -409,7 +409,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
   );
   if (!selectedCompanyId && !loading) return (
     <div className="cash-company-screen">
-      <header className="cash-company-header"><span className="cash-company-logo"><Wallet size={24} /> Golden Caja</span><Link href="/dashboard">Ir a Wio CRM <ArrowUpRight size={15} /></Link></header>
+      <header className="cash-company-header"><span className="cash-company-logo"><Wallet size={24} /> Golden Caja</span><Link href="/dashboard">Ir a Wio Suite <ArrowUpRight size={15} /></Link></header>
       <main className="cash-company-main">
         {demo && <div className="cash-demo"><strong>Vista de demostración</strong> · Solo Golden Habitat contiene movimientos de ejemplo. <Link href="/caja">Abrir mi caja</Link></div>}
         <p className="cash-eyebrow">TU ESPACIO FINANCIERO</p>
@@ -466,7 +466,7 @@ export function CashApp({ demo }: { demo?: CashSnapshot }) {
           <strong>Todo queda registrado</strong>
           <p>El dueño puede revisar cada edición con fecha y hora.</p>
           <Link href="/dashboard">
-            Ir a Wio CRM <ArrowUpRight size={14} />
+            Ir a Wio Suite <ArrowUpRight size={14} />
           </Link>
         </div>
       </aside>
