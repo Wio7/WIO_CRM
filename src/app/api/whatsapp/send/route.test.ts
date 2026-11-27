@@ -10,6 +10,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Records of what the route wrote, so we can assert the right rows landed.
 const conversationInserts: Array<Record<string, unknown>> = []
 const messageInserts: Array<Record<string, unknown>> = []
+// Filtros (.eq/.or) de las búsquedas en `conversations`, para comprobar
+// que el hilo se busca por contacto Y línea.
+const conversationFilters: unknown[][] = []
+let conversationLookupError: { message: string } | null = null
+let noLines = false
+
+const LINE_A = {
+  id: 'line-A', account_id: 'acct-1', phone_number_id: 'PNID-A',
+  access_token: 'enc-token', is_primary: true, area: null,
+}
+const LINE_B = {
+  id: 'line-B', account_id: 'acct-1', phone_number_id: 'PNID-B',
+  access_token: 'enc-token', is_primary: false, area: 'postventa',
+}
 
 // Toggles for the per-test scenario.
 let existingConversation: Record<string, unknown> | null = null
@@ -31,6 +45,7 @@ const CONTACT = {
 function makeSupabaseMock() {
   function builder(table: string) {
     let didInsert = false
+    let eqId: string | null = null
 
     const selectResult = () => {
       switch (table) {
@@ -41,17 +56,15 @@ function makeSupabaseMock() {
         case 'conversations':
           // Once created this request, a by-id reload returns it (with
           // its contact); otherwise fall back to the canned existing row.
-          return { data: createdConversation ?? existingConversation, error: null }
-        case 'whatsapp_config':
           return {
-            data: {
-              id: 'cfg-1',
-              account_id: 'acct-1',
-              phone_number_id: 'PNID-1',
-              access_token: 'enc-token',
-            },
-            error: null,
+            data: createdConversation ?? existingConversation,
+            error: conversationLookupError,
           }
+        case 'whatsapp_config':
+          if (noLines) return { data: null, error: null }
+          if (eqId === 'line-B') return { data: LINE_B, error: null }
+          if (eqId && eqId !== 'line-A') return { data: null, error: null }
+          return { data: LINE_A, error: null }
         case 'message_templates':
           return { data: null, error: null }
         default:
@@ -83,9 +96,18 @@ function makeSupabaseMock() {
 
     const b: Record<string, unknown> = {}
     const chain = () => b
-    for (const m of ['select', 'eq', 'in', 'order', 'limit', 'update', 'delete']) {
+    for (const m of ['select', 'in', 'order', 'limit', 'update', 'delete']) {
       b[m] = vi.fn(chain)
     }
+    b.eq = vi.fn((col: string, val: string) => {
+      if (col === 'id') eqId = val
+      if (table === 'conversations') conversationFilters.push(['eq', col, val])
+      return b
+    })
+    b.or = vi.fn((expr: string) => {
+      if (table === 'conversations') conversationFilters.push(['or', expr])
+      return b
+    })
     b.insert = vi.fn((payload: Record<string, unknown>) => {
       didInsert = true
       if (table === 'conversations') {
@@ -176,6 +198,9 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
   beforeEach(() => {
     conversationInserts.length = 0
     messageInserts.length = 0
+    conversationFilters.length = 0
+    conversationLookupError = null
+    noLines = false
     existingConversation = null
     createdConversation = null
     contactRow = CONTACT
@@ -257,5 +282,102 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
       }),
     )
     expect(res.status).toBe(400)
+  })
+})
+
+describe('POST /api/whatsapp/send — contact_id con varias líneas', () => {
+  beforeEach(() => {
+    conversationInserts.length = 0
+    messageInserts.length = 0
+    conversationFilters.length = 0
+    conversationLookupError = null
+    existingConversation = null
+    createdConversation = null
+    contactRow = CONTACT
+    supabaseMock = makeSupabaseMock()
+    sendTemplateMessage.mockClear()
+  })
+
+  it('con line_id busca el hilo de esa línea y, si existe, no crea un tercero', async () => {
+    existingConversation = {
+      id: 'conv-B', account_id: 'acct-1', contact_id: 'contact-1', line_id: 'line-B',
+      contact: CONTACT,
+    }
+
+    const res = await postContactTemplate({ line_id: 'line-B' })
+    expect(res.status).toBe(200)
+
+    expect(conversationFilters).toContainEqual(['eq', 'line_id', 'line-B'])
+    expect(conversationFilters.some((f) => f[0] === 'or')).toBe(false)
+    expect(conversationInserts).toHaveLength(0)
+    expect(messageInserts[0]).toMatchObject({ conversation_id: 'conv-B' })
+  })
+
+  it('un hilo nuevo nace con line_id y area de la línea', async () => {
+    const res = await postContactTemplate({ line_id: 'line-B' })
+    expect(res.status).toBe(200)
+
+    expect(conversationInserts).toHaveLength(1)
+    expect(conversationInserts[0]).toMatchObject({
+      contact_id: 'contact-1',
+      line_id: 'line-B',
+      area: 'postventa',
+    })
+  })
+
+  it('sin line_id usa la principal (que también reutiliza hilos antiguos sin línea)', async () => {
+    const res = await postContactTemplate()
+    expect(res.status).toBe(200)
+
+    expect(conversationFilters).toContainEqual(['or', 'line_id.eq.line-A,line_id.is.null'])
+    expect(conversationInserts[0]).toMatchObject({ line_id: 'line-A', area: null })
+  })
+
+  it('una line_id que no es de la cuenta da 404 y no crea nada', async () => {
+    const res = await postContactTemplate({ line_id: 'line-X' })
+    expect(res.status).toBe(404)
+    expect(conversationInserts).toHaveLength(0)
+    expect(sendTemplateMessage).not.toHaveBeenCalled()
+  })
+
+  it('un error real al buscar el hilo no se toma por "sin hilo": 500 sin crear', async () => {
+    conversationLookupError = { message: 'boom' }
+    const res = await postContactTemplate()
+    expect(res.status).toBe(500)
+    expect(conversationInserts).toHaveLength(0)
+    expect(sendTemplateMessage).not.toHaveBeenCalled()
+  })
+})
+
+describe('POST /api/whatsapp/send — cuenta sin ninguna línea', () => {
+  beforeEach(() => {
+    conversationInserts.length = 0
+    messageInserts.length = 0
+    conversationFilters.length = 0
+    conversationLookupError = null
+    noLines = true
+    existingConversation = null
+    createdConversation = null
+    contactRow = CONTACT
+    supabaseMock = makeSupabaseMock()
+    sendTemplateMessage.mockClear()
+  })
+
+  afterEach(() => {
+    noLines = false
+  })
+
+  it('abre el hilo como antes (sin line_id) y deja decidir al núcleo de envío, sin 400 previo', async () => {
+    const res = await postContactTemplate()
+    const json = await res.json()
+
+    // El hilo se creó: la ruta ya no corta antes de abrirlo.
+    expect(conversationInserts).toHaveLength(1)
+    expect(conversationInserts[0]).toMatchObject({ account_id: 'acct-1', contact_id: 'contact-1' })
+    expect(conversationInserts[0]).not.toHaveProperty('line_id')
+    // El núcleo es quien responde (aquí, el error de siempre al no haber línea).
+    expect(res.status).toBe(400)
+    expect(json.error).toMatch(/WhatsApp not configured/)
+    expect(sendTemplateMessage).not.toHaveBeenCalled()
   })
 })

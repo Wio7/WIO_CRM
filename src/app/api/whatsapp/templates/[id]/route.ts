@@ -11,6 +11,8 @@ import {
 } from '@/lib/whatsapp/template-validators'
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
+import { resolveAccountLine } from '@/lib/whatsapp/lines'
+import { lineErrorResponse } from '@/lib/whatsapp/line-http'
 
 /**
  * Per-template lifecycle endpoint.
@@ -80,9 +82,9 @@ export async function PATCH(
       )
     }
 
-    let payload: TemplatePayload
+    let payload: TemplatePayload & { line_id?: unknown }
     try {
-      payload = (await request.json()) as TemplatePayload
+      payload = (await request.json()) as TemplatePayload & { line_id?: unknown }
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
     }
@@ -138,12 +140,18 @@ export async function PATCH(
     }
 
     if (!isDryRun()) {
-      const { data: config, error: configError } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .single()
-      if (configError || !config) {
+      // Línea (opcional `line_id` en el cuerpo, si no la principal). Meta
+      // edita por id de plantilla; message_templates no guarda la WABA
+      // (limitación fase 1: plantillas por cuenta, ver /submit y /sync).
+      let config
+      try {
+        config = await resolveAccountLine(supabase, accountId, payload.line_id)
+      } catch (err) {
+        const response = lineErrorResponse(err)
+        if (response) return response
+        throw err
+      }
+      if (!config) {
         return NextResponse.json(
           { error: 'WhatsApp not configured.' },
           { status: 400 },
@@ -231,7 +239,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -278,12 +286,21 @@ export async function DELETE(
     }
 
     if (existing.meta_template_id && !isDryRun()) {
-      const { data: config, error: configError } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .single()
-      if (configError || !config || !config.waba_id) {
+      // Línea (opcional `?line_id=`, si no la principal): su WABA es la que
+      // borra la plantilla en Meta (limitación fase 1 como en PATCH).
+      let config
+      try {
+        config = await resolveAccountLine(
+          supabase,
+          accountId,
+          new URL(request.url).searchParams.get('line_id'),
+        )
+      } catch (err) {
+        const response = lineErrorResponse(err)
+        if (response) return response
+        throw err
+      }
+      if (!config || !config.waba_id) {
         return NextResponse.json(
           { error: 'WhatsApp not configured — cannot delete on Meta.' },
           { status: 400 },

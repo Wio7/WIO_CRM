@@ -17,6 +17,7 @@ import {
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
+import { mediaUrlForLine } from "@/lib/inbox/line-filter";
 
 interface MessageBubbleProps {
   message: Message;
@@ -25,6 +26,8 @@ interface MessageBubbleProps {
   reactions?: MessageReaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string) => void;
+  /** Línea de la conversación: el media entrante baja con el token de esa línea. */
+  lineId?: string | null;
 }
 
 /** El cartelito del canal de cada mensaje (050). */
@@ -62,7 +65,8 @@ function MediaUnavailable({ label }: { label: string }) {
   );
 }
 
-function MediaImage({ url, alt }: { url: string; alt: string }) {
+function MediaImage({ url: rawUrl, alt, lineId }: { url: string; alt: string; lineId?: string | null }) {
+  const url = mediaUrlForLine(rawUrl, lineId);
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -125,7 +129,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   );
 }
 
-function MessageContent({ message }: { message: Message }) {
+function MessageContent({ message, lineId }: { message: Message; lineId?: string | null }) {
   switch (message.content_type) {
     case "text":
       return (
@@ -138,7 +142,7 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <MediaImage url={message.media_url} alt="Shared image" />
+            <MediaImage url={message.media_url} alt="Shared image" lineId={lineId} />
           ) : (
             <MediaUnavailable label="Image" />
           )}
@@ -155,7 +159,7 @@ function MessageContent({ message }: { message: Message }) {
         <div>
           {message.media_url ? (
             <video
-              src={message.media_url}
+              src={mediaUrlForLine(message.media_url, lineId)}
               controls
               className="max-h-64 max-w-60 rounded-lg"
             />
@@ -174,7 +178,7 @@ function MessageContent({ message }: { message: Message }) {
       return (
         <div>
           {message.media_url ? (
-            <audio src={message.media_url} controls className="max-w-60" />
+            <audio src={mediaUrlForLine(message.media_url, lineId)} controls className="max-w-60" />
           ) : (
             <MediaUnavailable label="Audio" />
           )}
@@ -187,7 +191,7 @@ function MessageContent({ message }: { message: Message }) {
       }
       return (
         <a
-          href={message.media_url}
+          href={mediaUrlForLine(message.media_url, lineId)}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
@@ -256,6 +260,7 @@ export function MessageBubble({
   reactions,
   currentUserId,
   onToggleReaction,
+  lineId,
 }: MessageBubbleProps) {
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
   const time = format(new Date(message.created_at), "HH:mm");
@@ -284,7 +289,7 @@ export function MessageBubble({
             onPrimary={isAgent}
           />
         )}
-        <MessageContent message={message} />
+        <MessageContent message={message} lineId={lineId} />
         <div
           className={cn(
             "mt-1 flex items-center gap-1",

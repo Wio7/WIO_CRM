@@ -20,6 +20,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { faltaColumnaCanal } from "@/lib/channels";
 import { sendTextMessage } from "@/lib/whatsapp/meta-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
+import { getPrimaryLine } from "@/lib/whatsapp/lines";
 import {
   isRecipientNotAllowedError,
   phoneVariants,
@@ -355,13 +356,10 @@ async function ultimoMensajePorWhatsApp(db: SupabaseClient, contactId: string): 
 }
 
 /** Texto libre por el número de WhatsApp de la cuenta, probando las variantes del celular. */
-async function mandarPorWhatsApp(db: SupabaseClient, accountId: string, phone: string, text: string) {
-  const { data: config, error } = await db
-    .from("whatsapp_config")
-    .select("phone_number_id, access_token")
-    .eq("account_id", accountId)
-    .single();
-  if (error || !config) throw new Error("WhatsApp no está configurado");
+export async function mandarPorWhatsApp(db: SupabaseClient, accountId: string, phone: string, text: string) {
+  // Sin conversación de por medio: sale por la línea principal.
+  const config = await getPrimaryLine(db, accountId);
+  if (!config) throw new Error("WhatsApp no está configurado");
 
   const accessToken = decrypt(config.access_token as string);
   let ultimoError: unknown = null;

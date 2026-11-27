@@ -2,7 +2,8 @@
 // /api/whatsapp/profile-photo — poner la foto de perfil del número de
 // WhatsApp conectado a la cuenta.
 //
-//   POST { imagen: "data:image/jpeg;base64,..." } → { ok: true }
+//   POST { imagen: "data:image/jpeg;base64,...", line_id? } → { ok: true }
+//   (sin line_id: la línea principal de la cuenta)
 //
 // La usa la app de Broker Home desde "Sobre mí": Julio trabaja solo y
 // quiere que su foto sea también la del número. Es un cambio de toda la
@@ -15,6 +16,7 @@ import { NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/supabase/request-auth'
 import { corsPreflight, withCors } from '@/lib/cors'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { getLineById, getPrimaryLine } from '@/lib/whatsapp/lines'
 import { FOTO_MAX_BYTES, imagenDeDataUrl, ponerFotoDePerfil } from '@/lib/whatsapp/profile-picture'
 
 export function OPTIONS(request: Request) {
@@ -38,7 +40,7 @@ export async function POST(request: Request) {
     return responder(request, { ok: false, error: 'Sólo el dueño o un administrador cambia la foto del WhatsApp.' }, 403)
   }
 
-  let cuerpo: { imagen?: unknown }
+  let cuerpo: { imagen?: unknown; line_id?: unknown }
   try {
     cuerpo = await request.json()
   } catch {
@@ -55,11 +57,15 @@ export async function POST(request: Request) {
     return responder(request, { ok: false, error: 'Falta META_APP_ID en el CRM para subir la foto a Meta.' }, 500)
   }
 
-  const { data: config } = await supabase
-    .from('whatsapp_config')
-    .select('phone_number_id, access_token')
-    .eq('account_id', perfil.account_id)
-    .maybeSingle()
+  // Con varias líneas por cuenta: la indicada en `line_id` (si viene) o la principal.
+  let config: { phone_number_id?: string | null; access_token?: string | null } | null
+  try {
+    config = typeof cuerpo.line_id === 'string' && cuerpo.line_id
+      ? await getLineById(supabase, perfil.account_id as string, cuerpo.line_id)
+      : await getPrimaryLine(supabase, perfil.account_id as string)
+  } catch {
+    return responder(request, { ok: false, error: 'No se pudo leer la línea de WhatsApp.' }, 500)
+  }
   if (!config?.phone_number_id || !config?.access_token) {
     return responder(request, { ok: false, error: 'Esta cuenta no tiene un WhatsApp conectado.' }, 400)
   }

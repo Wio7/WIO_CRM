@@ -77,6 +77,9 @@ export async function resolveAuditUserId(
     .from('whatsapp_config')
     .select('user_id')
     .eq('account_id', accountId)
+    .order('is_primary', { ascending: false })
+    .order('sort_order', { ascending: true })
+    .limit(1)
     .maybeSingle();
   const configOwner = config?.user_id as string | undefined;
   if (configOwner) return configOwner;

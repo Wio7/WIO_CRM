@@ -10,6 +10,8 @@ import {
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
+import { resolveAccountLine } from '@/lib/whatsapp/lines'
+import { lineErrorResponse } from '@/lib/whatsapp/line-http'
 
 /**
  * Shared upsert payload builder — both the Meta-failure path and the
@@ -109,9 +111,9 @@ export async function POST(request: Request) {
       )
     }
 
-    let payload: TemplatePayload
+    let payload: TemplatePayload & { line_id?: unknown }
     try {
-      payload = (await request.json()) as TemplatePayload
+      payload = (await request.json()) as TemplatePayload & { line_id?: unknown }
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
     }
@@ -146,12 +148,19 @@ export async function POST(request: Request) {
       metaTemplateId = `dry-run-${crypto.randomUUID()}`
       metaStatus = 'PENDING'
     } else {
-      const { data: config, error: configError } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .single()
-      if (configError || !config) {
+      // Línea (opcional `line_id`, si no la principal). Las plantillas viven
+      // en Meta por WABA, pero message_templates no guarda la WABA y su
+      // UNIQUE es (user_id, name, language): en la fase 1 se gestionan por
+      // cuenta, a través de la línea usada aquí y en /sync.
+      let config
+      try {
+        config = await resolveAccountLine(supabase, accountId, payload.line_id)
+      } catch (err) {
+        const response = lineErrorResponse(err)
+        if (response) return response
+        throw err
+      }
+      if (!config) {
         return NextResponse.json(
           {
             error:

@@ -53,7 +53,6 @@ export function SettingsOverview({
     let cancelled = false;
     const supabase = createClient();
     const userId = user.id;
-    const acctId = accountId;
 
     // Cheap counts — resolve fast, render immediately.
     (async () => {
@@ -116,17 +115,16 @@ export function SettingsOverview({
     // WhatsApp connection status — slower, independent.
     (async () => {
       setWhatsappLoading(true);
-      const [row, health] = await Promise.allSettled([
-        supabase
-          .from('whatsapp_config')
-          .select('phone_number_id')
-          .eq('account_id', acctId)
-          .maybeSingle(),
+      // Una cuenta puede tener varias líneas: la API las devuelve en `lines`
+      // (sin tokens) y `connected` es la salud de la línea principal.
+      const [health] = await Promise.allSettled([
         fetch('/api/whatsapp/config', { cache: 'no-store' }).then((r) => r.json()),
       ]);
       if (cancelled) return;
+      const lines: { phone_number_id?: string }[] =
+        health.status === 'fulfilled' && Array.isArray(health.value?.lines) ? health.value.lines : [];
       setWhatsapp({
-        configured: row.status === 'fulfilled' && !!row.value.data?.phone_number_id,
+        configured: lines.some((l) => !!l.phone_number_id),
         connected: health.status === 'fulfilled' && !!health.value?.connected,
       });
       setWhatsappLoading(false);

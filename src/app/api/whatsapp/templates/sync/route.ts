@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { getRequestAuth } from '@/lib/supabase/request-auth'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
+import { resolveAccountLine } from '@/lib/whatsapp/lines'
+import { lineErrorResponse } from '@/lib/whatsapp/line-http'
 import type { TemplateButton, TemplateSampleValues } from '@/types'
 
 /**
@@ -147,13 +149,25 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single()
+    // Línea (opcional `?line_id=`, si no la principal). Se sincronizan las
+    // plantillas de la WABA de esa línea. Limitación fase 1: message_templates
+    // no guarda la WABA y es único por (nombre, idioma), así que con líneas
+    // en WABAs distintas las plantillas se gestionan por cuenta, a través de
+    // la línea que se use para sincronizar/enviar a revisión.
+    let config
+    try {
+      config = await resolveAccountLine(
+        supabase,
+        accountId,
+        new URL(request.url).searchParams.get('line_id'),
+      )
+    } catch (err) {
+      const response = lineErrorResponse(err)
+      if (response) return response
+      throw err
+    }
 
-    if (configError || !config) {
+    if (!config) {
       return NextResponse.json(
         {
           error:
