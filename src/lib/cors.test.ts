@@ -8,6 +8,8 @@ describe('origenPermitido', () => {
     expect(origenPermitido('https://broker.wiocompany.com')).toBe(true)
     expect(origenPermitido('https://golden.wiocompany.com')).toBe(true)
     expect(origenPermitido('https://administracion-golden.vercel.app')).toBe(true)
+    expect(origenPermitido('https://gerencia-golden.vercel.app')).toBe(true)
+    expect(origenPermitido('https://cobranzasgolden.vercel.app')).toBe(true)
   })
 
   it('no deja entrar a dominios que solo se parecen', () => {
