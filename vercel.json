@@ -12,6 +12,10 @@
     {
       "path": "/api/golden/separaciones-por-vencer",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/golden/abonos-pendientes",
+      "schedule": "0 22 * * *"
     }
   ]
 }
