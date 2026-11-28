@@ -19,8 +19,13 @@
 const DOMINIO_PROPIO = 'wiocompany.com';
 
 // Apps propias en vercel.app que piden el relevo de sesión hacia otra app.
-// Administración abre Golden Caja para registrar la caja chica.
-const APPS_PROPIAS = ['https://administracion-golden.vercel.app'];
+// Administración abre Golden Caja para registrar la caja chica; Gerencia y
+// Cobranzas llaman a los avisos al celular (/api/golden/aviso-*).
+const APPS_PROPIAS = [
+  'https://administracion-golden.vercel.app',
+  'https://gerencia-golden.vercel.app',
+  'https://cobranzasgolden.vercel.app',
+];
 
 function allowedOrigins(): string[] {
   return (process.env.APP_CORS_ORIGINS ?? '')
